@@ -1,0 +1,27 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-go-bgg:
+    name: Test go-bgg
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ./go-bgg/go.mod
+          cache: true
+          cache-dependency-path: ./go-bgg/go.sum
+
+      - name: Test
+        working-directory: ./go-bgg
+        run: go test -v ./...
