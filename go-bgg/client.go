@@ -35,6 +35,7 @@ type Client struct {
 	token      string
 	retryCount int
 	retryDelay time.Duration
+	baseURL    string
 }
 
 // NewClient creates a new BGG API client.
@@ -65,12 +66,13 @@ func NewClient(cfg Config) (*Client, error) {
 		token:      cfg.Token,
 		retryCount: retryCount,
 		retryDelay: retryDelay,
+		baseURL:    BaseURL,
 	}, nil
 }
 
 // doRequest performs an HTTP GET request with authentication and retry logic.
 func (c *Client) doRequest(endpoint string) ([]byte, error) {
-	url := BaseURL + endpoint
+	url := c.baseURL + endpoint
 
 	var lastErr error
 	for attempt := 0; attempt <= c.retryCount; attempt++ {
@@ -143,7 +145,7 @@ func (c *Client) doRequest(endpoint string) ([]byte, error) {
 // doRequestWithRetryOn202 performs a request with special handling for 202 responses.
 // This is used for Collection API which returns 202 when data is being prepared.
 func (c *Client) doRequestWithRetryOn202(endpoint string, maxRetries int) ([]byte, error) {
-	url := BaseURL + endpoint
+	url := c.baseURL + endpoint
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
