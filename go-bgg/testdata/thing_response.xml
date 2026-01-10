@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<items termsofuse="https://boardgamegeek.com/xmlapi/termsofuse">
+    <item type="boardgame" id="13">
+        <thumbnail>https://cf.geekdo-images.com/W3Bsga_uLP9kO91gZ7H8yw__thumb/img/8a9HeqFydO7Uun_le9bXWPnidcA=/fit-in/200x150/filters:strip_icc()/pic2419375.jpg</thumbnail>
+        <image>https://cf.geekdo-images.com/W3Bsga_uLP9kO91gZ7H8yw__original/img/A-0yDJkve0SAF1Fo6cIclUn5PIA=/0x0/filters:format(jpeg)/pic2419375.jpg</image>
+        <name type="primary" sortindex="1" value="CATAN"/>
+        <name type="alternate" sortindex="1" value="Catan: Das Spiel"/>
+        <description>In CATAN (formerly The Settlers of Catan), players try to be the dominant force on the island of Catan by building settlements, cities, and roads. On each turn dice are rolled to determine what resources the island produces. Players build by spending resources (sheep, wheat, wood, brick and ore) that are depicted by these resource cards; each land type, with the exception of the barren desert, produces a specific resource: hills produce brick, forests produce wood, mountains produce ore, fields produce wheat, and pastures produce sheep.&amp;#10;&amp;#10;Setup includes randomly placing large hexagonal tiles (each showing a resource or the desert) in a honeycomb shape and surrounding them with water tiles, some of which contain ports of exchange. Number disks, currentIndex 2 through 12, are placed on each resource tile.</description>
+        <yearpublished value="1995"/>
+        <minplayers value="3"/>
+        <maxplayers value="4"/>
+        <playingtime value="120"/>
+        <minplaytime value="60"/>
+        <maxplaytime value="120"/>
+        <minage value="10"/>
+        <link type="boardgamecategory" id="1021" value="Economic"/>
+        <link type="boardgamecategory" id="1026" value="Negotiation"/>
+        <link type="boardgamemechanic" id="2072" value="Dice Rolling"/>
+        <link type="boardgamemechanic" id="2011" value="Modular Board"/>
+        <link type="boardgamemechanic" id="2081" value="Network and Route Building"/>
+        <link type="boardgamemechanic" id="2008" value="Trading"/>
+        <link type="boardgamedesigner" id="11" value="Klaus Teuber"/>
+        <link type="boardgameartist" id="12036" value="Volkan Baga"/>
+        <link type="boardgameartist" id="11883" value="Tanja Donner"/>
+        <link type="boardgamepublisher" id="267" value="999 Games"/>
+        <link type="boardgamepublisher" id="4304" value="Albi"/>
+        <statistics page="1">
+            <ratings>
+                <usersrated value="98765"/>
+                <average value="7.14567"/>
+                <bayesaverage value="7.01234"/>
+                <ranks>
+                    <rank type="subtype" id="1" name="boardgame" friendlyname="Board Game Rank" value="389" bayesaverage="7.01234"/>
+                    <rank type="family" id="5497" name="strategygames" friendlyname="Strategy Game Rank" value="412" bayesaverage="6.98765"/>
+                </ranks>
+                <stddev value="1.54321"/>
+                <median value="0"/>
+                <owned value="123456"/>
+                <trading value="1234"/>
+                <wanting value="567"/>
+                <wishing value="8901"/>
+                <numcomments value="23456"/>
+                <numweights value="7890"/>
+                <averageweight value="2.32"/>
+            </ratings>
+        </statistics>
+    </item>
+</items>
