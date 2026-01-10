@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<items termsofuse="https://boardgamegeek.com/xmlapi/termsofuse">
+    <item id="224517" rank="1">
+        <thumbnail value="https://cf.geekdo-images.com/sZYp_3BTDGjh2unaZfZmuA__thumb/img/example1.jpg"/>
+        <name value="Brass: Birmingham"/>
+        <yearpublished value="2018"/>
+    </item>
+    <item id="342942" rank="2">
+        <thumbnail value="https://cf.geekdo-images.com/example2__thumb/img/example2.jpg"/>
+        <name value="Ark Nova"/>
+        <yearpublished value="2021"/>
+    </item>
+    <item id="167791" rank="3">
+        <thumbnail value="https://cf.geekdo-images.com/example3__thumb/img/example3.jpg"/>
+        <name value="Terraforming Mars"/>
+        <yearpublished value="2016"/>
+    </item>
+    <item id="316554" rank="4">
+        <thumbnail value="https://cf.geekdo-images.com/example4__thumb/img/example4.jpg"/>
+        <name value="Dune: Imperium"/>
+        <yearpublished value="2020"/>
+    </item>
+    <item id="291457" rank="5">
+        <thumbnail value="https://cf.geekdo-images.com/example5__thumb/img/example5.jpg"/>
+        <name value="Gloomhaven: Jaws of the Lion"/>
+        <yearpublished value="2020"/>
+    </item>
+</items>

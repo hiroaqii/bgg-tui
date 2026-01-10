@@ -86,5 +86,25 @@ func main() {
 		fmt.Printf("  Mechanics:   %v\n", game.Mechanics)
 	}
 
+	// Test Hot API
+	fmt.Println("\n=== Testing Hot API ===")
+	hotURL := fmt.Sprintf("%s/hot?type=boardgame", bgg.BaseURL)
+	fmt.Printf("URL: %s\n", hotURL)
+	fmt.Printf("curl: curl -s -H \"Authorization: Bearer $BGG_TOKEN\" \"%s\" | xmllint --format -\n\n", hotURL)
+
+	hotGames, err := client.GetHotGames()
+	if err != nil {
+		fmt.Printf("Error getting hot games: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Top 10 Hot Games:\n\n")
+	for i, game := range hotGames {
+		if i >= 10 {
+			break
+		}
+		fmt.Printf("  #%d [%d] %s (%s)\n", game.Rank, game.ID, game.Name, game.Year)
+	}
+
 	fmt.Println("\n=== Test Complete ===")
 }
