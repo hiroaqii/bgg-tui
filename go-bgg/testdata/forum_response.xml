@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<forum id="21" title="General" numthreads="120" numposts="600" lastpostdate="Sat, 01 Jan 2025 12:00:00 +0000" noposting="0" termsofuse="https://boardgamegeek.com/xmlapi/termsofuse">
+    <threads>
+        <thread id="1001" subject="Best strategy for beginners?" author="player1" numarticles="15" postdate="Mon, 25 Dec 2024 08:00:00 +0000" lastpostdate="Sat, 01 Jan 2025 12:00:00 +0000"/>
+        <thread id="1002" subject="House rules discussion" author="gamer42" numarticles="8" postdate="Tue, 26 Dec 2024 14:30:00 +0000" lastpostdate="Fri, 31 Dec 2024 20:00:00 +0000"/>
+        <thread id="1003" subject="Component quality issues" author="collector99" numarticles="25" postdate="Wed, 27 Dec 2024 10:15:00 +0000" lastpostdate="Sat, 01 Jan 2025 09:00:00 +0000"/>
+    </threads>
+</forum>

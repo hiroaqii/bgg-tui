@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<forums type="thing" id="13" termsofuse="https://boardgamegeek.com/xmlapi/termsofuse">
+    <forum id="19" groupid="0" title="Reviews" noposting="0" description="Post your game reviews in this forum." numthreads="150" numposts="450" lastpostdate="Sat, 01 Jan 2025 10:00:00 +0000"/>
+    <forum id="20" groupid="0" title="Sessions" noposting="0" description="Post your session reports here." numthreads="300" numposts="900" lastpostdate="Fri, 31 Dec 2024 15:30:00 +0000"/>
+    <forum id="21" groupid="0" title="General" noposting="0" description="Discussion about the game in general." numthreads="500" numposts="2500" lastpostdate="Sat, 01 Jan 2025 12:00:00 +0000"/>
+</forums>

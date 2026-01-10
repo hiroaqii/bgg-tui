@@ -149,5 +149,90 @@ func main() {
 		fmt.Println("Usage: BGG_TOKEN=your-token go run . <search-query> <username>")
 	}
 
+	// Test Forum API (if we have a game ID)
+	if firstGameID > 0 {
+		fmt.Println("\n=== Testing Forum API ===")
+		fmt.Printf("Getting forums for game ID %d...\n", firstGameID)
+		forumListURL := fmt.Sprintf("%s/forumlist?type=thing&id=%d", bgg.BaseURL, firstGameID)
+		fmt.Printf("URL: %s\n", forumListURL)
+		fmt.Printf("curl: curl -s -H \"Authorization: Bearer $BGG_TOKEN\" \"%s\" | xmllint --format -\n\n", forumListURL)
+
+		forums, err := client.GetForums(firstGameID)
+		if err != nil {
+			fmt.Printf("Error getting forums: %v\n", err)
+		} else {
+			fmt.Printf("Found %d forums:\n\n", len(forums))
+			var firstForumID int
+			for i, forum := range forums {
+				if i >= 5 {
+					fmt.Printf("... and %d more forums\n", len(forums)-5)
+					break
+				}
+				fmt.Printf("  [%d] %s - Threads: %d, Posts: %d\n",
+					forum.ID, forum.Title, forum.NumThreads, forum.NumPosts)
+				if i == 0 && forum.NumThreads > 0 {
+					firstForumID = forum.ID
+				}
+			}
+
+			// Test Forum Threads API
+			if firstForumID > 0 {
+				fmt.Println("\n=== Testing Forum Threads API ===")
+				fmt.Printf("Getting threads for forum ID %d...\n", firstForumID)
+				forumURL := fmt.Sprintf("%s/forum?id=%d&page=1", bgg.BaseURL, firstForumID)
+				fmt.Printf("URL: %s\n", forumURL)
+				fmt.Printf("curl: curl -s -H \"Authorization: Bearer $BGG_TOKEN\" \"%s\" | xmllint --format -\n\n", forumURL)
+
+				threadList, err := client.GetForumThreads(firstForumID, 1)
+				if err != nil {
+					fmt.Printf("Error getting forum threads: %v\n", err)
+				} else {
+					fmt.Printf("Found %d threads (page %d/%d):\n\n",
+						len(threadList.Threads), threadList.Page, threadList.TotalPages)
+					var firstThreadID int
+					for i, thread := range threadList.Threads {
+						if i >= 5 {
+							fmt.Printf("... and %d more threads\n", len(threadList.Threads)-5)
+							break
+						}
+						fmt.Printf("  [%d] %s by %s - Articles: %d\n",
+							thread.ID, thread.Subject, thread.Author, thread.NumArticles)
+						if i == 0 {
+							firstThreadID = thread.ID
+						}
+					}
+
+					// Test Thread API
+					if firstThreadID > 0 {
+						fmt.Println("\n=== Testing Thread API ===")
+						fmt.Printf("Getting thread ID %d...\n", firstThreadID)
+						threadURL := fmt.Sprintf("%s/thread?id=%d", bgg.BaseURL, firstThreadID)
+						fmt.Printf("URL: %s\n", threadURL)
+						fmt.Printf("curl: curl -s -H \"Authorization: Bearer $BGG_TOKEN\" \"%s\" | xmllint --format -\n\n", threadURL)
+
+						thread, err := client.GetThread(firstThreadID)
+						if err != nil {
+							fmt.Printf("Error getting thread: %v\n", err)
+						} else {
+							fmt.Printf("Thread: %s\n", thread.Subject)
+							fmt.Printf("Articles: %d\n\n", len(thread.Articles))
+							for i, article := range thread.Articles {
+								if i >= 3 {
+									fmt.Printf("... and %d more articles\n", len(thread.Articles)-3)
+									break
+								}
+								body := article.Body
+								if len(body) > 100 {
+									body = body[:100] + "..."
+								}
+								fmt.Printf("  [%s] %s\n", article.Username, body)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	fmt.Println("\n=== Test Complete ===")
 }
