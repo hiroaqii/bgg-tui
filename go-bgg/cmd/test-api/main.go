@@ -18,11 +18,15 @@ func main() {
 
 	if len(os.Args) < 2 {
 		fmt.Println("Error: search query is required")
-		fmt.Println("Usage: BGG_TOKEN=your-token go run . <search-query>")
+		fmt.Println("Usage: BGG_TOKEN=your-token go run . <search-query> [username]")
 		os.Exit(1)
 	}
 
 	query := os.Args[1]
+	var username string
+	if len(os.Args) >= 3 {
+		username = os.Args[2]
+	}
 
 	client, err := bgg.NewClient(bgg.Config{
 		Token: token,
@@ -104,6 +108,45 @@ func main() {
 			break
 		}
 		fmt.Printf("  #%d [%d] %s (%s)\n", game.Rank, game.ID, game.Name, game.Year)
+	}
+
+	// Test Collection API (if username provided)
+	if username != "" {
+		fmt.Println("\n=== Testing Collection API ===")
+		fmt.Printf("Getting collection for user '%s'...\n", username)
+		collectionURL := fmt.Sprintf("%s/collection?username=%s&stats=1", bgg.BaseURL, username)
+		fmt.Printf("URL: %s\n", collectionURL)
+		fmt.Printf("curl: curl -s -H \"Authorization: Bearer $BGG_TOKEN\" \"%s\" | xmllint --format -\n\n", collectionURL)
+
+		items, err := client.GetCollection(username, bgg.CollectionOptions{})
+		if err != nil {
+			fmt.Printf("Error getting collection: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Found %d items in collection:\n\n", len(items))
+		for i, item := range items {
+			if i >= 10 {
+				fmt.Printf("... and %d more items\n", len(items)-10)
+				break
+			}
+			status := ""
+			if item.Owned {
+				status += "[Owned]"
+			}
+			if item.Wishlist {
+				status += "[Wishlist]"
+			}
+			if item.WantToPlay {
+				status += "[WantToPlay]"
+			}
+			fmt.Printf("  [%d] %s (%s) - Plays: %d, Rating: %.1f %s\n",
+				item.ID, item.Name, item.Year, item.NumPlays, item.Rating, status)
+		}
+	} else {
+		fmt.Println("\n=== Skipping Collection API ===")
+		fmt.Println("Provide a username as second argument to test Collection API")
+		fmt.Println("Usage: BGG_TOKEN=your-token go run . <search-query> <username>")
 	}
 
 	fmt.Println("\n=== Test Complete ===")

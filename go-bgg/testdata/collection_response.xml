@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<items totalitems="3" termsofuse="https://boardgamegeek.com/xmlapi/termsofuse" pubdate="Sat, 01 Jan 2025 12:00:00 +0000">
+    <item objecttype="thing" objectid="13" subtype="boardgame" collid="12345678">
+        <name sortindex="1">CATAN</name>
+        <yearpublished>1995</yearpublished>
+        <image>https://cf.geekdo-images.com/W3Bsga_uLP9kO91gZ7H8yw__original/img/example.jpg</image>
+        <thumbnail>https://cf.geekdo-images.com/W3Bsga_uLP9kO91gZ7H8yw__thumb/img/example.jpg</thumbnail>
+        <status own="1" prevowned="0" fortrade="0" want="0" wanttoplay="1" wanttobuy="0" wishlist="0" preordered="0" lastmodified="2024-01-15 10:30:00"/>
+        <numplays>25</numplays>
+        <stats minplayers="3" maxplayers="4" minplaytime="60" maxplaytime="120" playingtime="120" numowned="123456">
+            <rating value="8">
+                <usersrated value="98765"/>
+                <average value="7.14"/>
+                <bayesaverage value="7.01"/>
+            </rating>
+        </stats>
+    </item>
+    <item objecttype="thing" objectid="167791" subtype="boardgame" collid="23456789">
+        <name sortindex="1">Terraforming Mars</name>
+        <yearpublished>2016</yearpublished>
+        <image>https://cf.geekdo-images.com/example2__original/img/example2.jpg</image>
+        <thumbnail>https://cf.geekdo-images.com/example2__thumb/img/example2.jpg</thumbnail>
+        <status own="1" prevowned="0" fortrade="0" want="0" wanttoplay="0" wanttobuy="0" wishlist="0" preordered="0" lastmodified="2024-02-20 14:45:00"/>
+        <numplays>12</numplays>
+        <stats minplayers="1" maxplayers="5" minplaytime="120" maxplaytime="120" playingtime="120" numowned="98765">
+            <rating value="9">
+                <usersrated value="87654"/>
+                <average value="8.42"/>
+                <bayesaverage value="8.25"/>
+            </rating>
+        </stats>
+    </item>
+    <item objecttype="thing" objectid="224517" subtype="boardgame" collid="34567890">
+        <name sortindex="1">Brass: Birmingham</name>
+        <yearpublished>2018</yearpublished>
+        <image>https://cf.geekdo-images.com/example3__original/img/example3.jpg</image>
+        <thumbnail>https://cf.geekdo-images.com/example3__thumb/img/example3.jpg</thumbnail>
+        <status own="0" prevowned="0" fortrade="0" want="0" wanttoplay="0" wanttobuy="0" wishlist="1" preordered="0" lastmodified="2024-03-10 09:15:00"/>
+        <numplays>0</numplays>
+        <stats minplayers="2" maxplayers="4" minplaytime="60" maxplaytime="120" playingtime="120" numowned="76543">
+            <rating value="N/A">
+                <usersrated value="65432"/>
+                <average value="8.65"/>
+                <bayesaverage value="8.45"/>
+            </rating>
+        </stats>
+    </item>
+</items>
