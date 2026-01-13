@@ -79,9 +79,9 @@ func TestGetForums_InvalidID(t *testing.T) {
 		t.Error("expected error for invalid ID")
 	}
 
-	var parseErr *ParseError
-	if !errors.As(err, &parseErr) {
-		t.Errorf("expected ParseError, got %T", err)
+	var notFoundErr *NotFoundError
+	if !errors.As(err, &notFoundErr) {
+		t.Errorf("expected NotFoundError, got %T", err)
 	}
 }
 
@@ -186,9 +186,9 @@ func TestGetForumThreads_InvalidID(t *testing.T) {
 		t.Error("expected error for invalid ID")
 	}
 
-	var parseErr *ParseError
-	if !errors.As(err, &parseErr) {
-		t.Errorf("expected ParseError, got %T", err)
+	var notFoundErr *NotFoundError
+	if !errors.As(err, &notFoundErr) {
+		t.Errorf("expected NotFoundError, got %T", err)
 	}
 }
 
@@ -316,9 +316,9 @@ func TestGetThread_InvalidID(t *testing.T) {
 		t.Error("expected error for invalid ID")
 	}
 
-	var parseErr *ParseError
-	if !errors.As(err, &parseErr) {
-		t.Errorf("expected ParseError, got %T", err)
+	var notFoundErr *NotFoundError
+	if !errors.As(err, &notFoundErr) {
+		t.Errorf("expected NotFoundError, got %T", err)
 	}
 }
 

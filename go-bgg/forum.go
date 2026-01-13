@@ -10,7 +10,7 @@ import (
 // GetForums retrieves the list of forums for a game.
 func (c *Client) GetForums(gameID int) ([]Forum, error) {
 	if gameID <= 0 {
-		return nil, newParseError("game ID must be positive", nil)
+		return nil, newNotFoundError(gameID)
 	}
 
 	endpoint := fmt.Sprintf("/forumlist?type=thing&id=%d", gameID)
@@ -58,7 +58,7 @@ func (c *Client) GetForumsJSON(gameID int) (string, error) {
 // Page is 1-indexed. Each page returns up to 50 threads.
 func (c *Client) GetForumThreads(forumID int, page int) (*ThreadList, error) {
 	if forumID <= 0 {
-		return nil, newParseError("forum ID must be positive", nil)
+		return nil, newNotFoundError(forumID)
 	}
 	if page <= 0 {
 		page = 1
@@ -119,7 +119,7 @@ func (c *Client) GetForumThreadsJSON(forumID int, page int) (string, error) {
 // GetThread retrieves a thread with its articles.
 func (c *Client) GetThread(threadID int) (*Thread, error) {
 	if threadID <= 0 {
-		return nil, newParseError("thread ID must be positive", nil)
+		return nil, newNotFoundError(threadID)
 	}
 
 	endpoint := fmt.Sprintf("/thread?id=%d", threadID)
