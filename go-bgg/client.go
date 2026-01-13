@@ -147,6 +147,7 @@ func (c *Client) doRequest(endpoint string) ([]byte, error) {
 func (c *Client) doRequestWithRetryOn202(endpoint string, maxRetries int) ([]byte, error) {
 	url := c.baseURL + endpoint
 
+	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
 			time.Sleep(c.retryDelay)
@@ -162,12 +163,14 @@ func (c *Client) doRequestWithRetryOn202(endpoint string, maxRetries int) ([]byt
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
+			lastErr = newNetworkError("request failed", 0, err)
 			continue
 		}
 
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
+			lastErr = newNetworkError("failed to read response body", 0, err)
 			continue
 		}
 
@@ -199,5 +202,8 @@ func (c *Client) doRequestWithRetryOn202(endpoint string, maxRetries int) ([]byt
 		}
 	}
 
+	if lastErr != nil {
+		return nil, lastErr
+	}
 	return nil, newNetworkError("collection not ready after max retries", http.StatusAccepted, nil)
 }
