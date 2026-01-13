@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"net/url"
 	"strconv"
 )
 
@@ -18,7 +19,7 @@ func (c *Client) GetCollection(username string, opts CollectionOptions) ([]Colle
 		return nil, newParseError("username is required", nil)
 	}
 
-	endpoint := fmt.Sprintf("/collection?username=%s&stats=1", username)
+	endpoint := fmt.Sprintf("/collection?username=%s&stats=1", url.QueryEscape(username))
 	if opts.OwnedOnly {
 		endpoint += "&own=1"
 	}
