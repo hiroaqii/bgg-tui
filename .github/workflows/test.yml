@@ -25,3 +25,21 @@ jobs:
       - name: Test
         working-directory: ./go-bgg
         run: go test -v ./...
+
+  test-bgg-tui:
+    name: Test bgg-tui
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ./go.mod
+          cache: true
+          cache-dependency-path: ./go.sum
+
+      - name: Test
+        run: go test -v ./...
