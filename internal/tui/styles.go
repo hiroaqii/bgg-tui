@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // Colors for the application.
 var (
@@ -102,4 +106,39 @@ func DefaultStyles() Styles {
 		Value: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFFFF")),
 	}
+}
+
+// centerContent centers the content both horizontally and vertically within the given dimensions.
+func centerContent(content string, width, height int) string {
+	contentHeight := strings.Count(content, "\n") + 1
+
+	// Vertical padding (1/3 from top)
+	topPadding := (height - contentHeight) / 3
+	if topPadding < 0 {
+		topPadding = 0
+	}
+
+	// Find max width of content
+	lines := strings.Split(content, "\n")
+	maxWidth := 0
+	for _, line := range lines {
+		if w := lipgloss.Width(line); w > maxWidth {
+			maxWidth = w
+		}
+	}
+
+	// Horizontal centering
+	leftPadding := (width - maxWidth) / 2
+	if leftPadding < 0 {
+		leftPadding = 0
+	}
+
+	// Apply padding to all lines
+	var centered []string
+	for _, line := range lines {
+		centered = append(centered, strings.Repeat(" ", leftPadding)+line)
+	}
+
+	result := strings.Repeat("\n", topPadding) + strings.Join(centered, "\n")
+	return lipgloss.NewStyle().Width(width).Height(height).Render(result)
 }

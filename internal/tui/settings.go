@@ -7,7 +7,6 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/hiroaqii/bgg-tui/internal/config"
 )
@@ -226,7 +225,7 @@ func (m settingsModel) View(width, height int) string {
 	}
 
 	content := b.String()
-	return lipgloss.NewStyle().Width(width).Height(height).Padding(2, 4).Render(content)
+	return centerContent(content, width, height)
 }
 
 func maskToken(token string) string {
