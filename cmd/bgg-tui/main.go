@@ -6,12 +6,19 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/hiroaqii/bgg-tui/internal/config"
 	"github.com/hiroaqii/bgg-tui/internal/tui"
 )
 
 func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		os.Exit(1)
+	}
+
 	p := tea.NewProgram(
-		tui.New(),
+		tui.New(cfg),
 		tea.WithAltScreen(),
 	)
 

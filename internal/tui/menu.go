@@ -12,23 +12,25 @@ import (
 type menuItem struct {
 	label string
 	key   string
+	view  View
 }
 
 type menuModel struct {
-	cursor int
-	items  []menuItem
-	styles Styles
-	keys   KeyMap
+	cursor   int
+	items    []menuItem
+	styles   Styles
+	keys     KeyMap
+	selected *View
 }
 
 func newMenuModel(styles Styles, keys KeyMap) menuModel {
 	return menuModel{
 		cursor: 0,
 		items: []menuItem{
-			{label: "Search Games", key: "1"},
-			{label: "Hot Games", key: "2"},
-			{label: "User Collection", key: "3"},
-			{label: "Settings", key: "4"},
+			{label: "Search Games", key: "1", view: ViewSearchInput},
+			{label: "Hot Games", key: "2", view: ViewHot},
+			{label: "User Collection", key: "3", view: ViewCollectionInput},
+			{label: "Settings", key: "4", view: ViewSettings},
 		},
 		styles: styles,
 		keys:   keys,
@@ -39,6 +41,8 @@ func (m menuModel) Update(msg tea.Msg) (menuModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch {
+		case key.Matches(msg, m.keys.Quit):
+			return m, tea.Quit
 		case key.Matches(msg, m.keys.Up):
 			if m.cursor > 0 {
 				m.cursor--
@@ -47,6 +51,12 @@ func (m menuModel) Update(msg tea.Msg) (menuModel, tea.Cmd) {
 			if m.cursor < len(m.items)-1 {
 				m.cursor++
 			}
+		case key.Matches(msg, m.keys.Enter):
+			view := m.items[m.cursor].view
+			m.selected = &view
+		case key.Matches(msg, m.keys.Settings):
+			view := ViewSettings
+			m.selected = &view
 		}
 	}
 	return m, nil
@@ -120,5 +130,6 @@ func (m menuModel) View(width, height int) string {
 		centered = append(centered, strings.Repeat(" ", leftPadding)+line)
 	}
 
-	return strings.Repeat("\n", topPadding) + strings.Join(centered, "\n")
+	result := strings.Repeat("\n", topPadding) + strings.Join(centered, "\n")
+	return lipgloss.NewStyle().Width(width).Height(height).Render(result)
 }
