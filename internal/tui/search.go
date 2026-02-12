@@ -75,7 +75,7 @@ func (m searchModel) Update(msg tea.Msg, client *bgg.Client) (searchModel, tea.C
 					m.state = searchStateLoading
 					return m, m.doSearch(client, query)
 				}
-			case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Escape):
+			case key.Matches(msg, m.keys.Escape):
 				m.wantsBack = true
 				return m, nil
 			}
