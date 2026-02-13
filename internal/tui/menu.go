@@ -63,6 +63,9 @@ func (m menuModel) Update(msg tea.Msg) (menuModel, tea.Cmd) {
 		case key.Matches(msg, m.keys.Hot):
 			view := ViewHot
 			m.selected = &view
+		case key.Matches(msg, m.keys.Collect):
+			view := ViewCollectionInput
+			m.selected = &view
 		}
 	}
 	return m, nil

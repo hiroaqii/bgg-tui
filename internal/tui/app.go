@@ -24,10 +24,11 @@ type Model struct {
 	height int
 
 	// Sub-models
-	menu     menuModel
-	settings settingsModel
-	search   searchModel
-	hot      hotModel
+	menu       menuModel
+	settings   settingsModel
+	search     searchModel
+	hot        hotModel
+	collection collectionModel
 }
 
 // New creates a new application model.
@@ -53,6 +54,7 @@ func New(cfg *config.Config) Model {
 		settings:    newSettingsModel(cfg, styles, keys),
 		search:      newSearchModel(styles, keys),
 		hot:         newHotModel(styles, keys),
+		collection:  newCollectionModel(cfg, styles, keys),
 	}
 }
 
@@ -79,6 +81,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSearch(msg)
 	case ViewHot:
 		return m.updateHot(msg)
+	case ViewCollectionInput, ViewCollectionList:
+		return m.updateCollection(msg)
 	}
 
 	return m, nil
@@ -105,6 +109,10 @@ func (m Model) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentView = ViewHot
 			m.hot = newHotModel(m.styles, m.keys)
 			return m, m.hot.loadHotGames(m.bggClient)
+		case ViewCollectionInput:
+			m.currentView = ViewCollectionInput
+			m.collection = newCollectionModel(m.config, m.styles, m.keys)
+			return m, textinput.Blink
 		}
 	}
 
@@ -167,6 +175,32 @@ func (m Model) updateHot(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) updateCollection(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.collection, cmd = m.collection.Update(msg, m.bggClient)
+
+	// Update current view based on collection state
+	switch m.collection.state {
+	case collectionStateInput:
+		m.currentView = ViewCollectionInput
+	case collectionStateLoading, collectionStateResults, collectionStateError:
+		m.currentView = ViewCollectionList
+	}
+
+	if m.collection.wantsBack {
+		m.collection.wantsBack = false
+		m.currentView = ViewMenu
+	}
+
+	// Handle detail selection (for future Task 13)
+	if m.collection.selected != nil {
+		// TODO: Navigate to detail view
+		m.collection.selected = nil
+	}
+
+	return m, cmd
+}
+
 // View implements tea.Model.
 func (m Model) View() string {
 	switch m.currentView {
@@ -178,6 +212,8 @@ func (m Model) View() string {
 		return m.search.View(m.width, m.height)
 	case ViewHot:
 		return m.hot.View(m.width, m.height)
+	case ViewCollectionInput, ViewCollectionList:
+		return m.collection.View(m.width, m.height)
 	}
 	return ""
 }
