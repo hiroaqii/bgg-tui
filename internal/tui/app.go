@@ -29,6 +29,10 @@ type Model struct {
 	search     searchModel
 	hot        hotModel
 	collection collectionModel
+	detail     detailModel
+
+	// Navigation history
+	previousView View
 }
 
 // New creates a new application model.
@@ -83,6 +87,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateHot(msg)
 	case ViewCollectionInput, ViewCollectionList:
 		return m.updateCollection(msg)
+	case ViewDetail:
+		return m.updateDetail(msg)
 	}
 
 	return m, nil
@@ -148,10 +154,14 @@ func (m Model) updateSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentView = ViewMenu
 	}
 
-	// Handle detail selection (for future Task 13)
+	// Handle detail selection
 	if m.search.selected != nil {
-		// TODO: Navigate to detail view
+		gameID := *m.search.selected
 		m.search.selected = nil
+		m.previousView = ViewSearchResults
+		m.detail = newDetailModel(gameID, m.styles, m.keys)
+		m.currentView = ViewDetail
+		return m, m.detail.loadGame(m.bggClient)
 	}
 
 	return m, cmd
@@ -166,10 +176,14 @@ func (m Model) updateHot(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentView = ViewMenu
 	}
 
-	// Handle detail selection (for future Task 13)
+	// Handle detail selection
 	if m.hot.selected != nil {
-		// TODO: Navigate to detail view
+		gameID := *m.hot.selected
 		m.hot.selected = nil
+		m.previousView = ViewHot
+		m.detail = newDetailModel(gameID, m.styles, m.keys)
+		m.currentView = ViewDetail
+		return m, m.detail.loadGame(m.bggClient)
 	}
 
 	return m, cmd
@@ -192,10 +206,32 @@ func (m Model) updateCollection(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentView = ViewMenu
 	}
 
-	// Handle detail selection (for future Task 13)
+	// Handle detail selection
 	if m.collection.selected != nil {
-		// TODO: Navigate to detail view
+		gameID := *m.collection.selected
 		m.collection.selected = nil
+		m.previousView = ViewCollectionList
+		m.detail = newDetailModel(gameID, m.styles, m.keys)
+		m.currentView = ViewDetail
+		return m, m.detail.loadGame(m.bggClient)
+	}
+
+	return m, cmd
+}
+
+func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.detail, cmd = m.detail.Update(msg)
+
+	if m.detail.wantsBack {
+		m.detail.wantsBack = false
+		m.currentView = m.previousView
+	}
+
+	// Handle forum navigation (for future Task 14)
+	if m.detail.wantsForum {
+		m.detail.wantsForum = false
+		// TODO: Navigate to forum view
 	}
 
 	return m, cmd
@@ -214,6 +250,8 @@ func (m Model) View() string {
 		return m.hot.View(m.width, m.height)
 	case ViewCollectionInput, ViewCollectionList:
 		return m.collection.View(m.width, m.height)
+	case ViewDetail:
+		return m.detail.View(m.width, m.height)
 	}
 	return ""
 }
