@@ -30,6 +30,8 @@ type Model struct {
 	hot        hotModel
 	collection collectionModel
 	detail     detailModel
+	forum      forumModel
+	thread     threadModel
 
 	// Navigation history
 	previousView View
@@ -89,6 +91,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateCollection(msg)
 	case ViewDetail:
 		return m.updateDetail(msg)
+	case ViewForumList, ViewThreadList:
+		return m.updateForum(msg)
+	case ViewThreadView:
+		return m.updateThread(msg)
 	}
 
 	return m, nil
@@ -228,10 +234,57 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentView = m.previousView
 	}
 
-	// Handle forum navigation (for future Task 14)
+	// Handle forum navigation
 	if m.detail.wantsForum {
 		m.detail.wantsForum = false
-		// TODO: Navigate to forum view
+		gameName := ""
+		if m.detail.game != nil {
+			gameName = m.detail.game.Name
+		}
+		m.forum = newForumModel(m.detail.gameID, gameName, m.styles, m.keys)
+		m.currentView = ViewForumList
+		return m, m.forum.loadForums(m.bggClient)
+	}
+
+	return m, cmd
+}
+
+func (m Model) updateForum(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.forum, cmd = m.forum.Update(msg, m.bggClient)
+
+	// Update current view based on forum state
+	switch m.forum.state {
+	case forumStateForumList, forumStateLoadingForums:
+		m.currentView = ViewForumList
+	case forumStateThreadList, forumStateLoadingThreads:
+		m.currentView = ViewThreadList
+	}
+
+	if m.forum.wantsBack {
+		m.forum.wantsBack = false
+		m.currentView = ViewDetail
+	}
+
+	// Handle thread selection
+	if m.forum.wantsThread != nil {
+		threadID := *m.forum.wantsThread
+		m.forum.wantsThread = nil
+		m.thread = newThreadModel(threadID, m.styles, m.keys)
+		m.currentView = ViewThreadView
+		return m, m.thread.loadThread(m.bggClient)
+	}
+
+	return m, cmd
+}
+
+func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.thread, cmd = m.thread.Update(msg)
+
+	if m.thread.wantsBack {
+		m.thread.wantsBack = false
+		m.currentView = ViewThreadList
 	}
 
 	return m, cmd
@@ -252,6 +305,10 @@ func (m Model) View() string {
 		return m.collection.View(m.width, m.height)
 	case ViewDetail:
 		return m.detail.View(m.width, m.height)
+	case ViewForumList, ViewThreadList:
+		return m.forum.View(m.width, m.height)
+	case ViewThreadView:
+		return m.thread.View(m.width, m.height)
 	}
 	return ""
 }
