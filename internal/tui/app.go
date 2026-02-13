@@ -27,6 +27,7 @@ type Model struct {
 	menu     menuModel
 	settings settingsModel
 	search   searchModel
+	hot      hotModel
 }
 
 // New creates a new application model.
@@ -51,6 +52,7 @@ func New(cfg *config.Config) Model {
 		menu:        newMenuModel(styles, keys),
 		settings:    newSettingsModel(cfg, styles, keys),
 		search:      newSearchModel(styles, keys),
+		hot:         newHotModel(styles, keys),
 	}
 }
 
@@ -75,6 +77,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSettings(msg)
 	case ViewSearchInput, ViewSearchResults:
 		return m.updateSearch(msg)
+	case ViewHot:
+		return m.updateHot(msg)
 	}
 
 	return m, nil
@@ -97,6 +101,10 @@ func (m Model) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentView = ViewSearchInput
 			m.search = newSearchModel(m.styles, m.keys)
 			return m, textinput.Blink
+		case ViewHot:
+			m.currentView = ViewHot
+			m.hot = newHotModel(m.styles, m.keys)
+			return m, m.hot.loadHotGames(m.bggClient)
 		}
 	}
 
@@ -141,6 +149,24 @@ func (m Model) updateSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) updateHot(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.hot, cmd = m.hot.Update(msg, m.bggClient)
+
+	if m.hot.wantsBack {
+		m.hot.wantsBack = false
+		m.currentView = ViewMenu
+	}
+
+	// Handle detail selection (for future Task 13)
+	if m.hot.selected != nil {
+		// TODO: Navigate to detail view
+		m.hot.selected = nil
+	}
+
+	return m, cmd
+}
+
 // View implements tea.Model.
 func (m Model) View() string {
 	switch m.currentView {
@@ -150,6 +176,8 @@ func (m Model) View() string {
 		return m.settings.View(m.width, m.height)
 	case ViewSearchInput, ViewSearchResults:
 		return m.search.View(m.width, m.height)
+	case ViewHot:
+		return m.hot.View(m.width, m.height)
 	}
 	return ""
 }
