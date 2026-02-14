@@ -11,6 +11,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	bgg "github.com/hiroaqii/go-bgg"
+
+	"github.com/hiroaqii/bgg-tui/internal/config"
 )
 
 type detailState int
@@ -25,6 +27,7 @@ type detailModel struct {
 	state      detailState
 	styles     Styles
 	keys       KeyMap
+	config     *config.Config
 	gameID     int
 	game       *bgg.Game
 	errMsg     string
@@ -50,11 +53,12 @@ type detailResultMsg struct {
 	err  error
 }
 
-func newDetailModel(gameID int, styles Styles, keys KeyMap, imgEnabled bool, cache *imageCache) detailModel {
+func newDetailModel(gameID int, styles Styles, keys KeyMap, imgEnabled bool, cache *imageCache, cfg *config.Config) detailModel {
 	return detailModel{
 		state:        detailStateLoading,
 		styles:       styles,
 		keys:         keys,
+		config:       cfg,
 		gameID:       gameID,
 		imageEnabled: imgEnabled,
 		imgCols:      20,
@@ -132,8 +136,8 @@ func (m detailModel) Update(msg tea.Msg) (detailModel, tea.Cmd) {
 			if desc == "" {
 				desc = "No description available."
 			}
-			m.descLines = wrapText(desc, 60)
-			visibleLines := 8
+			m.descLines = wrapText(desc, m.config.Display.DescriptionWidth)
+			visibleLines := m.config.Display.DescriptionHeight
 			m.maxScroll = len(m.descLines) - visibleLines
 			if m.maxScroll < 0 {
 				m.maxScroll = 0
@@ -275,7 +279,10 @@ func (m detailModel) View(width, height int) string {
 
 		// Mechanics
 		if len(game.Mechanics) > 0 {
-			lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Mechanics"), strings.Join(game.Mechanics, ", ")))
+			lines = append(lines, m.styles.Label.Render("Mechanics"))
+			for _, mech := range game.Mechanics {
+				lines = append(lines, "  "+mech)
+			}
 		}
 
 		for _, line := range lines {
@@ -289,7 +296,7 @@ func (m detailModel) View(width, height int) string {
 		b.WriteString("\n")
 
 		// Use pre-calculated description lines
-		visibleLines := 8
+		visibleLines := m.config.Display.DescriptionHeight
 		start := m.scroll
 		end := start + visibleLines
 		if end > len(m.descLines) {

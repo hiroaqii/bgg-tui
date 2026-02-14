@@ -22,11 +22,13 @@ type APIConfig struct {
 
 // DisplayConfig contains display-related configuration.
 type DisplayConfig struct {
-	ShowImages    bool   `toml:"show_images"`
-	ImageProtocol string `toml:"image_protocol"` // "auto", "kitty", "off"
-	ThreadWidth   int    `toml:"thread_width"`
-	ThreadHeight  int    `toml:"thread_height"`
-	ListPageSize  int    `toml:"list_page_size"`
+	ShowImages        bool   `toml:"show_images"`
+	ImageProtocol     string `toml:"image_protocol"` // "auto", "kitty", "off"
+	ThreadWidth       int    `toml:"thread_width"`
+	ThreadHeight      int    `toml:"thread_height"`
+	ListPageSize      int    `toml:"list_page_size"`
+	DescriptionWidth  int    `toml:"description_width"`
+	DescriptionHeight int    `toml:"description_height"`
 }
 
 // CollectionConfig contains collection-related configuration.
@@ -47,11 +49,13 @@ func DefaultConfig() *Config {
 			Token: "",
 		},
 		Display: DisplayConfig{
-			ShowImages:    true,
-			ImageProtocol: "auto",
-			ThreadWidth:   80,
-			ThreadHeight:  30,
-			ListPageSize:  25,
+			ShowImages:        true,
+			ImageProtocol:     "auto",
+			ThreadWidth:       80,
+			ThreadHeight:      30,
+			ListPageSize:      25,
+			DescriptionWidth:  100,
+			DescriptionHeight: 15,
 		},
 		Collection: CollectionConfig{
 			DefaultUsername: "",

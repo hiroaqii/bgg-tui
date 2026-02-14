@@ -242,7 +242,7 @@ func (m Model) updateSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		gameID := *m.search.selected
 		m.search.selected = nil
 		m.previousView = ViewSearchResults
-		m.detail = newDetailModel(gameID, m.styles, m.keys, m.imageEnabled, m.imageCache)
+		m.detail = newDetailModel(gameID, m.styles, m.keys, m.imageEnabled, m.imageCache, m.config)
 		m.currentView = ViewDetail
 		if m.imageEnabled {
 			m.needsClearImages = true
@@ -270,7 +270,7 @@ func (m Model) updateHot(msg tea.Msg) (tea.Model, tea.Cmd) {
 		gameID := *m.hot.selected
 		m.hot.selected = nil
 		m.previousView = ViewHot
-		m.detail = newDetailModel(gameID, m.styles, m.keys, m.imageEnabled, m.imageCache)
+		m.detail = newDetailModel(gameID, m.styles, m.keys, m.imageEnabled, m.imageCache, m.config)
 		m.currentView = ViewDetail
 		if m.imageEnabled {
 			m.needsClearImages = true
@@ -306,7 +306,7 @@ func (m Model) updateCollection(msg tea.Msg) (tea.Model, tea.Cmd) {
 		gameID := *m.collection.selected
 		m.collection.selected = nil
 		m.previousView = ViewCollectionList
-		m.detail = newDetailModel(gameID, m.styles, m.keys, m.imageEnabled, m.imageCache)
+		m.detail = newDetailModel(gameID, m.styles, m.keys, m.imageEnabled, m.imageCache, m.config)
 		m.currentView = ViewDetail
 		if m.imageEnabled {
 			m.needsClearImages = true
