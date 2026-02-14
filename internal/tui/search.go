@@ -56,6 +56,9 @@ func newSearchModel(styles Styles, keys KeyMap) searchModel {
 
 func (m searchModel) doSearch(client *bgg.Client, query string) tea.Cmd {
 	return func() tea.Msg {
+		if client == nil {
+			return searchResultMsg{err: fmt.Errorf("API token not configured. Please set your token in Settings.")}
+		}
 		results, err := client.SearchGames(query)
 		return searchResultMsg{results: results, err: err}
 	}

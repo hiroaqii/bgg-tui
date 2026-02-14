@@ -45,6 +45,9 @@ func newHotModel(styles Styles, keys KeyMap) hotModel {
 
 func (m hotModel) loadHotGames(client *bgg.Client) tea.Cmd {
 	return func() tea.Msg {
+		if client == nil {
+			return hotResultMsg{err: fmt.Errorf("API token not configured. Please set your token in Settings.")}
+		}
 		games, err := client.GetHotGames()
 		return hotResultMsg{games: games, err: err}
 	}

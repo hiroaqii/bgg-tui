@@ -65,6 +65,9 @@ func newDetailModel(gameID int, styles Styles, keys KeyMap, imgEnabled bool, cac
 
 func (m detailModel) loadGame(client *bgg.Client) tea.Cmd {
 	return func() tea.Msg {
+		if client == nil {
+			return detailResultMsg{err: fmt.Errorf("API token not configured. Please set your token in Settings.")}
+		}
 		game, err := client.GetGame(m.gameID)
 		return detailResultMsg{game: game, err: err}
 	}

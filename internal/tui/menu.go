@@ -21,9 +21,10 @@ type menuModel struct {
 	styles   Styles
 	keys     KeyMap
 	selected *View
+	hasToken bool
 }
 
-func newMenuModel(styles Styles, keys KeyMap) menuModel {
+func newMenuModel(styles Styles, keys KeyMap, hasToken bool) menuModel {
 	return menuModel{
 		cursor: 0,
 		items: []menuItem{
@@ -32,8 +33,9 @@ func newMenuModel(styles Styles, keys KeyMap) menuModel {
 			{label: "User Collection", key: "3", view: ViewCollectionInput},
 			{label: "Settings", key: "4", view: ViewSettings},
 		},
-		styles: styles,
-		keys:   keys,
+		styles:   styles,
+		keys:     keys,
+		hasToken: hasToken,
 	}
 }
 
@@ -82,6 +84,11 @@ func (m menuModel) View(width, height int) string {
 	b.WriteString("\n")
 	b.WriteString(subtitle)
 	b.WriteString("\n\n")
+
+	if !m.hasToken {
+		b.WriteString(m.styles.Error.Render("API token not configured. Please set your token in Settings."))
+		b.WriteString("\n\n")
+	}
 
 	// Menu items
 	for i, item := range m.items {

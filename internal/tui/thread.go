@@ -48,6 +48,9 @@ func newThreadModel(threadID int, styles Styles, keys KeyMap) threadModel {
 
 func (m threadModel) loadThread(client *bgg.Client) tea.Cmd {
 	return func() tea.Msg {
+		if client == nil {
+			return threadResultMsg{err: fmt.Errorf("API token not configured. Please set your token in Settings.")}
+		}
 		thread, err := client.GetThread(m.threadID)
 		return threadResultMsg{thread: thread, err: err}
 	}

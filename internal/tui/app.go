@@ -74,7 +74,7 @@ func New(cfg *config.Config) Model {
 		keys:         keys,
 		styles:       styles,
 		currentView:  ViewMenu,
-		menu:         newMenuModel(styles, keys),
+		menu:         newMenuModel(styles, keys, cfg.HasToken()),
 		settings:     newSettingsModel(cfg, styles, keys),
 		search:       newSearchModel(styles, keys),
 		hot:          newHotModel(styles, keys),

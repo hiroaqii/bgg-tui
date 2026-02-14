@@ -60,6 +60,9 @@ func newCollectionModel(cfg *config.Config, styles Styles, keys KeyMap) collecti
 
 func (m collectionModel) loadCollection(client *bgg.Client, username string, ownedOnly bool) tea.Cmd {
 	return func() tea.Msg {
+		if client == nil {
+			return collectionResultMsg{err: fmt.Errorf("API token not configured. Please set your token in Settings.")}
+		}
 		opts := bgg.CollectionOptions{
 			OwnedOnly: ownedOnly,
 		}

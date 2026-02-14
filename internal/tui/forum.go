@@ -64,6 +64,9 @@ func newForumModel(gameID int, gameName string, styles Styles, keys KeyMap) foru
 
 func (m forumModel) loadForums(client *bgg.Client) tea.Cmd {
 	return func() tea.Msg {
+		if client == nil {
+			return forumsResultMsg{err: fmt.Errorf("API token not configured. Please set your token in Settings.")}
+		}
 		forums, err := client.GetForums(m.gameID)
 		return forumsResultMsg{forums: forums, err: err}
 	}
@@ -71,6 +74,9 @@ func (m forumModel) loadForums(client *bgg.Client) tea.Cmd {
 
 func (m forumModel) loadThreads(client *bgg.Client) tea.Cmd {
 	return func() tea.Msg {
+		if client == nil {
+			return threadsResultMsg{err: fmt.Errorf("API token not configured. Please set your token in Settings.")}
+		}
 		threads, err := client.GetForumThreads(m.selectedForumID, m.page)
 		return threadsResultMsg{threads: threads, err: err}
 	}
