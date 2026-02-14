@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -214,7 +215,8 @@ func (m forumModel) View(width, height int) string {
 			b.WriteString(m.styles.Subtitle.Render("No forums found."))
 			b.WriteString("\n")
 		} else {
-			for i, forum := range m.forums {
+			titles, metas := formatForumColumns(m.forums)
+			for i := range m.forums {
 				cursor := "  "
 				style := m.styles.ListItem
 				if i == m.forumCursor {
@@ -222,10 +224,7 @@ func (m forumModel) View(width, height int) string {
 					style = m.styles.ListItemFocus
 				}
 
-				// Format thread count
-				threadStr := fmt.Sprintf("%d threads", forum.NumThreads)
-
-				line := fmt.Sprintf("%s%s  %s", cursor, style.Render(forum.Title), m.styles.Subtitle.Render(threadStr))
+				line := fmt.Sprintf("%s%s  %s", cursor, style.Render(titles[i]), m.styles.Subtitle.Render(metas[i]))
 				b.WriteString(line)
 				b.WriteString("\n")
 			}
@@ -306,12 +305,46 @@ func (m forumModel) View(width, height int) string {
 	return centerContent(content, width, height)
 }
 
+// formatForumColumns formats forum titles and meta info with aligned columns.
+func formatForumColumns(forums []bgg.Forum) (titles []string, metas []string) {
+	maxTitleWidth := 0
+	maxThreads := 0
+	for _, f := range forums {
+		if w := len(f.Title); w > maxTitleWidth {
+			maxTitleWidth = w
+		}
+		if f.NumThreads > maxThreads {
+			maxThreads = f.NumThreads
+		}
+	}
+	maxDigits := len(fmt.Sprintf("%d", maxThreads))
+	if maxDigits == 0 {
+		maxDigits = 1
+	}
+
+	for _, f := range forums {
+		titles = append(titles, fmt.Sprintf("%-*s", maxTitleWidth, f.Title))
+		metas = append(metas, fmt.Sprintf("%*d threads · %s", maxDigits, f.NumThreads, formatDate(f.LastPostDate)))
+	}
+	return
+}
+
 // formatDate formats a date string for display.
-// Input format: "2024-12-20T08:32:00-06:00" or similar
-// Output format: "2024-12-20"
+// Parses RFC 2822 ("Mon, 02 Jan 2006 15:04:05 -0700") and RFC 3339/ISO 8601 formats.
+// Output format: "2006-01-02 15:04"
 func formatDate(dateStr string) string {
-	if len(dateStr) >= 10 {
-		return dateStr[:10]
+	if dateStr == "" {
+		return ""
+	}
+	formats := []string{
+		time.RFC1123Z, // "Mon, 02 Jan 2006 15:04:05 -0700"
+		time.RFC1123,  // "Mon, 02 Jan 2006 15:04:05 MST"
+		time.RFC3339,  // "2006-01-02T15:04:05Z07:00"
+	}
+	for _, layout := range formats {
+		if t, err := time.Parse(layout, dateStr); err == nil {
+			return t.Format("2006-01-02 15:04")
+		}
 	}
 	return dateStr
 }
