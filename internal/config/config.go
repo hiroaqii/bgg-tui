@@ -26,6 +26,7 @@ type DisplayConfig struct {
 	ImageProtocol string `toml:"image_protocol"` // "auto", "kitty", "off"
 	ThreadWidth   int    `toml:"thread_width"`
 	ThreadHeight  int    `toml:"thread_height"`
+	ListPageSize  int    `toml:"list_page_size"`
 }
 
 // CollectionConfig contains collection-related configuration.
@@ -50,6 +51,7 @@ func DefaultConfig() *Config {
 			ImageProtocol: "auto",
 			ThreadWidth:   80,
 			ThreadHeight:  30,
+			ListPageSize:  25,
 		},
 		Collection: CollectionConfig{
 			DefaultUsername: "",

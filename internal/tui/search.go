@@ -10,6 +10,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	bgg "github.com/hiroaqii/go-bgg"
+
+	"github.com/hiroaqii/bgg-tui/internal/config"
 )
 
 type searchState int
@@ -23,6 +25,7 @@ const (
 
 type searchModel struct {
 	state    searchState
+	config   *config.Config
 	styles   Styles
 	keys     KeyMap
 	input    textinput.Model
@@ -63,7 +66,7 @@ type searchThumbMsg struct {
 	err            error
 }
 
-func newSearchModel(styles Styles, keys KeyMap, imageEnabled bool, cache *imageCache) searchModel {
+func newSearchModel(cfg *config.Config, styles Styles, keys KeyMap, imageEnabled bool, cache *imageCache) searchModel {
 	ti := textinput.New()
 	ti.Placeholder = "Enter game name..."
 	ti.CharLimit = 100
@@ -72,6 +75,7 @@ func newSearchModel(styles Styles, keys KeyMap, imageEnabled bool, cache *imageC
 
 	return searchModel{
 		state:        searchStateInput,
+		config:       cfg,
 		styles:       styles,
 		keys:         keys,
 		input:        ti,
@@ -396,9 +400,9 @@ func (m searchModel) View(width, height int) string {
 			b.WriteString(m.styles.Subtitle.Render("No results found."))
 			b.WriteString("\n")
 		} else {
-			// Show up to 15 results with scrolling
+			// Show results with scrolling
 			start := 0
-			visible := 15
+			visible := m.config.Display.ListPageSize
 			if m.cursor >= visible {
 				start = m.cursor - visible + 1
 			}

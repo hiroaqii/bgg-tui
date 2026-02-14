@@ -316,9 +316,9 @@ func (m collectionModel) View(width, height int) string {
 			b.WriteString(m.styles.Subtitle.Render("No games found."))
 			b.WriteString("\n")
 		} else {
-			// Show up to 15 results with scrolling
+			// Show results with scrolling
 			start := 0
-			visible := 15
+			visible := m.config.Display.ListPageSize
 			if m.cursor >= visible {
 				start = m.cursor - visible + 1
 			}

@@ -91,8 +91,8 @@ func New(cfg *config.Config) Model {
 		setupToken:   newSetupTokenModel(cfg, styles, keys),
 		menu:         newMenuModel(styles, keys, cfg.HasToken()),
 		settings:     newSettingsModel(cfg, styles, keys),
-		search:       newSearchModel(styles, keys, imgEnabled, imgCache),
-		hot:          newHotModel(styles, keys, imgEnabled, imgCache),
+		search:       newSearchModel(cfg, styles, keys, imgEnabled, imgCache),
+		hot:          newHotModel(cfg, styles, keys, imgEnabled, imgCache),
 		collection:   newCollectionModel(cfg, styles, keys, imgEnabled, imgCache),
 		imageEnabled: imgEnabled,
 		imageCache:   imgCache,
@@ -189,11 +189,11 @@ func (m Model) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.settings = newSettingsModel(m.config, m.styles, m.keys)
 		case ViewSearchInput:
 			m.currentView = ViewSearchInput
-			m.search = newSearchModel(m.styles, m.keys, m.imageEnabled, m.imageCache)
+			m.search = newSearchModel(m.config, m.styles, m.keys, m.imageEnabled, m.imageCache)
 			return m, textinput.Blink
 		case ViewHot:
 			m.currentView = ViewHot
-			m.hot = newHotModel(m.styles, m.keys, m.imageEnabled, m.imageCache)
+			m.hot = newHotModel(m.config, m.styles, m.keys, m.imageEnabled, m.imageCache)
 			return m, m.hot.loadHotGames(m.bggClient)
 		case ViewCollectionInput:
 			m.currentView = ViewCollectionInput

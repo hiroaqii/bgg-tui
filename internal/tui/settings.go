@@ -23,6 +23,7 @@ type settingsModel struct {
 	usernameInput textinput.Model
 	widthInput    textinput.Model
 	heightInput   textinput.Model
+	pageSizeInput textinput.Model
 	wantsBack     bool
 }
 
@@ -46,6 +47,11 @@ func newSettingsModel(cfg *config.Config, styles Styles, keys KeyMap) settingsMo
 	hi.CharLimit = 3
 	hi.SetValue(fmt.Sprintf("%d", cfg.Display.ThreadHeight))
 
+	pi := textinput.New()
+	pi.Placeholder = "Enter page size (5-50)"
+	pi.CharLimit = 2
+	pi.SetValue(fmt.Sprintf("%d", cfg.Display.ListPageSize))
+
 	return settingsModel{
 		cursor:        0,
 		styles:        styles,
@@ -55,11 +61,12 @@ func newSettingsModel(cfg *config.Config, styles Styles, keys KeyMap) settingsMo
 		usernameInput: ui,
 		widthInput:    wi,
 		heightInput:   hi,
+		pageSizeInput: pi,
 	}
 }
 
 func (m settingsModel) itemCount() int {
-	return 6 // Token, Username, ShowImages, ThreadWidth, ThreadHeight, ShowOnlyOwned
+	return 7 // Token, Username, ShowImages, ThreadWidth, ThreadHeight, ListPageSize, ShowOnlyOwned
 }
 
 func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
@@ -87,12 +94,17 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 					if v, err := strconv.Atoi(strings.TrimSpace(m.heightInput.Value())); err == nil && v >= 5 && v <= 100 {
 						m.config.Display.ThreadHeight = v
 					}
+				case 4:
+					if v, err := strconv.Atoi(strings.TrimSpace(m.pageSizeInput.Value())); err == nil && v >= 5 && v <= 50 {
+						m.config.Display.ListPageSize = v
+					}
 				}
 				m.editing = false
 				m.tokenInput.Blur()
 				m.usernameInput.Blur()
 				m.widthInput.Blur()
 				m.heightInput.Blur()
+				m.pageSizeInput.Blur()
 				m.config.Save()
 				return m, nil
 			case key.Matches(msg, m.keys.Escape):
@@ -101,6 +113,7 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 				m.usernameInput.Blur()
 				m.widthInput.Blur()
 				m.heightInput.Blur()
+				m.pageSizeInput.Blur()
 				return m, nil
 			}
 		}
@@ -114,6 +127,8 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 			m.widthInput, cmd = m.widthInput.Update(msg)
 		case 3:
 			m.heightInput, cmd = m.heightInput.Update(msg)
+		case 4:
+			m.pageSizeInput, cmd = m.pageSizeInput.Update(msg)
 		}
 		return m, cmd
 	}
@@ -157,7 +172,13 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 				m.heightInput.SetValue(fmt.Sprintf("%d", m.config.Display.ThreadHeight))
 				m.heightInput.Focus()
 				return m, textinput.Blink
-			case 5: // Show Only Owned
+			case 5: // List Page Size
+				m.editing = true
+				m.editingField = 4
+				m.pageSizeInput.SetValue(fmt.Sprintf("%d", m.config.Display.ListPageSize))
+				m.pageSizeInput.Focus()
+				return m, textinput.Blink
+			case 6: // Show Only Owned
 				m.config.Collection.ShowOnlyOwned = !m.config.Collection.ShowOnlyOwned
 				m.config.Save()
 			}
@@ -275,13 +296,28 @@ func (m settingsModel) View(width, height int) string {
 		b.WriteString(fmt.Sprintf("%s%s: %d\n", cursor, style.Render("Thread Height"), m.config.Display.ThreadHeight))
 	}
 
-	// Show Only Owned
+	// List Page Size
 	cursor = "  "
 	if m.cursor == 5 {
 		cursor = "> "
 	}
+	if m.editing && m.editingField == 4 {
+		b.WriteString(fmt.Sprintf("%sList Page Size: %s\n", cursor, m.pageSizeInput.View()))
+	} else {
+		style = m.styles.MenuItem
+		if m.cursor == 5 {
+			style = m.styles.MenuItemFocus
+		}
+		b.WriteString(fmt.Sprintf("%s%s: %d\n", cursor, style.Render("List Page Size"), m.config.Display.ListPageSize))
+	}
+
+	// Show Only Owned
+	cursor = "  "
+	if m.cursor == 6 {
+		cursor = "> "
+	}
 	style = m.styles.MenuItem
-	if m.cursor == 5 {
+	if m.cursor == 6 {
 		style = m.styles.MenuItemFocus
 	}
 	ownedValue := "OFF"

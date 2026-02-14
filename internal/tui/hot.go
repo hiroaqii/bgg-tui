@@ -10,6 +10,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	bgg "github.com/hiroaqii/go-bgg"
+
+	"github.com/hiroaqii/bgg-tui/internal/config"
 )
 
 type hotState int
@@ -22,6 +24,7 @@ const (
 
 type hotModel struct {
 	state     hotState
+	config    *config.Config
 	styles    Styles
 	keys      KeyMap
 	games     []bgg.HotGame
@@ -50,9 +53,10 @@ type hotResultMsg struct {
 	err   error
 }
 
-func newHotModel(styles Styles, keys KeyMap, imageEnabled bool, cache *imageCache) hotModel {
+func newHotModel(cfg *config.Config, styles Styles, keys KeyMap, imageEnabled bool, cache *imageCache) hotModel {
 	return hotModel{
 		state:        hotStateLoading,
+		config:       cfg,
 		styles:       styles,
 		keys:         keys,
 		imageEnabled: imageEnabled,
@@ -265,9 +269,9 @@ func (m hotModel) View(width, height int) string {
 			b.WriteString(m.styles.Subtitle.Render("No games found."))
 			b.WriteString("\n")
 		} else {
-			// Show up to 15 results with scrolling
+			// Show results with scrolling
 			start := 0
-			visible := 15
+			visible := m.config.Display.ListPageSize
 			if m.cursor >= visible {
 				start = m.cursor - visible + 1
 			}
