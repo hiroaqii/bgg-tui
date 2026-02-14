@@ -302,6 +302,29 @@ func fixedSizeLoadingPanel(cols, rows int) string {
 	return sb.String()
 }
 
+// fixedSizeNoImagePanel returns a fixed-size block for the error/no-image state.
+func fixedSizeNoImagePanel(cols, rows int) string {
+	blank := strings.Repeat(" ", cols)
+	var sb strings.Builder
+	for i := 0; i < rows; i++ {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		if i == 0 {
+			label := "No Image"
+			if len(label) < cols {
+				sb.WriteString(label)
+				sb.WriteString(strings.Repeat(" ", cols-len(label)))
+			} else {
+				sb.WriteString(label[:cols])
+			}
+		} else {
+			sb.WriteString(blank)
+		}
+	}
+	return sb.String()
+}
+
 // loadListImage loads a thumbnail image for list views (hot/collection).
 func loadListImage(cache *imageCache, url string) tea.Cmd {
 	return func() tea.Msg {

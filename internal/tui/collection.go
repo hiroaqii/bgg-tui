@@ -45,6 +45,7 @@ type collectionModel struct {
 	imgTransmit    string
 	imgPlaceholder string
 	imgLoading     bool
+	imgError       bool
 	lastThumbURL   string
 }
 
@@ -107,6 +108,7 @@ func (m collectionModel) maybeLoadThumb() (collectionModel, tea.Cmd) {
 	}
 	m.lastThumbURL = url
 	m.imgLoading = true
+	m.imgError = false
 	m.imgTransmit = ""
 	m.imgPlaceholder = ""
 	return m, loadListImage(m.cache, url)
@@ -155,7 +157,9 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 		if msg, ok := msg.(listImageMsg); ok {
 			if msg.url == m.lastThumbURL {
 				m.imgLoading = false
-				if msg.err == nil {
+				if msg.err != nil {
+					m.imgError = true
+				} else {
 					m.imgTransmit = msg.imgTransmit
 					m.imgPlaceholder = msg.imgPlaceholder
 				}
@@ -366,6 +370,11 @@ func (m collectionModel) View(width, height int) string {
 		} else if m.imageEnabled && m.imgLoading {
 			listContent := b.String()
 			imgPanel := "\n" + fixedSizeLoadingPanel(listImageCols, listImageRows) + "\n"
+			b.Reset()
+			b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listContent, "  ", imgPanel))
+		} else if m.imageEnabled && m.imgError {
+			listContent := b.String()
+			imgPanel := "\n" + fixedSizeNoImagePanel(listImageCols, listImageRows) + "\n"
 			b.Reset()
 			b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listContent, "  ", imgPanel))
 		}

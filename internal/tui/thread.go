@@ -179,7 +179,7 @@ func (m threadModel) renderArticles() []string {
 		lines = append(lines, m.styles.Label.Render(header))
 
 		// Body lines (wrap text)
-		bodyLines := wrapText(article.Body, 60)
+		bodyLines := htmlToText(article.Body, 60)
 		lines = append(lines, bodyLines...)
 
 		// Add separator between articles

@@ -9,7 +9,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.0.0
 	github.com/hiroaqii/go-bgg v0.0.0-00010101000000-000000000000
 	golang.org/x/image v0.36.0
-	golang.org/x/sys v0.27.0
+	golang.org/x/sys v0.41.0
 )
 
 require (
@@ -26,6 +26,7 @@ require (
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.15.2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
+	golang.org/x/net v0.50.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 )

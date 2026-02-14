@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	bgg "github.com/hiroaqii/go-bgg"
 )
@@ -35,6 +36,16 @@ type searchModel struct {
 	filteredResults []bgg.GameSearchResult
 
 	wantsBack bool
+
+	// Image fields
+	imageEnabled   bool
+	cache          *imageCache
+	imgTransmit    string
+	imgPlaceholder string
+	imgLoading     bool
+	imgError       bool
+	lastGameID     int            // last loaded game ID (tracked by ID since search results lack thumb URLs)
+	thumbURLs      map[int]string // gameID → thumbnail URL cache
 }
 
 // searchResultMsg is sent when search results are received.
@@ -43,7 +54,16 @@ type searchResultMsg struct {
 	err     error
 }
 
-func newSearchModel(styles Styles, keys KeyMap) searchModel {
+// searchThumbMsg is sent when a search thumbnail has been fetched via GetGame and rendered.
+type searchThumbMsg struct {
+	gameID         int
+	thumbURL       string
+	imgTransmit    string
+	imgPlaceholder string
+	err            error
+}
+
+func newSearchModel(styles Styles, keys KeyMap, imageEnabled bool, cache *imageCache) searchModel {
 	ti := textinput.New()
 	ti.Placeholder = "Enter game name..."
 	ti.CharLimit = 100
@@ -51,10 +71,13 @@ func newSearchModel(styles Styles, keys KeyMap) searchModel {
 	ti.Focus()
 
 	return searchModel{
-		state:  searchStateInput,
-		styles: styles,
-		keys:   keys,
-		input:  ti,
+		state:        searchStateInput,
+		styles:       styles,
+		keys:         keys,
+		input:        ti,
+		imageEnabled: imageEnabled,
+		cache:        cache,
+		thumbURLs:    make(map[int]string),
 	}
 }
 
@@ -65,6 +88,94 @@ func (m searchModel) doSearch(client *bgg.Client, query string) tea.Cmd {
 		}
 		results, err := client.SearchGames(query)
 		return searchResultMsg{results: results, err: err}
+	}
+}
+
+func (m searchModel) currentGameID() int {
+	items := m.results
+	if m.filtering || m.filteredResults != nil {
+		items = m.filteredResults
+	}
+	if m.cursor >= 0 && m.cursor < len(items) {
+		return items[m.cursor].ID
+	}
+	return 0
+}
+
+func (m searchModel) maybeLoadThumb(client *bgg.Client) (searchModel, tea.Cmd) {
+	if !m.imageEnabled || m.cache == nil {
+		return m, nil
+	}
+	gameID := m.currentGameID()
+	if gameID == 0 || gameID == m.lastGameID {
+		return m, nil
+	}
+	m.lastGameID = gameID
+	m.imgLoading = true
+	m.imgError = false
+	m.imgTransmit = ""
+	m.imgPlaceholder = ""
+
+	// If we already have the thumb URL cached, use the standard loadListImage path
+	if url, ok := m.thumbURLs[gameID]; ok {
+		return m, loadListImage(m.cache, url)
+	}
+
+	// Otherwise fetch the thumb URL via GetGame
+	return m, loadSearchThumb(client, m.cache, gameID)
+}
+
+// loadSearchThumb fetches thumbnail URL via GetGame, downloads and renders the image.
+func loadSearchThumb(client *bgg.Client, cache *imageCache, gameID int) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return searchThumbMsg{gameID: gameID, err: fmt.Errorf("no client")}
+		}
+		game, err := client.GetGame(gameID)
+		if err != nil {
+			return searchThumbMsg{gameID: gameID, err: err}
+		}
+		if game.Thumbnail == "" {
+			return searchThumbMsg{gameID: gameID, err: fmt.Errorf("no thumbnail")}
+		}
+
+		path, err := cache.Download(game.Thumbnail)
+		if err != nil {
+			return searchThumbMsg{gameID: gameID, thumbURL: game.Thumbnail, err: err}
+		}
+
+		cellW, cellH := termCellSize()
+		pixW := listImageCols * cellW
+		pixH := listImageRows * cellH
+
+		img, err := loadAndResize(path, pixW, pixH)
+		if err != nil {
+			return searchThumbMsg{gameID: gameID, thumbURL: game.Thumbnail, err: err}
+		}
+
+		bounds := img.Bounds()
+		actualCols := (bounds.Dx() + cellW - 1) / cellW
+		actualRows := (bounds.Dy() + cellH - 1) / cellH
+		if actualCols < 1 {
+			actualCols = 1
+		}
+		if actualRows < 1 {
+			actualRows = 1
+		}
+
+		transmit, err := kittyTransmitString(img, listImageID)
+		if err != nil {
+			return searchThumbMsg{gameID: gameID, thumbURL: game.Thumbnail, err: err}
+		}
+
+		placeholder := kittyPlaceholder(listImageID, actualRows, actualCols)
+		placeholder = padPlaceholder(placeholder, listImageRows, listImageCols)
+		return searchThumbMsg{
+			gameID:         gameID,
+			thumbURL:       game.Thumbnail,
+			imgTransmit:    transmit,
+			imgPlaceholder: placeholder,
+		}
 	}
 }
 
@@ -100,11 +211,42 @@ func (m searchModel) Update(msg tea.Msg, client *bgg.Client) (searchModel, tea.C
 				m.state = searchStateResults
 				m.results = msg.results
 				m.cursor = 0
+				m, cmd := m.maybeLoadThumb(client)
+				return m, cmd
 			}
 		}
 		return m, nil
 
 	case searchStateResults:
+		// Handle search thumbnail loaded (from GetGame fetch)
+		if msg, ok := msg.(searchThumbMsg); ok {
+			if msg.gameID == m.lastGameID {
+				m.imgLoading = false
+				if msg.err != nil {
+					m.imgError = true
+				} else {
+					m.thumbURLs[msg.gameID] = msg.thumbURL
+					m.imgTransmit = msg.imgTransmit
+					m.imgPlaceholder = msg.imgPlaceholder
+				}
+			}
+			return m, nil
+		}
+
+		// Handle list image loaded (from cached URL path)
+		if msg, ok := msg.(listImageMsg); ok {
+			if m.thumbURLs[m.lastGameID] == msg.url {
+				m.imgLoading = false
+				if msg.err != nil {
+					m.imgError = true
+				} else {
+					m.imgTransmit = msg.imgTransmit
+					m.imgPlaceholder = msg.imgPlaceholder
+				}
+			}
+			return m, nil
+		}
+
 		if m.filtering {
 			switch msg := msg.(type) {
 			case tea.KeyMsg:
@@ -114,7 +256,8 @@ func (m searchModel) Update(msg tea.Msg, client *bgg.Client) (searchModel, tea.C
 					m.filteredResults = nil
 					m.filterInput.SetValue("")
 					m.cursor = 0
-					return m, nil
+					m, cmd := m.maybeLoadThumb(client)
+					return m, cmd
 				case key.Matches(msg, m.keys.Enter):
 					if len(m.filteredResults) > 0 {
 						id := m.filteredResults[m.cursor].ID
@@ -125,12 +268,14 @@ func (m searchModel) Update(msg tea.Msg, client *bgg.Client) (searchModel, tea.C
 					if m.cursor > 0 {
 						m.cursor--
 					}
-					return m, nil
+					m, cmd := m.maybeLoadThumb(client)
+					return m, cmd
 				case msg.String() == "down":
 					if m.cursor < len(m.filteredResults)-1 {
 						m.cursor++
 					}
-					return m, nil
+					m, cmd := m.maybeLoadThumb(client)
+					return m, cmd
 				}
 			}
 			var cmd tea.Cmd
@@ -146,7 +291,8 @@ func (m searchModel) Update(msg tea.Msg, client *bgg.Client) (searchModel, tea.C
 			if m.cursor >= len(m.filteredResults) {
 				m.cursor = max(0, len(m.filteredResults)-1)
 			}
-			return m, cmd
+			m2, cmd2 := m.maybeLoadThumb(client)
+			return m2, tea.Batch(cmd, cmd2)
 		}
 
 		switch msg := msg.(type) {
@@ -156,10 +302,14 @@ func (m searchModel) Update(msg tea.Msg, client *bgg.Client) (searchModel, tea.C
 				if m.cursor > 0 {
 					m.cursor--
 				}
+				m, cmd := m.maybeLoadThumb(client)
+				return m, cmd
 			case key.Matches(msg, m.keys.Down):
 				if m.cursor < len(m.results)-1 {
 					m.cursor++
 				}
+				m, cmd := m.maybeLoadThumb(client)
+				return m, cmd
 			case key.Matches(msg, m.keys.Enter):
 				if len(m.results) > 0 {
 					id := m.results[m.cursor].ID
@@ -172,7 +322,8 @@ func (m searchModel) Update(msg tea.Msg, client *bgg.Client) (searchModel, tea.C
 				m.filteredResults = make([]bgg.GameSearchResult, len(m.results))
 				copy(m.filteredResults, m.results)
 				m.cursor = 0
-				return m, textinput.Blink
+				m, cmd := m.maybeLoadThumb(client)
+				return m, tea.Batch(textinput.Blink, cmd)
 			case key.Matches(msg, m.keys.Search):
 				// New search
 				m.state = searchStateInput
@@ -209,6 +360,7 @@ func (m searchModel) Update(msg tea.Msg, client *bgg.Client) (searchModel, tea.C
 
 func (m searchModel) View(width, height int) string {
 	var b strings.Builder
+	var transmit string
 
 	switch m.state {
 	case searchStateInput:
@@ -288,6 +440,25 @@ func (m searchModel) View(width, height int) string {
 			b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Detail  /: Filter  s: New Search  ?: Help  b: Back"))
 		}
 
+		// Add image panel
+		if m.imageEnabled && m.imgPlaceholder != "" {
+			transmit = m.imgTransmit
+			listContent := b.String()
+			imgPanel := "\n" + m.imgPlaceholder + "\n"
+			b.Reset()
+			b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listContent, "  ", imgPanel))
+		} else if m.imageEnabled && m.imgLoading {
+			listContent := b.String()
+			imgPanel := "\n" + fixedSizeLoadingPanel(listImageCols, listImageRows) + "\n"
+			b.Reset()
+			b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listContent, "  ", imgPanel))
+		} else if m.imageEnabled && m.imgError {
+			listContent := b.String()
+			imgPanel := "\n" + fixedSizeNoImagePanel(listImageCols, listImageRows) + "\n"
+			b.Reset()
+			b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listContent, "  ", imgPanel))
+		}
+
 	case searchStateError:
 		b.WriteString(m.styles.Title.Render("Search Games"))
 		b.WriteString("\n\n")
@@ -297,5 +468,5 @@ func (m searchModel) View(width, height int) string {
 	}
 
 	content := b.String()
-	return centerContent(content, width, height)
+	return transmit + centerContent(content, width, height)
 }
