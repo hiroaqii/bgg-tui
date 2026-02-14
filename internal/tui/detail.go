@@ -33,6 +33,15 @@ type detailModel struct {
 	descLines  []string // Pre-wrapped description lines
 	wantsBack  bool
 	wantsForum bool // Navigate to forum view
+
+	// Image fields
+	imageEnabled   bool
+	imgTransmit    string // Kitty APC transmit sequence
+	imgPlaceholder string // Unicode placeholder grid
+	imgLoading     bool
+	imgCols        int
+	imgRows        int
+	cache          *imageCache
 }
 
 // detailResultMsg is sent when game details are received.
@@ -41,12 +50,16 @@ type detailResultMsg struct {
 	err  error
 }
 
-func newDetailModel(gameID int, styles Styles, keys KeyMap) detailModel {
+func newDetailModel(gameID int, styles Styles, keys KeyMap, imgEnabled bool, cache *imageCache) detailModel {
 	return detailModel{
-		state:  detailStateLoading,
-		styles: styles,
-		keys:   keys,
-		gameID: gameID,
+		state:        detailStateLoading,
+		styles:       styles,
+		keys:         keys,
+		gameID:       gameID,
+		imageEnabled: imgEnabled,
+		imgCols:      20,
+		imgRows:      10,
+		cache:        cache,
 	}
 }
 
@@ -54,6 +67,45 @@ func (m detailModel) loadGame(client *bgg.Client) tea.Cmd {
 	return func() tea.Msg {
 		game, err := client.GetGame(m.gameID)
 		return detailResultMsg{game: game, err: err}
+	}
+}
+
+func (m detailModel) loadImage(url string) tea.Cmd {
+	return func() tea.Msg {
+		path, err := m.cache.Download(url)
+		if err != nil {
+			return imageLoadedMsg{url: url, err: err}
+		}
+
+		cellW, cellH := termCellSize()
+		pixW := m.imgCols * cellW
+		pixH := m.imgRows * cellH
+
+		img, err := loadAndResize(path, pixW, pixH)
+		if err != nil {
+			return imageLoadedMsg{url: url, err: err}
+		}
+
+		// Compute actual placeholder size from resized image bounds
+		bounds := img.Bounds()
+		actualCols := (bounds.Dx() + cellW - 1) / cellW
+		actualRows := (bounds.Dy() + cellH - 1) / cellH
+		if actualCols < 1 {
+			actualCols = 1
+		}
+		if actualRows < 1 {
+			actualRows = 1
+		}
+
+		const imageID uint32 = 1
+		transmit, err := kittyTransmitString(img, imageID)
+		if err != nil {
+			return imageLoadedMsg{url: url, err: err}
+		}
+
+		placeholder := kittyPlaceholder(imageID, actualRows, actualCols)
+
+		return imageLoadedMsg{url: url, imgTransmit: transmit, imgPlaceholder: placeholder}
 	}
 }
 
@@ -65,28 +117,41 @@ func (m detailModel) Update(msg tea.Msg) (detailModel, tea.Cmd) {
 			if msg.err != nil {
 				m.state = detailStateError
 				m.errMsg = msg.err.Error()
-			} else {
-				m.state = detailStateResults
-				m.game = msg.game
-				m.scroll = 0
+				return m, nil
+			}
 
-				// Pre-calculate description lines and max scroll
-				desc := msg.game.Description
-				if desc == "" {
-					desc = "No description available."
-				}
-				m.descLines = wrapText(desc, 60)
-				visibleLines := 8
-				m.maxScroll = len(m.descLines) - visibleLines
-				if m.maxScroll < 0 {
-					m.maxScroll = 0
-				}
+			m.state = detailStateResults
+			m.game = msg.game
+			m.scroll = 0
+
+			// Pre-calculate description lines and max scroll
+			desc := msg.game.Description
+			if desc == "" {
+				desc = "No description available."
+			}
+			m.descLines = wrapText(desc, 60)
+			visibleLines := 8
+			m.maxScroll = len(m.descLines) - visibleLines
+			if m.maxScroll < 0 {
+				m.maxScroll = 0
+			}
+
+			// Start image loading if enabled
+			if m.imageEnabled && m.cache != nil && msg.game.Image != "" {
+				m.imgLoading = true
+				return m, m.loadImage(msg.game.Image)
 			}
 		}
 		return m, nil
 
 	case detailStateResults:
 		switch msg := msg.(type) {
+		case imageLoadedMsg:
+			m.imgLoading = false
+			if msg.err == nil {
+				m.imgTransmit = msg.imgTransmit
+				m.imgPlaceholder = msg.imgPlaceholder
+			}
 		case tea.KeyMsg:
 			switch {
 			case key.Matches(msg, m.keys.Up):
@@ -125,6 +190,7 @@ func (m detailModel) Update(msg tea.Msg) (detailModel, tea.Cmd) {
 
 func (m detailModel) View(width, height int) string {
 	var b strings.Builder
+	var transmit string
 
 	switch m.state {
 	case detailStateLoading:
@@ -138,6 +204,16 @@ func (m detailModel) View(width, height int) string {
 		// Title
 		b.WriteString(m.styles.Title.Render(game.Name))
 		b.WriteString("\n\n")
+
+		// Image
+		if m.imgTransmit != "" {
+			transmit = m.imgTransmit
+			b.WriteString(m.imgPlaceholder)
+			b.WriteString("\n")
+		} else if m.imgLoading {
+			b.WriteString(m.styles.Loading.Render("Loading image..."))
+			b.WriteString("\n\n")
+		}
 
 		// Basic info
 		lines := []string{}
@@ -239,7 +315,7 @@ func (m detailModel) View(width, height int) string {
 	}
 
 	content := b.String()
-	return lipgloss.NewStyle().Width(width).Height(height).Padding(2, 4).Render(content)
+	return transmit + lipgloss.NewStyle().Width(width).Height(height).Padding(2, 4).Render(content)
 }
 
 // wrapText wraps text to the specified width.

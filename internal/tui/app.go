@@ -35,6 +35,11 @@ type Model struct {
 
 	// Navigation history
 	previousView View
+
+	// Image support
+	imageEnabled    bool
+	imageCache      *imageCache
+	needsClearImages bool
 }
 
 // New creates a new application model.
@@ -50,17 +55,32 @@ func New(cfg *config.Config) Model {
 		})
 	}
 
+	// Initialize image support
+	var imgEnabled bool
+	var imgCache *imageCache
+	if cfg.Display.ShowImages {
+		protocol := detectProtocol(cfg.Display.ImageProtocol)
+		if protocol == ProtocolKitty {
+			if c, err := newImageCache(); err == nil {
+				imgEnabled = true
+				imgCache = c
+			}
+		}
+	}
+
 	return Model{
-		config:      cfg,
-		bggClient:   client,
-		keys:        keys,
-		styles:      styles,
-		currentView: ViewMenu,
-		menu:        newMenuModel(styles, keys),
-		settings:    newSettingsModel(cfg, styles, keys),
-		search:      newSearchModel(styles, keys),
-		hot:         newHotModel(styles, keys),
-		collection:  newCollectionModel(cfg, styles, keys),
+		config:       cfg,
+		bggClient:    client,
+		keys:         keys,
+		styles:       styles,
+		currentView:  ViewMenu,
+		menu:         newMenuModel(styles, keys),
+		settings:     newSettingsModel(cfg, styles, keys),
+		search:       newSearchModel(styles, keys),
+		hot:          newHotModel(styles, keys),
+		collection:   newCollectionModel(cfg, styles, keys),
+		imageEnabled: imgEnabled,
+		imageCache:   imgCache,
 	}
 }
 
@@ -71,6 +91,10 @@ func (m Model) Init() tea.Cmd {
 
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.needsClearImages {
+		m.needsClearImages = false
+	}
+
 	// Handle window size for all views
 	if msg, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width = msg.Width
@@ -165,7 +189,7 @@ func (m Model) updateSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		gameID := *m.search.selected
 		m.search.selected = nil
 		m.previousView = ViewSearchResults
-		m.detail = newDetailModel(gameID, m.styles, m.keys)
+		m.detail = newDetailModel(gameID, m.styles, m.keys, m.imageEnabled, m.imageCache)
 		m.currentView = ViewDetail
 		return m, m.detail.loadGame(m.bggClient)
 	}
@@ -187,7 +211,7 @@ func (m Model) updateHot(msg tea.Msg) (tea.Model, tea.Cmd) {
 		gameID := *m.hot.selected
 		m.hot.selected = nil
 		m.previousView = ViewHot
-		m.detail = newDetailModel(gameID, m.styles, m.keys)
+		m.detail = newDetailModel(gameID, m.styles, m.keys, m.imageEnabled, m.imageCache)
 		m.currentView = ViewDetail
 		return m, m.detail.loadGame(m.bggClient)
 	}
@@ -217,7 +241,7 @@ func (m Model) updateCollection(msg tea.Msg) (tea.Model, tea.Cmd) {
 		gameID := *m.collection.selected
 		m.collection.selected = nil
 		m.previousView = ViewCollectionList
-		m.detail = newDetailModel(gameID, m.styles, m.keys)
+		m.detail = newDetailModel(gameID, m.styles, m.keys, m.imageEnabled, m.imageCache)
 		m.currentView = ViewDetail
 		return m, m.detail.loadGame(m.bggClient)
 	}
@@ -232,11 +256,17 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.detail.wantsBack {
 		m.detail.wantsBack = false
 		m.currentView = m.previousView
+		if m.imageEnabled {
+			m.needsClearImages = true
+		}
 	}
 
 	// Handle forum navigation
 	if m.detail.wantsForum {
 		m.detail.wantsForum = false
+		if m.imageEnabled {
+			m.needsClearImages = true
+		}
 		gameName := ""
 		if m.detail.game != nil {
 			gameName = m.detail.game.Name
@@ -292,23 +322,28 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View implements tea.Model.
 func (m Model) View() string {
+	var prefix string
+	if m.needsClearImages {
+		prefix = kittyDeleteSeq
+	}
+
 	switch m.currentView {
 	case ViewMenu:
-		return m.menu.View(m.width, m.height)
+		return prefix + m.menu.View(m.width, m.height)
 	case ViewSettings:
-		return m.settings.View(m.width, m.height)
+		return prefix + m.settings.View(m.width, m.height)
 	case ViewSearchInput, ViewSearchResults:
-		return m.search.View(m.width, m.height)
+		return prefix + m.search.View(m.width, m.height)
 	case ViewHot:
-		return m.hot.View(m.width, m.height)
+		return prefix + m.hot.View(m.width, m.height)
 	case ViewCollectionInput, ViewCollectionList:
-		return m.collection.View(m.width, m.height)
+		return prefix + m.collection.View(m.width, m.height)
 	case ViewDetail:
 		return m.detail.View(m.width, m.height)
 	case ViewForumList, ViewThreadList:
-		return m.forum.View(m.width, m.height)
+		return prefix + m.forum.View(m.width, m.height)
 	case ViewThreadView:
-		return m.thread.View(m.width, m.height)
+		return prefix + m.thread.View(m.width, m.height)
 	}
 	return ""
 }
