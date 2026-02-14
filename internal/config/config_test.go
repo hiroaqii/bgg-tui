@@ -29,6 +29,10 @@ func TestDefaultConfig(t *testing.T) {
 		t.Error("expected ShowOnlyOwned to be false by default")
 	}
 
+	if cfg.Display.ThreadHeight != 30 {
+		t.Errorf("expected ThreadHeight 30, got %d", cfg.Display.ThreadHeight)
+	}
+
 	if cfg.Interface.ColorTheme != "dark" {
 		t.Errorf("expected ColorTheme 'dark', got '%s'", cfg.Interface.ColorTheme)
 	}
@@ -54,6 +58,7 @@ func TestSaveAndLoad(t *testing.T) {
 	cfg.API.Token = "test-token-123"
 	cfg.Display.ShowImages = false
 	cfg.Collection.DefaultUsername = "testuser"
+	cfg.Display.ThreadHeight = 50
 
 	if err := cfg.SaveToPath(path); err != nil {
 		t.Fatalf("failed to save config: %v", err)
@@ -80,6 +85,10 @@ func TestSaveAndLoad(t *testing.T) {
 
 	if loaded.Collection.DefaultUsername != "testuser" {
 		t.Errorf("expected DefaultUsername 'testuser', got '%s'", loaded.Collection.DefaultUsername)
+	}
+
+	if loaded.Display.ThreadHeight != 50 {
+		t.Errorf("expected ThreadHeight 50, got %d", loaded.Display.ThreadHeight)
 	}
 }
 

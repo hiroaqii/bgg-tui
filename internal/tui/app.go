@@ -368,7 +368,7 @@ func (m Model) updateForum(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.forum.wantsThread != nil {
 		threadID := *m.forum.wantsThread
 		m.forum.wantsThread = nil
-		m.thread = newThreadModel(threadID, m.styles, m.keys)
+		m.thread = newThreadModel(threadID, m.styles, m.keys, m.config)
 		m.currentView = ViewThreadView
 		return m, m.thread.loadThread(m.bggClient)
 	}

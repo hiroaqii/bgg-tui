@@ -8,6 +8,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	bgg "github.com/hiroaqii/go-bgg"
+
+	"github.com/hiroaqii/bgg-tui/internal/config"
 )
 
 type threadState int
@@ -22,6 +24,7 @@ type threadModel struct {
 	state     threadState
 	styles    Styles
 	keys      KeyMap
+	config    *config.Config
 	threadID  int
 	thread    *bgg.Thread
 	scroll    int
@@ -37,11 +40,12 @@ type threadResultMsg struct {
 	err    error
 }
 
-func newThreadModel(threadID int, styles Styles, keys KeyMap) threadModel {
+func newThreadModel(threadID int, styles Styles, keys KeyMap, cfg *config.Config) threadModel {
 	return threadModel{
 		state:    threadStateLoading,
 		styles:   styles,
 		keys:     keys,
+		config:   cfg,
 		threadID: threadID,
 	}
 }
@@ -71,7 +75,7 @@ func (m threadModel) Update(msg tea.Msg) (threadModel, tea.Cmd) {
 
 				// Pre-render view lines
 				m.viewLines = m.renderArticles()
-				visibleLines := 15
+				visibleLines := m.config.Display.ThreadHeight
 				m.maxScroll = len(m.viewLines) - visibleLines
 				if m.maxScroll < 0 {
 					m.maxScroll = 0
@@ -137,7 +141,7 @@ func (m threadModel) View(width, height int) string {
 		b.WriteString("\n\n")
 
 		// Show articles with scrolling
-		visibleLines := 15
+		visibleLines := m.config.Display.ThreadHeight
 		start := m.scroll
 		end := start + visibleLines
 		if end > len(m.viewLines) {
@@ -179,7 +183,7 @@ func (m threadModel) renderArticles() []string {
 		lines = append(lines, m.styles.Label.Render(header))
 
 		// Body lines (wrap text)
-		bodyLines := htmlToText(article.Body, 60)
+		bodyLines := htmlToText(article.Body, m.config.Display.ThreadWidth)
 		lines = append(lines, bodyLines...)
 
 		// Add separator between articles

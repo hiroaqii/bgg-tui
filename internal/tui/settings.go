@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -20,6 +21,8 @@ type settingsModel struct {
 	editingField  int
 	tokenInput    textinput.Model
 	usernameInput textinput.Model
+	widthInput    textinput.Model
+	heightInput   textinput.Model
 	wantsBack     bool
 }
 
@@ -33,6 +36,16 @@ func newSettingsModel(cfg *config.Config, styles Styles, keys KeyMap) settingsMo
 	ui.CharLimit = 64
 	ui.SetValue(cfg.Collection.DefaultUsername)
 
+	wi := textinput.New()
+	wi.Placeholder = "Enter width (20-200)"
+	wi.CharLimit = 3
+	wi.SetValue(fmt.Sprintf("%d", cfg.Display.ThreadWidth))
+
+	hi := textinput.New()
+	hi.Placeholder = "Enter height (5-100)"
+	hi.CharLimit = 3
+	hi.SetValue(fmt.Sprintf("%d", cfg.Display.ThreadHeight))
+
 	return settingsModel{
 		cursor:        0,
 		styles:        styles,
@@ -40,11 +53,13 @@ func newSettingsModel(cfg *config.Config, styles Styles, keys KeyMap) settingsMo
 		config:        cfg,
 		tokenInput:    ti,
 		usernameInput: ui,
+		widthInput:    wi,
+		heightInput:   hi,
 	}
 }
 
 func (m settingsModel) itemCount() int {
-	return 4 // Token, Username, ShowImages, ShowOnlyOwned
+	return 6 // Token, Username, ShowImages, ThreadWidth, ThreadHeight, ShowOnlyOwned
 }
 
 func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
@@ -56,31 +71,49 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 			switch {
 			case key.Matches(msg, m.keys.Enter):
 				// Save the value
-				if m.editingField == 0 {
+				switch m.editingField {
+				case 0:
 					val := strings.TrimSpace(m.tokenInput.Value())
 					if val != "" {
 						m.config.API.Token = val
 					}
-				} else if m.editingField == 1 {
+				case 1:
 					m.config.Collection.DefaultUsername = strings.TrimSpace(m.usernameInput.Value())
+				case 2:
+					if v, err := strconv.Atoi(strings.TrimSpace(m.widthInput.Value())); err == nil && v >= 20 && v <= 200 {
+						m.config.Display.ThreadWidth = v
+					}
+				case 3:
+					if v, err := strconv.Atoi(strings.TrimSpace(m.heightInput.Value())); err == nil && v >= 5 && v <= 100 {
+						m.config.Display.ThreadHeight = v
+					}
 				}
 				m.editing = false
 				m.tokenInput.Blur()
 				m.usernameInput.Blur()
+				m.widthInput.Blur()
+				m.heightInput.Blur()
 				m.config.Save()
 				return m, nil
 			case key.Matches(msg, m.keys.Escape):
 				m.editing = false
 				m.tokenInput.Blur()
 				m.usernameInput.Blur()
+				m.widthInput.Blur()
+				m.heightInput.Blur()
 				return m, nil
 			}
 		}
 
-		if m.editingField == 0 {
+		switch m.editingField {
+		case 0:
 			m.tokenInput, cmd = m.tokenInput.Update(msg)
-		} else {
+		case 1:
 			m.usernameInput, cmd = m.usernameInput.Update(msg)
+		case 2:
+			m.widthInput, cmd = m.widthInput.Update(msg)
+		case 3:
+			m.heightInput, cmd = m.heightInput.Update(msg)
 		}
 		return m, cmd
 	}
@@ -112,7 +145,19 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 			case 2: // Show Images
 				m.config.Display.ShowImages = !m.config.Display.ShowImages
 				m.config.Save()
-			case 3: // Show Only Owned
+			case 3: // Thread Width
+				m.editing = true
+				m.editingField = 2
+				m.widthInput.SetValue(fmt.Sprintf("%d", m.config.Display.ThreadWidth))
+				m.widthInput.Focus()
+				return m, textinput.Blink
+			case 4: // Thread Height
+				m.editing = true
+				m.editingField = 3
+				m.heightInput.SetValue(fmt.Sprintf("%d", m.config.Display.ThreadHeight))
+				m.heightInput.Focus()
+				return m, textinput.Blink
+			case 5: // Show Only Owned
 				m.config.Collection.ShowOnlyOwned = !m.config.Collection.ShowOnlyOwned
 				m.config.Save()
 			}
@@ -200,13 +245,43 @@ func (m settingsModel) View(width, height int) string {
 	}
 	b.WriteString(fmt.Sprintf("%s%s: [%s]\n", cursor, style.Render("Show Images"), imagesValue))
 
-	// Show Only Owned
+	// Thread Width
 	cursor = "  "
 	if m.cursor == 3 {
 		cursor = "> "
 	}
+	if m.editing && m.editingField == 2 {
+		b.WriteString(fmt.Sprintf("%sThread Width: %s\n", cursor, m.widthInput.View()))
+	} else {
+		style = m.styles.MenuItem
+		if m.cursor == 3 {
+			style = m.styles.MenuItemFocus
+		}
+		b.WriteString(fmt.Sprintf("%s%s: %d\n", cursor, style.Render("Thread Width"), m.config.Display.ThreadWidth))
+	}
+
+	// Thread Height
+	cursor = "  "
+	if m.cursor == 4 {
+		cursor = "> "
+	}
+	if m.editing && m.editingField == 3 {
+		b.WriteString(fmt.Sprintf("%sThread Height: %s\n", cursor, m.heightInput.View()))
+	} else {
+		style = m.styles.MenuItem
+		if m.cursor == 4 {
+			style = m.styles.MenuItemFocus
+		}
+		b.WriteString(fmt.Sprintf("%s%s: %d\n", cursor, style.Render("Thread Height"), m.config.Display.ThreadHeight))
+	}
+
+	// Show Only Owned
+	cursor = "  "
+	if m.cursor == 5 {
+		cursor = "> "
+	}
 	style = m.styles.MenuItem
-	if m.cursor == 3 {
+	if m.cursor == 5 {
 		style = m.styles.MenuItemFocus
 	}
 	ownedValue := "OFF"
