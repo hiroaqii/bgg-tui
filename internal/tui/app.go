@@ -243,6 +243,7 @@ func (m Model) updateSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.search.selected = nil
 		m.previousView = ViewSearchResults
 		m.detail = newDetailModel(gameID, m.styles, m.keys, m.imageEnabled, m.imageCache, m.config)
+		m.detail.viewHeight = m.height
 		m.currentView = ViewDetail
 		if m.imageEnabled {
 			m.needsClearImages = true
@@ -271,6 +272,7 @@ func (m Model) updateHot(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.hot.selected = nil
 		m.previousView = ViewHot
 		m.detail = newDetailModel(gameID, m.styles, m.keys, m.imageEnabled, m.imageCache, m.config)
+		m.detail.viewHeight = m.height
 		m.currentView = ViewDetail
 		if m.imageEnabled {
 			m.needsClearImages = true
@@ -307,6 +309,7 @@ func (m Model) updateCollection(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.collection.selected = nil
 		m.previousView = ViewCollectionList
 		m.detail = newDetailModel(gameID, m.styles, m.keys, m.imageEnabled, m.imageCache, m.config)
+		m.detail.viewHeight = m.height
 		m.currentView = ViewDetail
 		if m.imageEnabled {
 			m.needsClearImages = true
@@ -413,7 +416,7 @@ func (m Model) View() string {
 	case ViewCollectionInput, ViewCollectionList:
 		return prefix + m.collection.View(m.width, m.height)
 	case ViewDetail:
-		return m.detail.View(m.width, m.height)
+		return prefix + m.detail.View(m.width, m.height)
 	case ViewForumList, ViewThreadList:
 		return prefix + m.forum.View(m.width, m.height)
 	case ViewThreadView:

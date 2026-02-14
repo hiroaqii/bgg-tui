@@ -235,6 +235,7 @@ type imageLoadedMsg struct {
 	url            string
 	imgTransmit    string // APC transmit sequence
 	imgPlaceholder string // Unicode placeholder grid
+	imgRows        int    // actual row count after resize
 	err            error
 }
 

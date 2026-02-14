@@ -31,11 +31,16 @@ type detailModel struct {
 	gameID     int
 	game       *bgg.Game
 	errMsg     string
-	scroll     int
-	maxScroll  int
-	descLines  []string // Pre-wrapped description lines
-	wantsBack  bool
-	wantsForum bool // Navigate to forum view
+	scroll       int
+	maxScroll    int
+	contentLines    []string // Pre-rendered full content lines
+	descLines       []string // Pre-wrapped description lines
+	maxContentWidth int      // max lipgloss.Width across all contentLines
+	wantsBack    bool
+	wantsForum   bool // Navigate to forum view
+
+	// Layout fields
+	viewHeight int // terminal height from WindowSizeMsg
 
 	// Image fields
 	imageEnabled   bool
@@ -44,6 +49,8 @@ type detailModel struct {
 	imgLoading     bool
 	imgCols        int
 	imgRows        int
+	imgLineStart   int // first line index of image in contentLines (-1 = none)
+	imgLineEnd     int // one past last line index of image in contentLines
 	cache          *imageCache
 }
 
@@ -64,6 +71,121 @@ func newDetailModel(gameID int, styles Styles, keys KeyMap, imgEnabled bool, cac
 		imgCols:      20,
 		imgRows:      10,
 		cache:        cache,
+	}
+}
+
+// buildContentLines pre-renders all content lines for full-screen scrolling.
+func (m *detailModel) buildContentLines() {
+	if m.game == nil {
+		m.contentLines = nil
+		m.maxScroll = 0
+		return
+	}
+
+	var lines []string
+	game := m.game
+
+	// Title + blank
+	lines = append(lines, m.styles.Title.Render(game.Name), "")
+
+	// Image
+	m.imgLineStart = -1
+	m.imgLineEnd = -1
+	if m.imgTransmit != "" {
+		m.imgLineStart = len(lines)
+		for _, pl := range strings.Split(m.imgPlaceholder, "\n") {
+			lines = append(lines, pl)
+		}
+		m.imgLineEnd = len(lines)
+	} else if m.imgLoading {
+		lines = append(lines, m.styles.Loading.Render("Loading image..."), "")
+	}
+
+	// Year
+	year := game.Year
+	if year == "" {
+		year = "N/A"
+	}
+	lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Year"), year))
+
+	// Rating
+	ratingStr := "N/A"
+	if game.Rating > 0 {
+		ratingStr = fmt.Sprintf("%.2f (%d votes)", game.Rating, game.UsersRated)
+	}
+	lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Rating"), m.styles.Rating.Render(ratingStr)))
+
+	// Rank
+	rankStr := "Not Ranked"
+	if game.Rank > 0 {
+		rankStr = fmt.Sprintf("#%d", game.Rank)
+	}
+	lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Rank"), m.styles.Rank.Render(rankStr)))
+
+	// Players
+	playersStr := fmt.Sprintf("%d-%d", game.MinPlayers, game.MaxPlayers)
+	if game.MinPlayers == game.MaxPlayers {
+		playersStr = fmt.Sprintf("%d", game.MinPlayers)
+	}
+	lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Players"), m.styles.Players.Render(playersStr)))
+
+	// Playing time
+	timeStr := fmt.Sprintf("%d min", game.PlayingTime)
+	if game.MinPlayTime != game.MaxPlayTime {
+		timeStr = fmt.Sprintf("%d-%d min", game.MinPlayTime, game.MaxPlayTime)
+	}
+	lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Time"), m.styles.Time.Render(timeStr)))
+
+	// Weight
+	weightStr := "N/A"
+	if game.Weight > 0 {
+		weightStr = fmt.Sprintf("%.2f / 5", game.Weight)
+	}
+	lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Weight"), weightStr))
+
+	// Designers
+	if len(game.Designers) > 0 {
+		lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Designer"), strings.Join(game.Designers, ", ")))
+	}
+
+	// Categories
+	if len(game.Categories) > 0 {
+		lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Categories"), strings.Join(game.Categories, ", ")))
+	}
+
+	// Mechanics
+	if len(game.Mechanics) > 0 {
+		lines = append(lines, m.styles.Label.Render("Mechanics"))
+		for _, mech := range game.Mechanics {
+			lines = append(lines, "  "+mech)
+		}
+	}
+
+	// Description
+	lines = append(lines, "", m.styles.Subtitle.Render("Description"))
+	lines = append(lines, m.descLines...)
+
+	m.contentLines = lines
+
+	// Compute max width across all content lines for stable horizontal centering
+	m.maxContentWidth = 0
+	for _, line := range lines {
+		if w := lipgloss.Width(line); w > m.maxContentWidth {
+			m.maxContentWidth = w
+		}
+	}
+
+	// maxScroll: visibleLines = viewHeight - 6
+	visibleLines := m.viewHeight - 6
+	if visibleLines < 1 {
+		visibleLines = 1
+	}
+	m.maxScroll = len(m.contentLines) - visibleLines
+	if m.maxScroll < 0 {
+		m.maxScroll = 0
+	}
+	if m.scroll > m.maxScroll {
+		m.scroll = m.maxScroll
 	}
 }
 
@@ -112,7 +234,7 @@ func (m detailModel) loadImage(url string) tea.Cmd {
 
 		placeholder := kittyPlaceholder(imageID, actualRows, actualCols)
 
-		return imageLoadedMsg{url: url, imgTransmit: transmit, imgPlaceholder: placeholder}
+		return imageLoadedMsg{url: url, imgTransmit: transmit, imgPlaceholder: placeholder, imgRows: actualRows}
 	}
 }
 
@@ -120,6 +242,9 @@ func (m detailModel) Update(msg tea.Msg) (detailModel, tea.Cmd) {
 	switch m.state {
 	case detailStateLoading:
 		switch msg := msg.(type) {
+		case tea.WindowSizeMsg:
+			m.viewHeight = msg.Height
+
 		case detailResultMsg:
 			if msg.err != nil {
 				m.state = detailStateError
@@ -131,17 +256,13 @@ func (m detailModel) Update(msg tea.Msg) (detailModel, tea.Cmd) {
 			m.game = msg.game
 			m.scroll = 0
 
-			// Pre-calculate description lines and max scroll
+			// Pre-calculate description lines
 			desc := msg.game.Description
 			if desc == "" {
 				desc = "No description available."
 			}
 			m.descLines = wrapText(desc, m.config.Display.DescriptionWidth)
-			visibleLines := m.config.Display.DescriptionHeight
-			m.maxScroll = len(m.descLines) - visibleLines
-			if m.maxScroll < 0 {
-				m.maxScroll = 0
-			}
+			m.buildContentLines()
 
 			// Start image loading if enabled
 			if m.imageEnabled && m.cache != nil && msg.game.Image != "" {
@@ -153,12 +274,18 @@ func (m detailModel) Update(msg tea.Msg) (detailModel, tea.Cmd) {
 
 	case detailStateResults:
 		switch msg := msg.(type) {
+		case tea.WindowSizeMsg:
+			m.viewHeight = msg.Height
+			m.buildContentLines()
+
 		case imageLoadedMsg:
 			m.imgLoading = false
 			if msg.err == nil {
 				m.imgTransmit = msg.imgTransmit
 				m.imgPlaceholder = msg.imgPlaceholder
+				m.imgRows = msg.imgRows
 			}
+			m.buildContentLines()
 		case tea.KeyMsg:
 			switch {
 			case key.Matches(msg, m.keys.Up):
@@ -206,105 +333,28 @@ func (m detailModel) View(width, height int) string {
 		b.WriteString(m.styles.Loading.Render("Loading..."))
 
 	case detailStateResults:
-		game := m.game
+		visibleLines := m.viewHeight - 6
+		if visibleLines < 1 {
+			visibleLines = 1
+		}
 
-		// Title
-		b.WriteString(m.styles.Title.Render(game.Name))
-		b.WriteString("\n\n")
+		start := m.scroll
+		end := start + visibleLines
+		if end > len(m.contentLines) {
+			end = len(m.contentLines)
+		}
 
-		// Image
+		// Only transmit image when placeholder lines are visible; delete when scrolled off
 		if m.imgTransmit != "" {
-			transmit = m.imgTransmit
-			b.WriteString(m.imgPlaceholder)
-			b.WriteString("\n")
-		} else if m.imgLoading {
-			b.WriteString(m.styles.Loading.Render("Loading image..."))
-			b.WriteString("\n\n")
-		}
-
-		// Basic info
-		lines := []string{}
-
-		// Year
-		year := game.Year
-		if year == "" {
-			year = "N/A"
-		}
-		lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Year"), year))
-
-		// Rating
-		ratingStr := "N/A"
-		if game.Rating > 0 {
-			ratingStr = fmt.Sprintf("%.2f (%d votes)", game.Rating, game.UsersRated)
-		}
-		lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Rating"), m.styles.Rating.Render(ratingStr)))
-
-		// Rank
-		rankStr := "Not Ranked"
-		if game.Rank > 0 {
-			rankStr = fmt.Sprintf("#%d", game.Rank)
-		}
-		lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Rank"), m.styles.Rank.Render(rankStr)))
-
-		// Players
-		playersStr := fmt.Sprintf("%d-%d", game.MinPlayers, game.MaxPlayers)
-		if game.MinPlayers == game.MaxPlayers {
-			playersStr = fmt.Sprintf("%d", game.MinPlayers)
-		}
-		lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Players"), m.styles.Players.Render(playersStr)))
-
-		// Playing time
-		timeStr := fmt.Sprintf("%d min", game.PlayingTime)
-		if game.MinPlayTime != game.MaxPlayTime {
-			timeStr = fmt.Sprintf("%d-%d min", game.MinPlayTime, game.MaxPlayTime)
-		}
-		lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Time"), m.styles.Time.Render(timeStr)))
-
-		// Weight
-		weightStr := "N/A"
-		if game.Weight > 0 {
-			weightStr = fmt.Sprintf("%.2f / 5", game.Weight)
-		}
-		lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Weight"), weightStr))
-
-		// Designers
-		if len(game.Designers) > 0 {
-			lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Designer"), strings.Join(game.Designers, ", ")))
-		}
-
-		// Categories
-		if len(game.Categories) > 0 {
-			lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Categories"), strings.Join(game.Categories, ", ")))
-		}
-
-		// Mechanics
-		if len(game.Mechanics) > 0 {
-			lines = append(lines, m.styles.Label.Render("Mechanics"))
-			for _, mech := range game.Mechanics {
-				lines = append(lines, "  "+mech)
+			if m.imgLineStart >= 0 && m.imgLineStart < end && m.imgLineEnd > start {
+				transmit = m.imgTransmit
+			} else {
+				transmit = fmt.Sprintf("\033_Ga=d,d=I,i=1\033\\")
 			}
 		}
 
-		for _, line := range lines {
-			b.WriteString(line)
-			b.WriteString("\n")
-		}
-
-		// Description
-		b.WriteString("\n")
-		b.WriteString(m.styles.Subtitle.Render("Description"))
-		b.WriteString("\n")
-
-		// Use pre-calculated description lines
-		visibleLines := m.config.Display.DescriptionHeight
-		start := m.scroll
-		end := start + visibleLines
-		if end > len(m.descLines) {
-			end = len(m.descLines)
-		}
-
 		for i := start; i < end; i++ {
-			b.WriteString(m.descLines[i])
+			b.WriteString(m.contentLines[i])
 			b.WriteString("\n")
 		}
 
@@ -314,7 +364,11 @@ func (m detailModel) View(width, height int) string {
 		}
 
 		b.WriteString("\n")
-		b.WriteString(m.styles.Help.Render("j/k: Scroll  o: Open BGG  f: Forum  ?: Help  b: Back"))
+		helpLine := m.styles.Help.Render("j/k: Scroll  o: Open BGG  f: Forum  ?: Help  b: Back")
+		if helpWidth := lipgloss.Width(helpLine); helpWidth < m.maxContentWidth {
+			helpLine += strings.Repeat(" ", m.maxContentWidth-helpWidth)
+		}
+		b.WriteString(helpLine)
 
 	case detailStateError:
 		b.WriteString(m.styles.Title.Render("Game Details"))
@@ -325,7 +379,7 @@ func (m detailModel) View(width, height int) string {
 	}
 
 	content := b.String()
-	return transmit + lipgloss.NewStyle().Width(width).Height(height).Padding(2, 4).Render(content)
+	return transmit + centerContent(content, width, height)
 }
 
 // wrapText wraps text to the specified width.

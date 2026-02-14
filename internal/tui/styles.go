@@ -149,5 +149,20 @@ func centerContent(content string, width, height int) string {
 	}
 
 	result := strings.Repeat("\n", topPadding) + strings.Join(centered, "\n")
-	return lipgloss.NewStyle().Width(width).Height(height).Render(result)
+
+	// Ensure output is exactly `height` lines (truncate excess, pad shortfall)
+	resultLines := strings.Split(result, "\n")
+	if len(resultLines) > height {
+		resultLines = resultLines[:height]
+	}
+	for len(resultLines) < height {
+		resultLines = append(resultLines, "")
+	}
+	// Pad each line to full width to clear previous screen content
+	for i, line := range resultLines {
+		if w := lipgloss.Width(line); w < width {
+			resultLines[i] = line + strings.Repeat(" ", width-w)
+		}
+	}
+	return strings.Join(resultLines, "\n")
 }
