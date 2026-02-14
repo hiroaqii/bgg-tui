@@ -84,8 +84,8 @@ func New(cfg *config.Config) Model {
 		menu:         newMenuModel(styles, keys, cfg.HasToken()),
 		settings:     newSettingsModel(cfg, styles, keys),
 		search:       newSearchModel(styles, keys),
-		hot:          newHotModel(styles, keys),
-		collection:   newCollectionModel(cfg, styles, keys),
+		hot:          newHotModel(styles, keys, imgEnabled, imgCache),
+		collection:   newCollectionModel(cfg, styles, keys, imgEnabled, imgCache),
 		imageEnabled: imgEnabled,
 		imageCache:   imgCache,
 	}
@@ -172,11 +172,11 @@ func (m Model) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, textinput.Blink
 		case ViewHot:
 			m.currentView = ViewHot
-			m.hot = newHotModel(m.styles, m.keys)
+			m.hot = newHotModel(m.styles, m.keys, m.imageEnabled, m.imageCache)
 			return m, m.hot.loadHotGames(m.bggClient)
 		case ViewCollectionInput:
 			m.currentView = ViewCollectionInput
-			m.collection = newCollectionModel(m.config, m.styles, m.keys)
+			m.collection = newCollectionModel(m.config, m.styles, m.keys, m.imageEnabled, m.imageCache)
 			return m, textinput.Blink
 		}
 	}
@@ -233,6 +233,9 @@ func (m Model) updateHot(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.hot.wantsBack {
 		m.hot.wantsBack = false
 		m.currentView = ViewMenu
+		if m.imageEnabled {
+			m.needsClearImages = true
+		}
 	}
 
 	// Handle detail selection
@@ -242,6 +245,9 @@ func (m Model) updateHot(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.previousView = ViewHot
 		m.detail = newDetailModel(gameID, m.styles, m.keys, m.imageEnabled, m.imageCache)
 		m.currentView = ViewDetail
+		if m.imageEnabled {
+			m.needsClearImages = true
+		}
 		return m, m.detail.loadGame(m.bggClient)
 	}
 
@@ -263,6 +269,9 @@ func (m Model) updateCollection(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.collection.wantsBack {
 		m.collection.wantsBack = false
 		m.currentView = ViewMenu
+		if m.imageEnabled {
+			m.needsClearImages = true
+		}
 	}
 
 	// Handle detail selection
@@ -272,6 +281,9 @@ func (m Model) updateCollection(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.previousView = ViewCollectionList
 		m.detail = newDetailModel(gameID, m.styles, m.keys, m.imageEnabled, m.imageCache)
 		m.currentView = ViewDetail
+		if m.imageEnabled {
+			m.needsClearImages = true
+		}
 		return m, m.detail.loadGame(m.bggClient)
 	}
 

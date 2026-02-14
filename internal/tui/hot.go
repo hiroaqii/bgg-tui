@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	bgg "github.com/hiroaqii/go-bgg"
 )
@@ -32,6 +33,14 @@ type hotModel struct {
 	filtering     bool
 	filterInput   textinput.Model
 	filteredGames []bgg.HotGame
+
+	// Image fields
+	imageEnabled   bool
+	cache          *imageCache
+	imgTransmit    string
+	imgPlaceholder string
+	imgLoading     bool
+	lastThumbURL   string
 }
 
 // hotResultMsg is sent when hot games are received.
@@ -40,11 +49,13 @@ type hotResultMsg struct {
 	err   error
 }
 
-func newHotModel(styles Styles, keys KeyMap) hotModel {
+func newHotModel(styles Styles, keys KeyMap, imageEnabled bool, cache *imageCache) hotModel {
 	return hotModel{
-		state:  hotStateLoading,
-		styles: styles,
-		keys:   keys,
+		state:        hotStateLoading,
+		styles:       styles,
+		keys:         keys,
+		imageEnabled: imageEnabled,
+		cache:        cache,
 	}
 }
 
@@ -56,6 +67,32 @@ func (m hotModel) loadHotGames(client *bgg.Client) tea.Cmd {
 		games, err := client.GetHotGames()
 		return hotResultMsg{games: games, err: err}
 	}
+}
+
+func (m hotModel) currentThumbURL() string {
+	items := m.games
+	if m.filtering || m.filteredGames != nil {
+		items = m.filteredGames
+	}
+	if m.cursor >= 0 && m.cursor < len(items) {
+		return items[m.cursor].Thumbnail
+	}
+	return ""
+}
+
+func (m hotModel) maybeLoadThumb() (hotModel, tea.Cmd) {
+	if !m.imageEnabled || m.cache == nil {
+		return m, nil
+	}
+	url := m.currentThumbURL()
+	if url == "" || url == m.lastThumbURL {
+		return m, nil
+	}
+	m.lastThumbURL = url
+	m.imgLoading = true
+	m.imgTransmit = ""
+	m.imgPlaceholder = ""
+	return m, loadListImage(m.cache, url)
 }
 
 func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
@@ -70,11 +107,25 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 				m.state = hotStateResults
 				m.games = msg.games
 				m.cursor = 0
+				m, cmd := m.maybeLoadThumb()
+				return m, cmd
 			}
 		}
 		return m, nil
 
 	case hotStateResults:
+		// Handle image loaded
+		if msg, ok := msg.(listImageMsg); ok {
+			if msg.url == m.lastThumbURL {
+				m.imgLoading = false
+				if msg.err == nil {
+					m.imgTransmit = msg.imgTransmit
+					m.imgPlaceholder = msg.imgPlaceholder
+				}
+			}
+			return m, nil
+		}
+
 		if m.filtering {
 			switch msg := msg.(type) {
 			case tea.KeyMsg:
@@ -84,7 +135,8 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 					m.filteredGames = nil
 					m.filterInput.SetValue("")
 					m.cursor = 0
-					return m, nil
+					m, cmd := m.maybeLoadThumb()
+					return m, cmd
 				case key.Matches(msg, m.keys.Enter):
 					if len(m.filteredGames) > 0 {
 						id := m.filteredGames[m.cursor].ID
@@ -95,12 +147,14 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 					if m.cursor > 0 {
 						m.cursor--
 					}
-					return m, nil
+					m, cmd := m.maybeLoadThumb()
+					return m, cmd
 				case msg.String() == "down":
 					if m.cursor < len(m.filteredGames)-1 {
 						m.cursor++
 					}
-					return m, nil
+					m, cmd := m.maybeLoadThumb()
+					return m, cmd
 				}
 			}
 			var cmd tea.Cmd
@@ -115,7 +169,8 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 			if m.cursor >= len(m.filteredGames) {
 				m.cursor = max(0, len(m.filteredGames)-1)
 			}
-			return m, cmd
+			m2, cmd2 := m.maybeLoadThumb()
+			return m2, tea.Batch(cmd, cmd2)
 		}
 
 		switch msg := msg.(type) {
@@ -125,10 +180,14 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 				if m.cursor > 0 {
 					m.cursor--
 				}
+				m, cmd := m.maybeLoadThumb()
+				return m, cmd
 			case key.Matches(msg, m.keys.Down):
 				if m.cursor < len(m.games)-1 {
 					m.cursor++
 				}
+				m, cmd := m.maybeLoadThumb()
+				return m, cmd
 			case key.Matches(msg, m.keys.Enter):
 				if len(m.games) > 0 {
 					id := m.games[m.cursor].ID
@@ -141,7 +200,8 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 				m.filteredGames = make([]bgg.HotGame, len(m.games))
 				copy(m.filteredGames, m.games)
 				m.cursor = 0
-				return m, textinput.Blink
+				m, cmd := m.maybeLoadThumb()
+				return m, tea.Batch(textinput.Blink, cmd)
 			case key.Matches(msg, m.keys.Refresh):
 				m.state = hotStateLoading
 				m.games = nil
@@ -173,6 +233,7 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 
 func (m hotModel) View(width, height int) string {
 	var b strings.Builder
+	var transmit string
 
 	switch m.state {
 	case hotStateLoading:
@@ -239,6 +300,20 @@ func (m hotModel) View(width, height int) string {
 			b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Detail  /: Filter  r: Refresh  b: Back"))
 		}
 
+		// Add image panel
+		if m.imageEnabled && m.imgPlaceholder != "" {
+			transmit = m.imgTransmit
+			listContent := b.String()
+			imgPanel := "\n" + m.imgPlaceholder + "\n"
+			b.Reset()
+			b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listContent, "  ", imgPanel))
+		} else if m.imageEnabled && m.imgLoading {
+			listContent := b.String()
+			imgPanel := "\n" + fixedSizeLoadingPanel(listImageCols, listImageRows) + "\n"
+			b.Reset()
+			b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listContent, "  ", imgPanel))
+		}
+
 	case hotStateError:
 		b.WriteString(m.styles.Title.Render("Hot Games"))
 		b.WriteString("\n\n")
@@ -248,5 +323,5 @@ func (m hotModel) View(width, height int) string {
 	}
 
 	content := b.String()
-	return centerContent(content, width, height)
+	return transmit + centerContent(content, width, height)
 }

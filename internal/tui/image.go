@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/image/draw"
 
 	_ "image/gif"
@@ -211,29 +213,129 @@ func kittyPlaceholder(id uint32, rows, cols int) string {
 	r := (id >> 16) & 0xFF
 	g := (id >> 8) & 0xFF
 	b := id & 0xFF
-	fmt.Fprintf(&sb, "\033[38;2;%d;%d;%dm", r, g, b)
-
 	placeholder := "\U0010EEEE"
 	for row := 0; row < rows; row++ {
+		fmt.Fprintf(&sb, "\033[38;2;%d;%d;%dm", r, g, b)
 		for col := 0; col < cols; col++ {
 			sb.WriteString(placeholder)
 			if row < len(kittyRowDiacritics) {
 				sb.WriteRune(kittyRowDiacritics[row])
 			}
 		}
+		sb.WriteString("\033[39m")
 		if row < rows-1 {
 			sb.WriteString("\n")
 		}
 	}
-
-	sb.WriteString("\033[39m")
 	return sb.String()
 }
 
-// imageLoadedMsg is sent when an image has been loaded and rendered.
+// imageLoadedMsg is sent when an image has been loaded and rendered (Detail view).
 type imageLoadedMsg struct {
 	url            string
 	imgTransmit    string // APC transmit sequence
 	imgPlaceholder string // Unicode placeholder grid
 	err            error
+}
+
+const listImageID uint32 = 2 // Detail uses 1
+
+// listImageMsg is sent when a list thumbnail has been loaded (Hot/Collection views).
+type listImageMsg struct {
+	url            string
+	imgTransmit    string
+	imgPlaceholder string
+	err            error
+}
+
+const listImageCols = 14
+const listImageRows = 8
+
+// padPlaceholder pads a placeholder string to exactly rows lines of cols width.
+// Each line is right-padded with spaces to cols width, and missing rows are filled
+// with cols-width blank lines.
+func padPlaceholder(s string, rows, cols int) string {
+	lines := strings.Split(s, "\n")
+	blank := strings.Repeat(" ", cols)
+	var sb strings.Builder
+	for i := 0; i < rows; i++ {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		if i < len(lines) {
+			sb.WriteString(lines[i])
+			// Pad to cols width if the line is shorter
+			// Use lipgloss.Width to measure visible width (ignoring ANSI escapes)
+			w := lipgloss.Width(lines[i])
+			if w < cols {
+				sb.WriteString(strings.Repeat(" ", cols-w))
+			}
+		} else {
+			sb.WriteString(blank)
+		}
+	}
+	return sb.String()
+}
+
+// fixedSizeLoadingPanel returns a fixed-size block for the loading state.
+// The block is rows lines tall and cols columns wide, with "Loading..." centered
+// vertically in the first line and the rest filled with spaces.
+func fixedSizeLoadingPanel(cols, rows int) string {
+	blank := strings.Repeat(" ", cols)
+	var sb strings.Builder
+	for i := 0; i < rows; i++ {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		if i == 0 {
+			label := "Loading..."
+			if len(label) < cols {
+				sb.WriteString(label)
+				sb.WriteString(strings.Repeat(" ", cols-len(label)))
+			} else {
+				sb.WriteString(label[:cols])
+			}
+		} else {
+			sb.WriteString(blank)
+		}
+	}
+	return sb.String()
+}
+
+// loadListImage loads a thumbnail image for list views (hot/collection).
+func loadListImage(cache *imageCache, url string) tea.Cmd {
+	return func() tea.Msg {
+		path, err := cache.Download(url)
+		if err != nil {
+			return listImageMsg{url: url, err: err}
+		}
+
+		cellW, cellH := termCellSize()
+		pixW := listImageCols * cellW
+		pixH := listImageRows * cellH
+
+		img, err := loadAndResize(path, pixW, pixH)
+		if err != nil {
+			return listImageMsg{url: url, err: err}
+		}
+
+		bounds := img.Bounds()
+		actualCols := (bounds.Dx() + cellW - 1) / cellW
+		actualRows := (bounds.Dy() + cellH - 1) / cellH
+		if actualCols < 1 {
+			actualCols = 1
+		}
+		if actualRows < 1 {
+			actualRows = 1
+		}
+
+		transmit, err := kittyTransmitString(img, listImageID)
+		if err != nil {
+			return listImageMsg{url: url, err: err}
+		}
+
+		placeholder := kittyPlaceholder(listImageID, actualRows, actualCols)
+		placeholder = padPlaceholder(placeholder, listImageRows, listImageCols)
+		return listImageMsg{url: url, imgTransmit: transmit, imgPlaceholder: placeholder}
+	}
 }

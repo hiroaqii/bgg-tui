@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	bgg "github.com/hiroaqii/go-bgg"
 
@@ -37,6 +38,14 @@ type collectionModel struct {
 	filtering     bool
 	filterInput   textinput.Model
 	filteredItems []bgg.CollectionItem
+
+	// Image fields
+	imageEnabled   bool
+	cache          *imageCache
+	imgTransmit    string
+	imgPlaceholder string
+	imgLoading     bool
+	lastThumbURL   string
 }
 
 // collectionResultMsg is sent when collection results are received.
@@ -45,7 +54,7 @@ type collectionResultMsg struct {
 	err   error
 }
 
-func newCollectionModel(cfg *config.Config, styles Styles, keys KeyMap) collectionModel {
+func newCollectionModel(cfg *config.Config, styles Styles, keys KeyMap, imageEnabled bool, cache *imageCache) collectionModel {
 	ti := textinput.New()
 	ti.Placeholder = "Enter BGG username..."
 	ti.CharLimit = 64
@@ -54,11 +63,13 @@ func newCollectionModel(cfg *config.Config, styles Styles, keys KeyMap) collecti
 	ti.Focus()
 
 	return collectionModel{
-		state:  collectionStateInput,
-		styles: styles,
-		keys:   keys,
-		config: cfg,
-		input:  ti,
+		state:        collectionStateInput,
+		styles:       styles,
+		keys:         keys,
+		config:       cfg,
+		input:        ti,
+		imageEnabled: imageEnabled,
+		cache:        cache,
 	}
 }
 
@@ -73,6 +84,32 @@ func (m collectionModel) loadCollection(client *bgg.Client, username string, own
 		items, err := client.GetCollection(username, opts)
 		return collectionResultMsg{items: items, err: err}
 	}
+}
+
+func (m collectionModel) currentThumbURL() string {
+	items := m.items
+	if m.filtering || m.filteredItems != nil {
+		items = m.filteredItems
+	}
+	if m.cursor >= 0 && m.cursor < len(items) {
+		return items[m.cursor].Thumbnail
+	}
+	return ""
+}
+
+func (m collectionModel) maybeLoadThumb() (collectionModel, tea.Cmd) {
+	if !m.imageEnabled || m.cache == nil {
+		return m, nil
+	}
+	url := m.currentThumbURL()
+	if url == "" || url == m.lastThumbURL {
+		return m, nil
+	}
+	m.lastThumbURL = url
+	m.imgLoading = true
+	m.imgTransmit = ""
+	m.imgPlaceholder = ""
+	return m, loadListImage(m.cache, url)
 }
 
 func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionModel, tea.Cmd) {
@@ -107,11 +144,25 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 				m.state = collectionStateResults
 				m.items = msg.items
 				m.cursor = 0
+				m, cmd := m.maybeLoadThumb()
+				return m, cmd
 			}
 		}
 		return m, nil
 
 	case collectionStateResults:
+		// Handle image loaded
+		if msg, ok := msg.(listImageMsg); ok {
+			if msg.url == m.lastThumbURL {
+				m.imgLoading = false
+				if msg.err == nil {
+					m.imgTransmit = msg.imgTransmit
+					m.imgPlaceholder = msg.imgPlaceholder
+				}
+			}
+			return m, nil
+		}
+
 		if m.filtering {
 			switch msg := msg.(type) {
 			case tea.KeyMsg:
@@ -121,7 +172,8 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 					m.filteredItems = nil
 					m.filterInput.SetValue("")
 					m.cursor = 0
-					return m, nil
+					m, cmd := m.maybeLoadThumb()
+					return m, cmd
 				case key.Matches(msg, m.keys.Enter):
 					if len(m.filteredItems) > 0 {
 						id := m.filteredItems[m.cursor].ID
@@ -132,12 +184,14 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 					if m.cursor > 0 {
 						m.cursor--
 					}
-					return m, nil
+					m, cmd := m.maybeLoadThumb()
+					return m, cmd
 				case msg.String() == "down":
 					if m.cursor < len(m.filteredItems)-1 {
 						m.cursor++
 					}
-					return m, nil
+					m, cmd := m.maybeLoadThumb()
+					return m, cmd
 				}
 			}
 			m.filterInput, cmd = m.filterInput.Update(msg)
@@ -151,7 +205,8 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 			if m.cursor >= len(m.filteredItems) {
 				m.cursor = max(0, len(m.filteredItems)-1)
 			}
-			return m, cmd
+			m2, cmd2 := m.maybeLoadThumb()
+			return m2, tea.Batch(cmd, cmd2)
 		}
 
 		switch msg := msg.(type) {
@@ -161,10 +216,14 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 				if m.cursor > 0 {
 					m.cursor--
 				}
+				m, cmd := m.maybeLoadThumb()
+				return m, cmd
 			case key.Matches(msg, m.keys.Down):
 				if m.cursor < len(m.items)-1 {
 					m.cursor++
 				}
+				m, cmd := m.maybeLoadThumb()
+				return m, cmd
 			case key.Matches(msg, m.keys.Enter):
 				if len(m.items) > 0 {
 					id := m.items[m.cursor].ID
@@ -177,7 +236,8 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 				m.filteredItems = make([]bgg.CollectionItem, len(m.items))
 				copy(m.filteredItems, m.items)
 				m.cursor = 0
-				return m, textinput.Blink
+				m, cmd := m.maybeLoadThumb()
+				return m, tea.Batch(textinput.Blink, cmd)
 			case key.Matches(msg, m.keys.User):
 				// Change user - go back to input
 				m.state = collectionStateInput
@@ -213,6 +273,7 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 
 func (m collectionModel) View(width, height int) string {
 	var b strings.Builder
+	var transmit string
 
 	switch m.state {
 	case collectionStateInput:
@@ -295,6 +356,20 @@ func (m collectionModel) View(width, height int) string {
 			b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Detail  /: Filter  u: Change User  b: Back"))
 		}
 
+		// Add image panel
+		if m.imageEnabled && m.imgPlaceholder != "" {
+			transmit = m.imgTransmit
+			listContent := b.String()
+			imgPanel := "\n" + m.imgPlaceholder + "\n"
+			b.Reset()
+			b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listContent, "  ", imgPanel))
+		} else if m.imageEnabled && m.imgLoading {
+			listContent := b.String()
+			imgPanel := "\n" + fixedSizeLoadingPanel(listImageCols, listImageRows) + "\n"
+			b.Reset()
+			b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listContent, "  ", imgPanel))
+		}
+
 	case collectionStateError:
 		b.WriteString(m.styles.Title.Render("User Collection"))
 		b.WriteString("\n\n")
@@ -304,5 +379,5 @@ func (m collectionModel) View(width, height int) string {
 	}
 
 	content := b.String()
-	return centerContent(content, width, height)
+	return transmit + centerContent(content, width, height)
 }
