@@ -6,6 +6,50 @@ import (
 	bgg "github.com/hiroaqii/go-bgg"
 )
 
+func TestParseDate(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		wantZero bool
+		wantYear int
+	}{
+		{"RFC 2822 format", "Tue, 10 Feb 2025 14:30:00 +0000", false, 2025},
+		{"RFC 2822 with offset", "Fri, 20 Dec 2024 08:32:00 -0600", false, 2024},
+		{"RFC 1123 with MST", "Mon, 02 Jan 2006 15:04:05 MST", false, 2006},
+		{"RFC 3339 format", "2024-12-20T08:32:00-06:00", false, 2024},
+		{"RFC 3339 UTC", "2025-01-15T00:00:00Z", false, 2025},
+		{"empty string", "", true, 0},
+		{"unparseable", "unknown", true, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseDate(tt.input)
+			if tt.wantZero {
+				if !got.IsZero() {
+					t.Errorf("parseDate(%q) = %v, want zero time", tt.input, got)
+				}
+			} else {
+				if got.IsZero() {
+					t.Errorf("parseDate(%q) returned zero time, want year %d", tt.input, tt.wantYear)
+				}
+				if got.Year() != tt.wantYear {
+					t.Errorf("parseDate(%q).Year() = %d, want %d", tt.input, got.Year(), tt.wantYear)
+				}
+			}
+		})
+	}
+
+	t.Run("correct ordering", func(t *testing.T) {
+		older := parseDate("Fri, 20 Dec 2024 08:32:00 +0000")
+		newer := parseDate("Tue, 10 Feb 2025 14:30:00 +0000")
+		if !newer.After(older) {
+			t.Errorf("expected %v to be after %v", newer, older)
+		}
+	})
+
+}
+
 func TestFormatDate(t *testing.T) {
 	tests := []struct {
 		name  string

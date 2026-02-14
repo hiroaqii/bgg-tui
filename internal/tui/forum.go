@@ -96,7 +96,7 @@ func (m forumModel) Update(msg tea.Msg, client *bgg.Client) (forumModel, tea.Cmd
 				m.forums = msg.forums
 				// Sort by last post date (descending)
 				sort.Slice(m.forums, func(i, j int) bool {
-					return m.forums[i].LastPostDate > m.forums[j].LastPostDate
+					return parseDate(m.forums[i].LastPostDate).After(parseDate(m.forums[j].LastPostDate))
 				})
 				m.forumCursor = 0
 			}
@@ -329,13 +329,9 @@ func formatForumColumns(forums []bgg.Forum) (titles []string, metas []string) {
 	return
 }
 
-// formatDate formats a date string for display.
-// Parses RFC 2822 ("Mon, 02 Jan 2006 15:04:05 -0700") and RFC 3339/ISO 8601 formats.
-// Output format: "2006-01-02 15:04"
-func formatDate(dateStr string) string {
-	if dateStr == "" {
-		return ""
-	}
+// parseDate parses a date string into time.Time.
+// Returns zero time if parsing fails.
+func parseDate(dateStr string) time.Time {
 	formats := []string{
 		time.RFC1123Z, // "Mon, 02 Jan 2006 15:04:05 -0700"
 		time.RFC1123,  // "Mon, 02 Jan 2006 15:04:05 MST"
@@ -343,8 +339,21 @@ func formatDate(dateStr string) string {
 	}
 	for _, layout := range formats {
 		if t, err := time.Parse(layout, dateStr); err == nil {
-			return t.Format("2006-01-02 15:04")
+			return t
 		}
 	}
-	return dateStr
+	return time.Time{}
+}
+
+// formatDate formats a date string for display.
+// Output format: "2006-01-02 15:04"
+func formatDate(dateStr string) string {
+	if dateStr == "" {
+		return ""
+	}
+	t := parseDate(dateStr)
+	if t.IsZero() {
+		return dateStr
+	}
+	return t.Format("2006-01-02 15:04")
 }
