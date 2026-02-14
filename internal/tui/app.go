@@ -1,8 +1,13 @@
 package tui
 
 import (
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	bgg "github.com/hiroaqii/go-bgg"
 
@@ -38,9 +43,12 @@ type Model struct {
 	previousView View
 
 	// Image support
-	imageEnabled    bool
-	imageCache      *imageCache
+	imageEnabled     bool
+	imageCache       *imageCache
 	needsClearImages bool
+
+	// Help overlay
+	showHelp bool
 }
 
 // New creates a new application model.
@@ -109,6 +117,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if msg, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width = msg.Width
 		m.height = msg.Height
+	}
+
+	// Help overlay handling
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		if m.showHelp {
+			// Any key closes the help overlay
+			m.showHelp = false
+			return m, nil
+		}
+		if key.Matches(keyMsg, m.keys.Help) {
+			m.showHelp = true
+			return m, nil
+		}
 	}
 
 	// Delegate to current view
@@ -363,6 +384,10 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View implements tea.Model.
 func (m Model) View() string {
+	if m.showHelp {
+		return m.renderHelpOverlay()
+	}
+
 	var prefix string
 	if m.needsClearImages {
 		prefix = kittyDeleteSeq
@@ -389,4 +414,54 @@ func (m Model) View() string {
 		return prefix + m.thread.View(m.width, m.height)
 	}
 	return ""
+}
+
+// renderHelpOverlay renders a centered keybindings overlay.
+func (m Model) renderHelpOverlay() string {
+	groups := m.keys.FullHelp()
+
+	// Build two-column rows: groups[0]+groups[1], groups[2]+groups[3]
+	var rows []string
+	for i := 0; i < len(groups); i += 2 {
+		left := groups[i]
+		var right []key.Binding
+		if i+1 < len(groups) {
+			right = groups[i+1]
+		}
+
+		maxLen := len(left)
+		if len(right) > maxLen {
+			maxLen = len(right)
+		}
+
+		for j := 0; j < maxLen; j++ {
+			var lKey, lDesc, rKey, rDesc string
+			if j < len(left) {
+				lKey = left[j].Help().Key
+				lDesc = left[j].Help().Desc
+			}
+			if j < len(right) {
+				rKey = right[j].Help().Key
+				rDesc = right[j].Help().Desc
+			}
+			row := fmt.Sprintf("  %-10s %-14s %-10s %s", lKey, lDesc, rKey, rDesc)
+			rows = append(rows, row)
+		}
+		rows = append(rows, "")
+	}
+
+	title := lipgloss.NewStyle().Bold(true).Foreground(ColorPrimary).Render("Keybindings")
+	footer := lipgloss.NewStyle().Foreground(ColorMuted).Render("Press any key to close")
+
+	var b strings.Builder
+	b.WriteString(lipgloss.PlaceHorizontal(40, lipgloss.Center, title))
+	b.WriteString("\n")
+	for _, row := range rows {
+		b.WriteString(row)
+		b.WriteString("\n")
+	}
+	b.WriteString(lipgloss.PlaceHorizontal(40, lipgloss.Center, footer))
+
+	content := m.styles.Border.Render(b.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }

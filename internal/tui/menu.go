@@ -111,7 +111,7 @@ func (m menuModel) View(width, height int) string {
 
 	// Help
 	b.WriteString("\n")
-	help := m.styles.Help.Render("j/k: Navigate  Enter: Select  q: Quit")
+	help := m.styles.Help.Render("j/k: Navigate  Enter: Select  ?: Help  q: Quit")
 	b.WriteString(help)
 
 	// Center the content

@@ -307,7 +307,7 @@ func (m detailModel) View(width, height int) string {
 		}
 
 		b.WriteString("\n")
-		b.WriteString(m.styles.Help.Render("j/k: Scroll  o: Open BGG  f: Forum  b: Back"))
+		b.WriteString(m.styles.Help.Render("j/k: Scroll  o: Open BGG  f: Forum  ?: Help  b: Back"))
 
 	case detailStateError:
 		b.WriteString(m.styles.Title.Render("Game Details"))

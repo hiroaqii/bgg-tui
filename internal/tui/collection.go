@@ -353,7 +353,7 @@ func (m collectionModel) View(width, height int) string {
 		if m.filtering {
 			b.WriteString(m.styles.Help.Render("↑/↓: Navigate  Enter: Detail  Esc: Clear filter"))
 		} else {
-			b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Detail  /: Filter  u: Change User  b: Back"))
+			b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Detail  /: Filter  u: Change User  ?: Help  b: Back"))
 		}
 
 		// Add image panel
