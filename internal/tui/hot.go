@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
 	bgg "github.com/hiroaqii/go-bgg"
@@ -27,6 +28,10 @@ type hotModel struct {
 	errMsg    string
 	selected  *int // Selected game ID for detail view
 	wantsBack bool
+
+	filtering     bool
+	filterInput   textinput.Model
+	filteredGames []bgg.HotGame
 }
 
 // hotResultMsg is sent when hot games are received.
@@ -70,6 +75,49 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 		return m, nil
 
 	case hotStateResults:
+		if m.filtering {
+			switch msg := msg.(type) {
+			case tea.KeyMsg:
+				switch {
+				case key.Matches(msg, m.keys.Escape):
+					m.filtering = false
+					m.filteredGames = nil
+					m.filterInput.SetValue("")
+					m.cursor = 0
+					return m, nil
+				case key.Matches(msg, m.keys.Enter):
+					if len(m.filteredGames) > 0 {
+						id := m.filteredGames[m.cursor].ID
+						m.selected = &id
+					}
+					return m, nil
+				case msg.String() == "up":
+					if m.cursor > 0 {
+						m.cursor--
+					}
+					return m, nil
+				case msg.String() == "down":
+					if m.cursor < len(m.filteredGames)-1 {
+						m.cursor++
+					}
+					return m, nil
+				}
+			}
+			var cmd tea.Cmd
+			m.filterInput, cmd = m.filterInput.Update(msg)
+			query := strings.ToLower(m.filterInput.Value())
+			m.filteredGames = nil
+			for _, g := range m.games {
+				if strings.Contains(strings.ToLower(g.Name), query) {
+					m.filteredGames = append(m.filteredGames, g)
+				}
+			}
+			if m.cursor >= len(m.filteredGames) {
+				m.cursor = max(0, len(m.filteredGames)-1)
+			}
+			return m, cmd
+		}
+
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch {
@@ -86,6 +134,14 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 					id := m.games[m.cursor].ID
 					m.selected = &id
 				}
+			case key.Matches(msg, m.keys.Filter):
+				m.filtering = true
+				m.filterInput = newFilterInput()
+				m.filterInput.Focus()
+				m.filteredGames = make([]bgg.HotGame, len(m.games))
+				copy(m.filteredGames, m.games)
+				m.cursor = 0
+				return m, textinput.Blink
 			case key.Matches(msg, m.keys.Refresh):
 				m.state = hotStateLoading
 				m.games = nil
@@ -126,11 +182,21 @@ func (m hotModel) View(width, height int) string {
 
 	case hotStateResults:
 		b.WriteString(m.styles.Title.Render("Hot Games"))
+		if m.filtering {
+			b.WriteString("  Filter: ")
+			b.WriteString(m.filterInput.View())
+		}
 		b.WriteString("\n")
-		b.WriteString(m.styles.Subtitle.Render("Top 50 trending games on BGG"))
+
+		displayItems := m.games
+		if m.filtering || m.filteredGames != nil {
+			displayItems = m.filteredGames
+		}
+
+		b.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("%d/%d trending games", len(displayItems), len(m.games))))
 		b.WriteString("\n\n")
 
-		if len(m.games) == 0 {
+		if len(displayItems) == 0 {
 			b.WriteString(m.styles.Subtitle.Render("No games found."))
 			b.WriteString("\n")
 		} else {
@@ -141,12 +207,12 @@ func (m hotModel) View(width, height int) string {
 				start = m.cursor - visible + 1
 			}
 			end := start + visible
-			if end > len(m.games) {
-				end = len(m.games)
+			if end > len(displayItems) {
+				end = len(displayItems)
 			}
 
 			for i := start; i < end; i++ {
-				game := m.games[i]
+				game := displayItems[i]
 				cursor := "  "
 				style := m.styles.ListItem
 				if i == m.cursor {
@@ -167,7 +233,11 @@ func (m hotModel) View(width, height int) string {
 		}
 
 		b.WriteString("\n")
-		b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Detail  r: Refresh  b: Back"))
+		if m.filtering {
+			b.WriteString(m.styles.Help.Render("↑/↓: Navigate  Enter: Detail  Esc: Clear filter"))
+		} else {
+			b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Detail  /: Filter  r: Refresh  b: Back"))
+		}
 
 	case hotStateError:
 		b.WriteString(m.styles.Title.Render("Hot Games"))

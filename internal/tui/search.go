@@ -30,6 +30,10 @@ type searchModel struct {
 	errMsg   string
 	selected *int // Selected game ID for detail view
 
+	filtering       bool
+	filterInput     textinput.Model
+	filteredResults []bgg.GameSearchResult
+
 	wantsBack bool
 }
 
@@ -101,6 +105,50 @@ func (m searchModel) Update(msg tea.Msg, client *bgg.Client) (searchModel, tea.C
 		return m, nil
 
 	case searchStateResults:
+		if m.filtering {
+			switch msg := msg.(type) {
+			case tea.KeyMsg:
+				switch {
+				case key.Matches(msg, m.keys.Escape):
+					m.filtering = false
+					m.filteredResults = nil
+					m.filterInput.SetValue("")
+					m.cursor = 0
+					return m, nil
+				case key.Matches(msg, m.keys.Enter):
+					if len(m.filteredResults) > 0 {
+						id := m.filteredResults[m.cursor].ID
+						m.selected = &id
+					}
+					return m, nil
+				case msg.String() == "up":
+					if m.cursor > 0 {
+						m.cursor--
+					}
+					return m, nil
+				case msg.String() == "down":
+					if m.cursor < len(m.filteredResults)-1 {
+						m.cursor++
+					}
+					return m, nil
+				}
+			}
+			var cmd tea.Cmd
+			m.filterInput, cmd = m.filterInput.Update(msg)
+			// Recompute filtered results
+			query := strings.ToLower(m.filterInput.Value())
+			m.filteredResults = nil
+			for _, r := range m.results {
+				if strings.Contains(strings.ToLower(r.Name), query) {
+					m.filteredResults = append(m.filteredResults, r)
+				}
+			}
+			if m.cursor >= len(m.filteredResults) {
+				m.cursor = max(0, len(m.filteredResults)-1)
+			}
+			return m, cmd
+		}
+
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch {
@@ -117,6 +165,14 @@ func (m searchModel) Update(msg tea.Msg, client *bgg.Client) (searchModel, tea.C
 					id := m.results[m.cursor].ID
 					m.selected = &id
 				}
+			case key.Matches(msg, m.keys.Filter):
+				m.filtering = true
+				m.filterInput = newFilterInput()
+				m.filterInput.Focus()
+				m.filteredResults = make([]bgg.GameSearchResult, len(m.results))
+				copy(m.filteredResults, m.results)
+				m.cursor = 0
+				return m, textinput.Blink
 			case key.Matches(msg, m.keys.Search):
 				// New search
 				m.state = searchStateInput
@@ -170,11 +226,21 @@ func (m searchModel) View(width, height int) string {
 
 	case searchStateResults:
 		b.WriteString(m.styles.Title.Render("Search Results"))
+		if m.filtering {
+			b.WriteString("  Filter: ")
+			b.WriteString(m.filterInput.View())
+		}
 		b.WriteString("\n")
-		b.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("%d games found", len(m.results))))
+
+		displayItems := m.results
+		if m.filtering || m.filteredResults != nil {
+			displayItems = m.filteredResults
+		}
+
+		b.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("%d/%d games found", len(displayItems), len(m.results))))
 		b.WriteString("\n\n")
 
-		if len(m.results) == 0 {
+		if len(displayItems) == 0 {
 			b.WriteString(m.styles.Subtitle.Render("No results found."))
 			b.WriteString("\n")
 		} else {
@@ -185,12 +251,12 @@ func (m searchModel) View(width, height int) string {
 				start = m.cursor - visible + 1
 			}
 			end := start + visible
-			if end > len(m.results) {
-				end = len(m.results)
+			if end > len(displayItems) {
+				end = len(displayItems)
 			}
 
 			for i := start; i < end; i++ {
-				result := m.results[i]
+				result := displayItems[i]
 				cursor := "  "
 				style := m.styles.ListItem
 				if i == m.cursor {
@@ -216,7 +282,11 @@ func (m searchModel) View(width, height int) string {
 		}
 
 		b.WriteString("\n")
-		b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Detail  s: New Search  b: Back"))
+		if m.filtering {
+			b.WriteString(m.styles.Help.Render("↑/↓: Navigate  Enter: Detail  Esc: Clear filter"))
+		} else {
+			b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Detail  /: Filter  s: New Search  b: Back"))
+		}
 
 	case searchStateError:
 		b.WriteString(m.styles.Title.Render("Search Games"))

@@ -33,6 +33,10 @@ type collectionModel struct {
 	errMsg    string
 	selected  *int // Selected game ID for detail view
 	wantsBack bool
+
+	filtering     bool
+	filterInput   textinput.Model
+	filteredItems []bgg.CollectionItem
 }
 
 // collectionResultMsg is sent when collection results are received.
@@ -108,6 +112,48 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 		return m, nil
 
 	case collectionStateResults:
+		if m.filtering {
+			switch msg := msg.(type) {
+			case tea.KeyMsg:
+				switch {
+				case key.Matches(msg, m.keys.Escape):
+					m.filtering = false
+					m.filteredItems = nil
+					m.filterInput.SetValue("")
+					m.cursor = 0
+					return m, nil
+				case key.Matches(msg, m.keys.Enter):
+					if len(m.filteredItems) > 0 {
+						id := m.filteredItems[m.cursor].ID
+						m.selected = &id
+					}
+					return m, nil
+				case msg.String() == "up":
+					if m.cursor > 0 {
+						m.cursor--
+					}
+					return m, nil
+				case msg.String() == "down":
+					if m.cursor < len(m.filteredItems)-1 {
+						m.cursor++
+					}
+					return m, nil
+				}
+			}
+			m.filterInput, cmd = m.filterInput.Update(msg)
+			query := strings.ToLower(m.filterInput.Value())
+			m.filteredItems = nil
+			for _, item := range m.items {
+				if strings.Contains(strings.ToLower(item.Name), query) {
+					m.filteredItems = append(m.filteredItems, item)
+				}
+			}
+			if m.cursor >= len(m.filteredItems) {
+				m.cursor = max(0, len(m.filteredItems)-1)
+			}
+			return m, cmd
+		}
+
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch {
@@ -124,6 +170,14 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 					id := m.items[m.cursor].ID
 					m.selected = &id
 				}
+			case key.Matches(msg, m.keys.Filter):
+				m.filtering = true
+				m.filterInput = newFilterInput()
+				m.filterInput.Focus()
+				m.filteredItems = make([]bgg.CollectionItem, len(m.items))
+				copy(m.filteredItems, m.items)
+				m.cursor = 0
+				return m, textinput.Blink
 			case key.Matches(msg, m.keys.User):
 				// Change user - go back to input
 				m.state = collectionStateInput
@@ -179,11 +233,21 @@ func (m collectionModel) View(width, height int) string {
 	case collectionStateResults:
 		username := strings.TrimSpace(m.input.Value())
 		b.WriteString(m.styles.Title.Render(fmt.Sprintf("%s's Collection", username)))
+		if m.filtering {
+			b.WriteString("  Filter: ")
+			b.WriteString(m.filterInput.View())
+		}
 		b.WriteString("\n")
-		b.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("%d games", len(m.items))))
+
+		displayItems := m.items
+		if m.filtering || m.filteredItems != nil {
+			displayItems = m.filteredItems
+		}
+
+		b.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("%d/%d games", len(displayItems), len(m.items))))
 		b.WriteString("\n\n")
 
-		if len(m.items) == 0 {
+		if len(displayItems) == 0 {
 			b.WriteString(m.styles.Subtitle.Render("No games found."))
 			b.WriteString("\n")
 		} else {
@@ -194,12 +258,12 @@ func (m collectionModel) View(width, height int) string {
 				start = m.cursor - visible + 1
 			}
 			end := start + visible
-			if end > len(m.items) {
-				end = len(m.items)
+			if end > len(displayItems) {
+				end = len(displayItems)
 			}
 
 			for i := start; i < end; i++ {
-				item := m.items[i]
+				item := displayItems[i]
 				cursor := "  "
 				style := m.styles.ListItem
 				if i == m.cursor {
@@ -225,7 +289,11 @@ func (m collectionModel) View(width, height int) string {
 		}
 
 		b.WriteString("\n")
-		b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Detail  u: Change User  b: Back"))
+		if m.filtering {
+			b.WriteString(m.styles.Help.Render("↑/↓: Navigate  Enter: Detail  Esc: Clear filter"))
+		} else {
+			b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Detail  /: Filter  u: Change User  b: Back"))
+		}
 
 	case collectionStateError:
 		b.WriteString(m.styles.Title.Render("User Collection"))

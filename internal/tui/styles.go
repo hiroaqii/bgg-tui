@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -106,6 +107,14 @@ func DefaultStyles() Styles {
 		Value: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFFFF")),
 	}
+}
+
+func newFilterInput() textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = "type to filter..."
+	ti.CharLimit = 50
+	ti.Width = 30
+	return ti
 }
 
 // centerContent centers the content both horizontally and vertically within the given dimensions.
