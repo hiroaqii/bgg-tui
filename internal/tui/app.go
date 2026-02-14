@@ -24,6 +24,7 @@ type Model struct {
 	height int
 
 	// Sub-models
+	setupToken setupTokenModel
 	menu       menuModel
 	settings   settingsModel
 	search     searchModel
@@ -68,12 +69,18 @@ func New(cfg *config.Config) Model {
 		}
 	}
 
+	startView := ViewMenu
+	if !cfg.HasToken() {
+		startView = ViewSetupToken
+	}
+
 	return Model{
 		config:       cfg,
 		bggClient:    client,
 		keys:         keys,
 		styles:       styles,
-		currentView:  ViewMenu,
+		currentView:  startView,
+		setupToken:   newSetupTokenModel(cfg, styles, keys),
 		menu:         newMenuModel(styles, keys, cfg.HasToken()),
 		settings:     newSettingsModel(cfg, styles, keys),
 		search:       newSearchModel(styles, keys),
@@ -86,6 +93,9 @@ func New(cfg *config.Config) Model {
 
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
+	if m.currentView == ViewSetupToken {
+		return textinput.Blink
+	}
 	return nil
 }
 
@@ -103,6 +113,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Delegate to current view
 	switch m.currentView {
+	case ViewSetupToken:
+		return m.updateSetupToken(msg)
 	case ViewMenu:
 		return m.updateMenu(msg)
 	case ViewSettings:
@@ -122,6 +134,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m Model) updateSetupToken(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.setupToken, cmd = m.setupToken.Update(msg)
+
+	if m.setupToken.done {
+		m.setupToken.done = false
+		// Create BGG client with new token
+		m.bggClient, _ = bgg.NewClient(bgg.Config{
+			Token: m.config.API.Token,
+		})
+		m.menu = newMenuModel(m.styles, m.keys, true)
+		m.currentView = ViewMenu
+	}
+
+	return m, cmd
 }
 
 func (m Model) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -328,6 +357,8 @@ func (m Model) View() string {
 	}
 
 	switch m.currentView {
+	case ViewSetupToken:
+		return prefix + m.setupToken.View(m.width, m.height)
 	case ViewMenu:
 		return prefix + m.menu.View(m.width, m.height)
 	case ViewSettings:
