@@ -39,6 +39,7 @@ type searchModel struct {
 	filteredResults []bgg.GameSearchResult
 
 	wantsBack bool
+	wantsMenu bool
 
 	// Image fields
 	imageEnabled   bool
@@ -198,7 +199,7 @@ func (m searchModel) Update(msg tea.Msg, client *bgg.Client) (searchModel, tea.C
 					return m, m.doSearch(client, query)
 				}
 			case key.Matches(msg, m.keys.Escape):
-				m.wantsBack = true
+				m.wantsMenu = true
 				return m, nil
 			}
 		}
@@ -336,8 +337,10 @@ func (m searchModel) Update(msg tea.Msg, client *bgg.Client) (searchModel, tea.C
 				m.results = nil
 				m.cursor = 0
 				return m, textinput.Blink
-			case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Escape):
+			case key.Matches(msg, m.keys.Back):
 				m.wantsBack = true
+			case key.Matches(msg, m.keys.Escape):
+				m.wantsMenu = true
 			}
 		}
 		return m, nil
@@ -352,8 +355,10 @@ func (m searchModel) Update(msg tea.Msg, client *bgg.Client) (searchModel, tea.C
 				m.input.Focus()
 				m.errMsg = ""
 				return m, textinput.Blink
-			case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Escape):
+			case key.Matches(msg, m.keys.Back):
 				m.wantsBack = true
+			case key.Matches(msg, m.keys.Escape):
+				m.wantsMenu = true
 			}
 		}
 		return m, nil
@@ -373,7 +378,7 @@ func (m searchModel) View(width, height int, selType string, animFrame int) stri
 		b.WriteString("Enter game name:\n")
 		b.WriteString(m.input.View())
 		b.WriteString("\n\n")
-		b.WriteString(m.styles.Help.Render("Enter: Search  Esc: Back"))
+		b.WriteString(m.styles.Help.Render("Enter: Search  Esc: Menu"))
 
 	case searchStateLoading:
 		b.WriteString(m.styles.Title.Render("Search Games"))
@@ -446,7 +451,7 @@ func (m searchModel) View(width, height int, selType string, animFrame int) stri
 		if m.filtering {
 			b.WriteString(m.styles.Help.Render("↑/↓: Navigate  Enter: Detail  Esc: Clear filter"))
 		} else {
-			b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Detail  /: Filter  s: New Search  ?: Help  b: Back"))
+			b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Detail  /: Filter  s: New Search  ?: Help  b: Back  Esc: Menu"))
 		}
 
 		// Add image panel
@@ -473,7 +478,7 @@ func (m searchModel) View(width, height int, selType string, animFrame int) stri
 		b.WriteString("\n\n")
 		b.WriteString(m.styles.Error.Render("Error: " + m.errMsg))
 		b.WriteString("\n\n")
-		b.WriteString(m.styles.Help.Render("Enter: Retry  Esc: Back"))
+		b.WriteString(m.styles.Help.Render("Enter: Retry  b: Back  Esc: Menu"))
 	}
 
 	content := b.String()

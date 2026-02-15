@@ -27,6 +27,7 @@ type settingsModel struct {
 	descWidthInput  textinput.Model
 	descHeightInput textinput.Model
 	wantsBack         bool
+	wantsMenu         bool
 	themeChanged      bool
 	transitionChanged bool
 	selectionChanged  bool
@@ -239,8 +240,10 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 				m.config.Save()
 				m.selectionChanged = true
 			}
-		case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Escape):
+		case key.Matches(msg, m.keys.Back):
 			m.wantsBack = true
+		case key.Matches(msg, m.keys.Escape):
+			m.wantsMenu = true
 		}
 	}
 
@@ -459,7 +462,7 @@ func (m settingsModel) View(width, height int) string {
 	if m.editing {
 		b.WriteString(m.styles.Help.Render("Enter: Save  Esc: Cancel"))
 	} else {
-		b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Edit/Toggle  b: Back"))
+		b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Edit/Toggle  Esc: Menu"))
 	}
 
 	content := b.String()
