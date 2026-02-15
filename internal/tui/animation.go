@@ -79,7 +79,7 @@ func renderTransition(content string, t transitionState) string {
 		progress := float64(t.frame) / float64(t.maxFrame)
 		return renderTransitionFade(content, progress)
 	case "typing":
-		// T06
+		return renderTransitionTyping(content, t.frame)
 	case "wave":
 		// T07
 	case "glitch":
@@ -109,6 +109,34 @@ func renderTransitionFade(content string, progress float64) string {
 	for _, line := range lines {
 		plain := stripAnsi(line)
 		result = append(result, style.Render(plain))
+	}
+	return strings.Join(result, "\n")
+}
+
+// renderTransitionTyping reveals lines top-to-bottom with a cursor on the last visible line.
+func renderTransitionTyping(content string, frame int) string {
+	lines := strings.Split(content, "\n")
+	totalLines := len(lines)
+	if totalLines == 0 {
+		return content
+	}
+
+	// Number of visible lines increases with each frame
+	visibleLines := frame * totalLines / 15
+	if visibleLines > totalLines {
+		visibleLines = totalLines
+	}
+
+	var result []string
+	for i := 0; i < totalLines; i++ {
+		if i < visibleLines {
+			result = append(result, lines[i])
+		} else if i == visibleLines {
+			// Current line: show cursor
+			result = append(result, "▌")
+		} else {
+			result = append(result, "")
+		}
 	}
 	return strings.Join(result, "\n")
 }
