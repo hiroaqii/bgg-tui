@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"math"
+	"math/rand"
 	"regexp"
 	"strings"
 	"time"
@@ -90,7 +91,8 @@ func renderTransition(content string, t transitionState) string {
 	case "wave":
 		return renderTransitionWave(content, t.frame)
 	case "glitch":
-		// T08
+		progress := float64(t.frame) / float64(t.maxFrame)
+		return renderTransitionGlitch(content, progress)
 	case "rainbow":
 		// T09
 	case "blink":
@@ -122,6 +124,33 @@ func renderTransitionFade(content string, progress float64) string {
 		result = append(result, style.Render(plain))
 	}
 	return strings.Join(result, "\n")
+}
+
+// renderTransitionGlitch randomly replaces characters with glitch symbols.
+// The replacement probability decreases as progress approaches 1.0.
+func renderTransitionGlitch(content string, progress float64) string {
+	lines := strings.Split(content, "\n")
+	glitchProb := 0.4 * (1 - progress)
+	glitchStyle := lipgloss.NewStyle().Foreground(ColorAccent)
+
+	var resultLines []string
+	for _, line := range lines {
+		if hasKittyImage(line) {
+			resultLines = append(resultLines, line)
+			continue
+		}
+		plain := stripAnsi(line)
+		var b strings.Builder
+		for _, ch := range plain {
+			if ch != ' ' && rand.Float64() < glitchProb {
+				b.WriteString(glitchStyle.Render(string(glitchChars[rand.Intn(len(glitchChars))])))
+			} else {
+				b.WriteString(string(ch))
+			}
+		}
+		resultLines = append(resultLines, b.String())
+	}
+	return strings.Join(resultLines, "\n")
 }
 
 // renderTransitionWave applies a wave color effect line-by-line from top to bottom.
