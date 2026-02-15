@@ -244,6 +244,8 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.menu.styles = m.styles
 	}
 
+	needsTickBefore := m.needsAnimTick()
+
 	if m.settings.transitionChanged {
 		m.settings.transitionChanged = false
 		m.transitionType = m.config.Interface.Transition
@@ -254,8 +256,9 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.selectionType = m.config.Interface.Selection
 	}
 
-	// Ensure anim tick is running after settings change
-	if m.needsAnimTick() && cmd == nil {
+	// Only start a new anim tick when transitioning from not-needed to needed,
+	// to avoid accumulating duplicate tick streams on every key press.
+	if !needsTickBefore && m.needsAnimTick() && cmd == nil {
 		cmd = animTickCmd()
 	}
 
