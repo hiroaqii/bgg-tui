@@ -152,7 +152,7 @@ func renderTransitionTyping(content string, frame int) string {
 	}
 
 	// Number of visible lines increases with each frame
-	visibleLines := frame * totalLines / 15
+	visibleLines := frame * totalLines / 30
 	if visibleLines > totalLines {
 		visibleLines = totalLines
 	}
