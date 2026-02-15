@@ -39,7 +39,7 @@ var (
 )
 
 // TransitionNames lists all available transition types for cycling in settings.
-var TransitionNames = []string{"none", "fade", "typing", "wave", "glitch", "rainbow", "blink"}
+var TransitionNames = []string{"none", "fade", "typing", "wave", "glitch", "rainbow"}
 
 // SelectionNames lists all available selection animation types for cycling in settings.
 var SelectionNames = []string{"none", "rainbow", "wave", "blink", "glitch"}
@@ -95,8 +95,6 @@ func renderTransition(content string, t transitionState) string {
 		return renderTransitionGlitch(content, progress)
 	case "rainbow":
 		return renderTransitionRainbow(content, t.frame)
-	case "blink":
-		// T10
 	}
 	return content
 }
@@ -253,7 +251,7 @@ func renderTransitionTyping(content string, frame int) string {
 func renderSelectionAnim(text string, selType string, frame int) string {
 	switch selType {
 	case "rainbow":
-		// T11
+		return renderSelectionRainbow(text, frame)
 	case "wave":
 		// T12
 	case "blink":
@@ -262,4 +260,15 @@ func renderSelectionAnim(text string, selType string, frame int) string {
 		// T14
 	}
 	return text
+}
+
+// renderSelectionRainbow applies rainbow colors per character with bold.
+func renderSelectionRainbow(text string, frame int) string {
+	var b strings.Builder
+	for i, ch := range text {
+		colorIdx := (i + frame) % len(rainbowColors)
+		style := lipgloss.NewStyle().Foreground(rainbowColors[colorIdx]).Bold(true)
+		b.WriteString(style.Render(string(ch)))
+	}
+	return b.String()
 }
