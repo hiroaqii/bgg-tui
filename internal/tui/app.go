@@ -243,6 +243,16 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.settings.styles = m.styles
 	}
 
+	if m.settings.transitionChanged {
+		m.settings.transitionChanged = false
+		m.transitionType = m.config.Interface.Transition
+	}
+
+	if m.settings.selectionChanged {
+		m.settings.selectionChanged = false
+		m.selectionType = m.config.Interface.Selection
+	}
+
 	if m.settings.wantsBack {
 		m.settings.wantsBack = false
 		m.setView(ViewMenu)
