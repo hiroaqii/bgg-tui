@@ -28,7 +28,6 @@ type DisplayConfig struct {
 	ThreadHeight      int    `toml:"thread_height"`
 	ListPageSize      int    `toml:"list_page_size"`
 	DescriptionWidth  int    `toml:"description_width"`
-	DescriptionHeight int    `toml:"description_height"`
 }
 
 // CollectionConfig contains collection-related configuration.
@@ -57,7 +56,6 @@ func DefaultConfig() *Config {
 			ThreadHeight:      30,
 			ListPageSize:      25,
 			DescriptionWidth:  100,
-			DescriptionHeight: 15,
 		},
 		Collection: CollectionConfig{
 			DefaultUsername: "",
