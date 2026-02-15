@@ -39,7 +39,7 @@ var (
 )
 
 // TransitionNames lists all available transition types for cycling in settings.
-var TransitionNames = []string{"none", "fade", "typing", "wave", "glitch", "rainbow"}
+var TransitionNames = []string{"none", "fade", "typing", "glitch"}
 
 // SelectionNames lists all available selection animation types for cycling in settings.
 var SelectionNames = []string{"none", "rainbow", "wave", "blink", "glitch"}
@@ -88,13 +88,9 @@ func renderTransition(content string, t transitionState) string {
 		return renderTransitionFade(content, progress)
 	case "typing":
 		return renderTransitionTyping(content, t.frame)
-	case "wave":
-		return renderTransitionWave(content, t.frame)
 	case "glitch":
 		progress := float64(t.frame) / float64(t.maxFrame)
 		return renderTransitionGlitch(content, progress)
-	case "rainbow":
-		return renderTransitionRainbow(content, t.frame)
 	}
 	return content
 }
@@ -124,30 +120,6 @@ func renderTransitionFade(content string, progress float64) string {
 	return strings.Join(result, "\n")
 }
 
-// renderTransitionRainbow applies rainbow colors character-by-character, cycling with frame.
-func renderTransitionRainbow(content string, frame int) string {
-	lines := strings.Split(content, "\n")
-	var resultLines []string
-
-	charIdx := 0
-	for _, line := range lines {
-		if hasKittyImage(line) {
-			resultLines = append(resultLines, line)
-			continue
-		}
-		plain := stripAnsi(line)
-		var b strings.Builder
-		for _, ch := range plain {
-			colorIdx := (charIdx + frame) % len(rainbowColors)
-			style := lipgloss.NewStyle().Foreground(rainbowColors[colorIdx])
-			b.WriteString(style.Render(string(ch)))
-			charIdx++
-		}
-		resultLines = append(resultLines, b.String())
-	}
-	return strings.Join(resultLines, "\n")
-}
-
 // renderTransitionGlitch randomly replaces characters with glitch symbols.
 // The replacement probability decreases as progress approaches 1.0.
 func renderTransitionGlitch(content string, progress float64) string {
@@ -171,45 +143,6 @@ func renderTransitionGlitch(content string, progress float64) string {
 			}
 		}
 		resultLines = append(resultLines, b.String())
-	}
-	return strings.Join(resultLines, "\n")
-}
-
-// renderTransitionWave applies a wave color effect line-by-line from top to bottom.
-func renderTransitionWave(content string, frame int) string {
-	lines := strings.Split(content, "\n")
-	totalLines := len(lines)
-	if totalLines == 0 {
-		return content
-	}
-
-	// Number of visible lines increases with each frame
-	visibleLines := frame * totalLines / 15
-	if visibleLines > totalLines {
-		visibleLines = totalLines
-	}
-
-	var resultLines []string
-	charIdx := 0
-	for i, line := range lines {
-		if hasKittyImage(line) {
-			resultLines = append(resultLines, line)
-			continue
-		}
-		if i < visibleLines {
-			plain := stripAnsi(line)
-			var b strings.Builder
-			for _, ch := range plain {
-				wave := math.Sin(float64(frame)*0.15 + float64(charIdx)*0.3)
-				colorIdx := int((wave+1)/2*float64(len(waveColors)-1)) % len(waveColors)
-				style := lipgloss.NewStyle().Foreground(waveColors[colorIdx])
-				b.WriteString(style.Render(string(ch)))
-				charIdx++
-			}
-			resultLines = append(resultLines, b.String())
-		} else {
-			resultLines = append(resultLines, "")
-		}
 	}
 	return strings.Join(resultLines, "\n")
 }
