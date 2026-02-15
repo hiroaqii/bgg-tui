@@ -275,7 +275,7 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 	return m, nil
 }
 
-func (m collectionModel) View(width, height int) string {
+func (m collectionModel) View(width, height int, selType string, animFrame int) string {
 	var b strings.Builder
 	var transmit string
 
@@ -347,7 +347,11 @@ func (m collectionModel) View(width, height int) string {
 					ratingStr = fmt.Sprintf(" %.1f", item.Rating)
 				}
 
-				line := fmt.Sprintf("%s%s (%s)%s", cursor, style.Render(item.Name), year, m.styles.Rating.Render(ratingStr))
+				name := style.Render(item.Name)
+				if i == m.cursor && selType != "" && selType != "none" {
+					name = renderSelectionAnim(item.Name, selType, animFrame)
+				}
+				line := fmt.Sprintf("%s%s (%s)%s", cursor, name, year, m.styles.Rating.Render(ratingStr))
 				b.WriteString(line)
 				b.WriteString("\n")
 			}

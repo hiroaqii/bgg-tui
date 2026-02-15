@@ -49,6 +49,12 @@ type Model struct {
 
 	// Help overlay
 	showHelp bool
+
+	// Animation
+	animFrame      int
+	transition     transitionState
+	transitionType string
+	selectionType  string
 }
 
 // New creates a new application model.
@@ -94,17 +100,23 @@ func New(cfg *config.Config) Model {
 		search:       newSearchModel(cfg, styles, keys, imgEnabled, imgCache),
 		hot:          newHotModel(cfg, styles, keys, imgEnabled, imgCache),
 		collection:   newCollectionModel(cfg, styles, keys, imgEnabled, imgCache),
-		imageEnabled: imgEnabled,
-		imageCache:   imgCache,
+		imageEnabled:   imgEnabled,
+		imageCache:     imgCache,
+		transitionType: cfg.Interface.Transition,
+		selectionType:  cfg.Interface.Selection,
 	}
 }
 
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
+	var cmds []tea.Cmd
 	if m.currentView == ViewSetupToken {
-		return textinput.Blink
+		cmds = append(cmds, textinput.Blink)
 	}
-	return nil
+	if m.needsAnimTick() {
+		cmds = append(cmds, animTickCmd())
+	}
+	return tea.Batch(cmds...)
 }
 
 // Update implements tea.Model.
@@ -117,6 +129,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if msg, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width = msg.Width
 		m.height = msg.Height
+	}
+
+	// Animation tick handling
+	if _, ok := msg.(animTickMsg); ok {
+		m.animFrame++
+		if m.transition.active {
+			m.transition.frame++
+			if m.transition.frame >= m.transition.maxFrame {
+				m.transition.active = false
+			}
+		}
+		var cmds []tea.Cmd
+		if m.needsAnimTick() {
+			cmds = append(cmds, animTickCmd())
+		}
+		return m, tea.Batch(cmds...)
 	}
 
 	// Help overlay handling
@@ -168,7 +196,7 @@ func (m Model) updateSetupToken(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Token: m.config.API.Token,
 		})
 		m.menu = newMenuModel(m.styles, m.keys, true)
-		m.currentView = ViewMenu
+		m.setView(ViewMenu)
 	}
 
 	return m, cmd
@@ -185,18 +213,18 @@ func (m Model) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch view {
 		case ViewSettings:
-			m.currentView = ViewSettings
+			m.setView(ViewSettings)
 			m.settings = newSettingsModel(m.config, m.styles, m.keys)
 		case ViewSearchInput:
-			m.currentView = ViewSearchInput
+			m.setView(ViewSearchInput)
 			m.search = newSearchModel(m.config, m.styles, m.keys, m.imageEnabled, m.imageCache)
 			return m, textinput.Blink
 		case ViewHot:
-			m.currentView = ViewHot
+			m.setView(ViewHot)
 			m.hot = newHotModel(m.config, m.styles, m.keys, m.imageEnabled, m.imageCache)
 			return m, m.hot.loadHotGames(m.bggClient)
 		case ViewCollectionInput:
-			m.currentView = ViewCollectionInput
+			m.setView(ViewCollectionInput)
 			m.collection = newCollectionModel(m.config, m.styles, m.keys, m.imageEnabled, m.imageCache)
 			return m, textinput.Blink
 		}
@@ -213,11 +241,30 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.settings.themeChanged = false
 		m.styles = NewStyles(m.config.Interface.ColorTheme)
 		m.settings.styles = m.styles
+		m.menu.styles = m.styles
+	}
+
+	needsTickBefore := m.needsAnimTick()
+
+	if m.settings.transitionChanged {
+		m.settings.transitionChanged = false
+		m.transitionType = m.config.Interface.Transition
+	}
+
+	if m.settings.selectionChanged {
+		m.settings.selectionChanged = false
+		m.selectionType = m.config.Interface.Selection
+	}
+
+	// Only start a new anim tick when transitioning from not-needed to needed,
+	// to avoid accumulating duplicate tick streams on every key press.
+	if !needsTickBefore && m.needsAnimTick() && cmd == nil {
+		cmd = animTickCmd()
 	}
 
 	if m.settings.wantsBack {
 		m.settings.wantsBack = false
-		m.currentView = ViewMenu
+		m.setView(ViewMenu)
 	}
 
 	return m, cmd
@@ -230,14 +277,14 @@ func (m Model) updateSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Update current view based on search state
 	switch m.search.state {
 	case searchStateInput:
-		m.currentView = ViewSearchInput
+		m.setView(ViewSearchInput)
 	case searchStateLoading, searchStateResults, searchStateError:
-		m.currentView = ViewSearchResults
+		m.setView(ViewSearchResults)
 	}
 
 	if m.search.wantsBack {
 		m.search.wantsBack = false
-		m.currentView = ViewMenu
+		m.setView(ViewMenu)
 		if m.imageEnabled {
 			m.needsClearImages = true
 		}
@@ -250,7 +297,7 @@ func (m Model) updateSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.previousView = ViewSearchResults
 		m.detail = newDetailModel(gameID, m.styles, m.keys, m.imageEnabled, m.imageCache, m.config)
 		m.detail.viewHeight = m.height
-		m.currentView = ViewDetail
+		m.setView(ViewDetail)
 		if m.imageEnabled {
 			m.needsClearImages = true
 		}
@@ -266,7 +313,7 @@ func (m Model) updateHot(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if m.hot.wantsBack {
 		m.hot.wantsBack = false
-		m.currentView = ViewMenu
+		m.setView(ViewMenu)
 		if m.imageEnabled {
 			m.needsClearImages = true
 		}
@@ -279,7 +326,7 @@ func (m Model) updateHot(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.previousView = ViewHot
 		m.detail = newDetailModel(gameID, m.styles, m.keys, m.imageEnabled, m.imageCache, m.config)
 		m.detail.viewHeight = m.height
-		m.currentView = ViewDetail
+		m.setView(ViewDetail)
 		if m.imageEnabled {
 			m.needsClearImages = true
 		}
@@ -296,14 +343,14 @@ func (m Model) updateCollection(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Update current view based on collection state
 	switch m.collection.state {
 	case collectionStateInput:
-		m.currentView = ViewCollectionInput
+		m.setView(ViewCollectionInput)
 	case collectionStateLoading, collectionStateResults, collectionStateError:
-		m.currentView = ViewCollectionList
+		m.setView(ViewCollectionList)
 	}
 
 	if m.collection.wantsBack {
 		m.collection.wantsBack = false
-		m.currentView = ViewMenu
+		m.setView(ViewMenu)
 		if m.imageEnabled {
 			m.needsClearImages = true
 		}
@@ -316,7 +363,7 @@ func (m Model) updateCollection(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.previousView = ViewCollectionList
 		m.detail = newDetailModel(gameID, m.styles, m.keys, m.imageEnabled, m.imageCache, m.config)
 		m.detail.viewHeight = m.height
-		m.currentView = ViewDetail
+		m.setView(ViewDetail)
 		if m.imageEnabled {
 			m.needsClearImages = true
 		}
@@ -332,7 +379,7 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if m.detail.wantsBack {
 		m.detail.wantsBack = false
-		m.currentView = m.previousView
+		m.setView(m.previousView)
 		if m.imageEnabled {
 			m.needsClearImages = true
 		}
@@ -349,7 +396,7 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			gameName = m.detail.game.Name
 		}
 		m.forum = newForumModel(m.detail.gameID, gameName, m.styles, m.keys)
-		m.currentView = ViewForumList
+		m.setView(ViewForumList)
 		return m, m.forum.loadForums(m.bggClient)
 	}
 
@@ -363,14 +410,14 @@ func (m Model) updateForum(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Update current view based on forum state
 	switch m.forum.state {
 	case forumStateForumList, forumStateLoadingForums:
-		m.currentView = ViewForumList
+		m.setView(ViewForumList)
 	case forumStateThreadList, forumStateLoadingThreads:
-		m.currentView = ViewThreadList
+		m.setView(ViewThreadList)
 	}
 
 	if m.forum.wantsBack {
 		m.forum.wantsBack = false
-		m.currentView = ViewDetail
+		m.setView(ViewDetail)
 	}
 
 	// Handle thread selection
@@ -378,7 +425,7 @@ func (m Model) updateForum(msg tea.Msg) (tea.Model, tea.Cmd) {
 		threadID := *m.forum.wantsThread
 		m.forum.wantsThread = nil
 		m.thread = newThreadModel(threadID, m.styles, m.keys, m.config, m.height)
-		m.currentView = ViewThreadView
+		m.setView(ViewThreadView)
 		return m, m.thread.loadThread(m.bggClient)
 	}
 
@@ -391,10 +438,53 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if m.thread.wantsBack {
 		m.thread.wantsBack = false
-		m.currentView = ViewThreadList
+		m.setView(ViewThreadList)
 	}
 
 	return m, cmd
+}
+
+// setView changes the current view, starting a transition if configured.
+func (m *Model) setView(view View) {
+	if view != m.currentView && m.transitionType != "" && m.transitionType != "none" {
+		oldView := m.renderCurrentView()
+		m.currentView = view
+		m.transition = startTransition(m.transitionType, oldView)
+	} else {
+		m.currentView = view
+	}
+}
+
+// needsAnimTick returns true if any animation requires periodic ticking.
+func (m Model) needsAnimTick() bool {
+	return m.transition.active ||
+		(m.selectionType != "" && m.selectionType != "none") ||
+		(m.transitionType != "" && m.transitionType != "none")
+}
+
+// renderCurrentView renders the content of the current view.
+func (m Model) renderCurrentView() string {
+	switch m.currentView {
+	case ViewSetupToken:
+		return m.setupToken.View(m.width, m.height)
+	case ViewMenu:
+		return m.menu.View(m.width, m.height, m.selectionType, m.animFrame)
+	case ViewSettings:
+		return m.settings.View(m.width, m.height)
+	case ViewSearchInput, ViewSearchResults:
+		return m.search.View(m.width, m.height, m.selectionType, m.animFrame)
+	case ViewHot:
+		return m.hot.View(m.width, m.height, m.selectionType, m.animFrame)
+	case ViewCollectionInput, ViewCollectionList:
+		return m.collection.View(m.width, m.height, m.selectionType, m.animFrame)
+	case ViewDetail:
+		return m.detail.View(m.width, m.height)
+	case ViewForumList, ViewThreadList:
+		return m.forum.View(m.width, m.height, m.selectionType, m.animFrame)
+	case ViewThreadView:
+		return m.thread.View(m.width, m.height)
+	}
+	return ""
 }
 
 // View implements tea.Model.
@@ -408,27 +498,12 @@ func (m Model) View() string {
 		prefix = kittyDeleteSeq
 	}
 
-	switch m.currentView {
-	case ViewSetupToken:
-		return prefix + m.setupToken.View(m.width, m.height)
-	case ViewMenu:
-		return prefix + m.menu.View(m.width, m.height)
-	case ViewSettings:
-		return prefix + m.settings.View(m.width, m.height)
-	case ViewSearchInput, ViewSearchResults:
-		return prefix + m.search.View(m.width, m.height)
-	case ViewHot:
-		return prefix + m.hot.View(m.width, m.height)
-	case ViewCollectionInput, ViewCollectionList:
-		return prefix + m.collection.View(m.width, m.height)
-	case ViewDetail:
-		return prefix + m.detail.View(m.width, m.height)
-	case ViewForumList, ViewThreadList:
-		return prefix + m.forum.View(m.width, m.height)
-	case ViewThreadView:
-		return prefix + m.thread.View(m.width, m.height)
+	content := m.renderCurrentView()
+	if m.transition.active {
+		content = renderTransition(content, m.transition)
 	}
-	return ""
+
+	return prefix + content
 }
 
 // renderHelpOverlay renders a centered keybindings overlay.

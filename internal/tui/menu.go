@@ -73,7 +73,7 @@ func (m menuModel) Update(msg tea.Msg) (menuModel, tea.Cmd) {
 	return m, nil
 }
 
-func (m menuModel) View(width, height int) string {
+func (m menuModel) View(width, height int, selType string, animFrame int) string {
 	var b strings.Builder
 
 	// Title
@@ -99,7 +99,11 @@ func (m menuModel) View(width, height int) string {
 			style = m.styles.MenuItemFocus
 		}
 
-		line := fmt.Sprintf("%s[%s] %s", cursor, item.key, style.Render(item.label))
+		label := style.Render(item.label)
+		if i == m.cursor && selType != "" && selType != "none" {
+			label = renderSelectionAnim(item.label, selType, animFrame)
+		}
+		line := fmt.Sprintf("%s[%s] %s", cursor, item.key, label)
 		b.WriteString(line)
 		b.WriteString("\n")
 	}

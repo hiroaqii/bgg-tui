@@ -198,7 +198,7 @@ func (m forumModel) Update(msg tea.Msg, client *bgg.Client) (forumModel, tea.Cmd
 	return m, nil
 }
 
-func (m forumModel) View(width, height int) string {
+func (m forumModel) View(width, height int, selType string, animFrame int) string {
 	var b strings.Builder
 
 	switch m.state {
@@ -224,7 +224,11 @@ func (m forumModel) View(width, height int) string {
 					style = m.styles.ListItemFocus
 				}
 
-				line := fmt.Sprintf("%s%s  %s", cursor, style.Render(titles[i]), m.styles.Subtitle.Render(metas[i]))
+				title := style.Render(titles[i])
+				if i == m.forumCursor && selType != "" && selType != "none" {
+					title = renderSelectionAnim(titles[i], selType, animFrame)
+				}
+				line := fmt.Sprintf("%s%s  %s", cursor, title, m.styles.Subtitle.Render(metas[i]))
 				b.WriteString(line)
 				b.WriteString("\n")
 			}
@@ -276,7 +280,11 @@ func (m forumModel) View(width, height int) string {
 					subject = subject[:47] + "..."
 				}
 
-				line := fmt.Sprintf("%s%s", cursor, style.Render(subject))
+				renderedSubject := style.Render(subject)
+			if i == m.threadCursor && selType != "" && selType != "none" {
+				renderedSubject = renderSelectionAnim(subject, selType, animFrame)
+			}
+			line := fmt.Sprintf("%s%s", cursor, renderedSubject)
 				b.WriteString(line)
 				b.WriteString("\n")
 

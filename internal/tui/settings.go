@@ -26,8 +26,10 @@ type settingsModel struct {
 	pageSizeInput   textinput.Model
 	descWidthInput  textinput.Model
 	descHeightInput textinput.Model
-	wantsBack       bool
-	themeChanged    bool
+	wantsBack         bool
+	themeChanged      bool
+	transitionChanged bool
+	selectionChanged  bool
 }
 
 func newSettingsModel(cfg *config.Config, styles Styles, keys KeyMap) settingsModel {
@@ -81,7 +83,7 @@ func newSettingsModel(cfg *config.Config, styles Styles, keys KeyMap) settingsMo
 }
 
 func (m settingsModel) itemCount() int {
-	return 10 // Token, Username, ShowImages, ThreadWidth, ThreadHeight, ListPageSize, DescriptionWidth, DescriptionHeight, ShowOnlyOwned, ColorTheme
+	return 12 // Token, Username, ShowImages, ThreadWidth, ThreadHeight, ListPageSize, DescriptionWidth, DescriptionHeight, ShowOnlyOwned, ColorTheme, Transition, Selection
 }
 
 func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
@@ -225,15 +227,17 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 				m.config.Collection.ShowOnlyOwned = !m.config.Collection.ShowOnlyOwned
 				m.config.Save()
 			case 9: // Color Theme
-				names := ThemeNames
-				for i, n := range names {
-					if n == m.config.Interface.ColorTheme {
-						m.config.Interface.ColorTheme = names[(i+1)%len(names)]
-						break
-					}
-				}
+				m.config.Interface.ColorTheme = cycleValue(m.config.Interface.ColorTheme, ThemeNames)
 				m.config.Save()
 				m.themeChanged = true
+			case 10: // Transition
+				m.config.Interface.Transition = cycleValue(m.config.Interface.Transition, TransitionNames)
+				m.config.Save()
+				m.transitionChanged = true
+			case 11: // Selection
+				m.config.Interface.Selection = cycleValue(m.config.Interface.Selection, SelectionNames)
+				m.config.Save()
+				m.selectionChanged = true
 			}
 		case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Escape):
 			m.wantsBack = true
@@ -427,6 +431,28 @@ func (m settingsModel) View(width, height int) string {
 	themeValue := m.config.Interface.ColorTheme
 	b.WriteString(fmt.Sprintf("%s%s: [%s]\n", cursor, style.Render("Color Theme"), themeValue))
 
+	// Transition
+	cursor = "  "
+	if m.cursor == 10 {
+		cursor = "> "
+	}
+	style = m.styles.MenuItem
+	if m.cursor == 10 {
+		style = m.styles.MenuItemFocus
+	}
+	b.WriteString(fmt.Sprintf("%s%s: [%s]\n", cursor, style.Render("Transition"), m.config.Interface.Transition))
+
+	// Selection
+	cursor = "  "
+	if m.cursor == 11 {
+		cursor = "> "
+	}
+	style = m.styles.MenuItem
+	if m.cursor == 11 {
+		style = m.styles.MenuItemFocus
+	}
+	b.WriteString(fmt.Sprintf("%s%s: [%s]\n", cursor, style.Render("Selection"), m.config.Interface.Selection))
+
 	b.WriteString("\n")
 
 	// Help
@@ -445,4 +471,15 @@ func maskToken(token string) string {
 		return strings.Repeat("*", len(token))
 	}
 	return token[:4] + strings.Repeat("*", len(token)-8) + token[len(token)-4:]
+}
+
+// cycleValue returns the next value in names after current.
+// If current is not found, it falls back to names[0].
+func cycleValue(current string, names []string) string {
+	for i, n := range names {
+		if n == current {
+			return names[(i+1)%len(names)]
+		}
+	}
+	return names[0]
 }
