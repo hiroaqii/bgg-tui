@@ -241,6 +241,7 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.settings.themeChanged = false
 		m.styles = NewStyles(m.config.Interface.ColorTheme)
 		m.settings.styles = m.styles
+		m.menu.styles = m.styles
 	}
 
 	if m.settings.transitionChanged {
@@ -251,6 +252,11 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.settings.selectionChanged {
 		m.settings.selectionChanged = false
 		m.selectionType = m.config.Interface.Selection
+	}
+
+	// Ensure anim tick is running after settings change
+	if m.needsAnimTick() && cmd == nil {
+		cmd = animTickCmd()
 	}
 
 	if m.settings.wantsBack {
