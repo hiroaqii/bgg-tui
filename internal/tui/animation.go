@@ -94,7 +94,7 @@ func renderTransition(content string, t transitionState) string {
 		progress := float64(t.frame) / float64(t.maxFrame)
 		return renderTransitionGlitch(content, progress)
 	case "rainbow":
-		// T09
+		return renderTransitionRainbow(content, t.frame)
 	case "blink":
 		// T10
 	}
@@ -124,6 +124,30 @@ func renderTransitionFade(content string, progress float64) string {
 		result = append(result, style.Render(plain))
 	}
 	return strings.Join(result, "\n")
+}
+
+// renderTransitionRainbow applies rainbow colors character-by-character, cycling with frame.
+func renderTransitionRainbow(content string, frame int) string {
+	lines := strings.Split(content, "\n")
+	var resultLines []string
+
+	charIdx := 0
+	for _, line := range lines {
+		if hasKittyImage(line) {
+			resultLines = append(resultLines, line)
+			continue
+		}
+		plain := stripAnsi(line)
+		var b strings.Builder
+		for _, ch := range plain {
+			colorIdx := (charIdx + frame) % len(rainbowColors)
+			style := lipgloss.NewStyle().Foreground(rainbowColors[colorIdx])
+			b.WriteString(style.Render(string(ch)))
+			charIdx++
+		}
+		resultLines = append(resultLines, b.String())
+	}
+	return strings.Join(resultLines, "\n")
 }
 
 // renderTransitionGlitch randomly replaces characters with glitch symbols.
