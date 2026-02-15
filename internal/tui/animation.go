@@ -253,11 +253,11 @@ func renderSelectionAnim(text string, selType string, frame int) string {
 	case "rainbow":
 		return renderSelectionRainbow(text, frame)
 	case "wave":
-		// T12
+		return renderSelectionWave(text, frame)
 	case "blink":
-		// T13
+		return renderSelectionBlink(text, frame)
 	case "glitch":
-		// T14
+		return renderSelectionGlitch(text, frame)
 	}
 	return text
 }
@@ -269,6 +269,46 @@ func renderSelectionRainbow(text string, frame int) string {
 		colorIdx := (i + frame) % len(rainbowColors)
 		style := lipgloss.NewStyle().Foreground(rainbowColors[colorIdx]).Bold(true)
 		b.WriteString(style.Render(string(ch)))
+	}
+	return b.String()
+}
+
+// renderSelectionWave applies sin-based 5-color wave per character with bold.
+func renderSelectionWave(text string, frame int) string {
+	var b strings.Builder
+	for i, ch := range text {
+		wave := math.Sin(float64(frame)*0.15 + float64(i)*0.3)
+		colorIdx := int((wave+1)/2*float64(len(waveColors)-1)) % len(waveColors)
+		style := lipgloss.NewStyle().Foreground(waveColors[colorIdx]).Bold(true)
+		b.WriteString(style.Render(string(ch)))
+	}
+	return b.String()
+}
+
+// renderSelectionBlink toggles between bright and dim colors with bold.
+func renderSelectionBlink(text string, frame int) string {
+	var color lipgloss.Color
+	if (frame/15)%2 == 0 {
+		color = lipgloss.Color("#F8F8F2")
+	} else {
+		color = lipgloss.Color("#44475A")
+	}
+	style := lipgloss.NewStyle().Foreground(color).Bold(true)
+	return style.Render(text)
+}
+
+// renderSelectionGlitch randomly replaces 8% of characters with glitch symbols.
+func renderSelectionGlitch(text string, frame int) string {
+	_ = frame // used implicitly via rand
+	var b strings.Builder
+	for _, ch := range text {
+		if ch != ' ' && rand.Float64() < 0.08 {
+			style := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
+			b.WriteString(style.Render(string(glitchChars[rand.Intn(len(glitchChars))])))
+		} else {
+			style := lipgloss.NewStyle().Bold(true)
+			b.WriteString(style.Render(string(ch)))
+		}
 	}
 	return b.String()
 }
