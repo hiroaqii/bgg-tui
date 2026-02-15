@@ -465,7 +465,7 @@ func (m Model) renderCurrentView() string {
 	case ViewSetupToken:
 		return m.setupToken.View(m.width, m.height)
 	case ViewMenu:
-		return m.menu.View(m.width, m.height)
+		return m.menu.View(m.width, m.height, m.selectionType, m.animFrame)
 	case ViewSettings:
 		return m.settings.View(m.width, m.height)
 	case ViewSearchInput, ViewSearchResults:
