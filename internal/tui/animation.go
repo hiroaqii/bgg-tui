@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -74,7 +76,8 @@ func startTransition(name string, oldView string) transitionState {
 func renderTransition(content string, t transitionState) string {
 	switch t.name {
 	case "fade":
-		// T05
+		progress := float64(t.frame) / float64(t.maxFrame)
+		return renderTransitionFade(content, progress)
 	case "typing":
 		// T06
 	case "wave":
@@ -87,6 +90,27 @@ func renderTransition(content string, t transitionState) string {
 		// T10
 	}
 	return content
+}
+
+// renderTransitionFade applies a fade-in effect using ANSI256 grayscale.
+// progress goes from 0.0 (dark) to 1.0 (fully visible).
+func renderTransitionFade(content string, progress float64) string {
+	// Map progress to ANSI256 grayscale: 232 (darkest) to 255 (lightest)
+	grayIndex := 232 + int(progress*23)
+	if grayIndex > 255 {
+		grayIndex = 255
+	}
+
+	color := lipgloss.Color(fmt.Sprintf("%d", grayIndex))
+	style := lipgloss.NewStyle().Foreground(color)
+
+	lines := strings.Split(content, "\n")
+	var result []string
+	for _, line := range lines {
+		plain := stripAnsi(line)
+		result = append(result, style.Render(plain))
+	}
+	return strings.Join(result, "\n")
 }
 
 // renderSelectionAnim dispatches to the appropriate selection animation renderer.

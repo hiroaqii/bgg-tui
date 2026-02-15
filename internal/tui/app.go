@@ -448,7 +448,9 @@ func (m *Model) setView(view View) {
 
 // needsAnimTick returns true if any animation requires periodic ticking.
 func (m Model) needsAnimTick() bool {
-	return m.transition.active || (m.selectionType != "" && m.selectionType != "none")
+	return m.transition.active ||
+		(m.selectionType != "" && m.selectionType != "none") ||
+		(m.transitionType != "" && m.transitionType != "none")
 }
 
 // renderCurrentView renders the content of the current view.
