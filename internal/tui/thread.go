@@ -21,17 +21,18 @@ const (
 )
 
 type threadModel struct {
-	state     threadState
-	styles    Styles
-	keys      KeyMap
-	config    *config.Config
-	threadID  int
-	thread    *bgg.Thread
-	scroll    int
-	maxScroll int
-	viewLines []string // Pre-rendered view lines
-	errMsg    string
-	wantsBack bool
+	state      threadState
+	styles     Styles
+	keys       KeyMap
+	config     *config.Config
+	threadID   int
+	thread     *bgg.Thread
+	scroll     int
+	maxScroll  int
+	viewLines  []string // Pre-rendered view lines
+	viewHeight int      // Terminal height for dynamic layout
+	errMsg     string
+	wantsBack  bool
 }
 
 // threadResultMsg is sent when thread content is received.
@@ -40,13 +41,34 @@ type threadResultMsg struct {
 	err    error
 }
 
-func newThreadModel(threadID int, styles Styles, keys KeyMap, cfg *config.Config) threadModel {
+func newThreadModel(threadID int, styles Styles, keys KeyMap, cfg *config.Config, viewHeight int) threadModel {
 	return threadModel{
-		state:    threadStateLoading,
-		styles:   styles,
-		keys:     keys,
-		config:   cfg,
-		threadID: threadID,
+		state:      threadStateLoading,
+		styles:     styles,
+		keys:       keys,
+		config:     cfg,
+		threadID:   threadID,
+		viewHeight: viewHeight,
+	}
+}
+
+// visibleLines returns the number of content lines that fit in the viewport.
+// Overhead: title(1+marginBottom1) + subtitle(1) + blank(1) + scrollPos(2) + help(1+marginTop1) = 8
+func (m threadModel) visibleLines() int {
+	v := m.viewHeight - 8
+	if v < 1 {
+		v = 1
+	}
+	return v
+}
+
+func (m *threadModel) recalcScroll() {
+	m.maxScroll = len(m.viewLines) - m.visibleLines()
+	if m.maxScroll < 0 {
+		m.maxScroll = 0
+	}
+	if m.scroll > m.maxScroll {
+		m.scroll = m.maxScroll
 	}
 }
 
@@ -64,6 +86,8 @@ func (m threadModel) Update(msg tea.Msg) (threadModel, tea.Cmd) {
 	switch m.state {
 	case threadStateLoading:
 		switch msg := msg.(type) {
+		case tea.WindowSizeMsg:
+			m.viewHeight = msg.Height
 		case threadResultMsg:
 			if msg.err != nil {
 				m.state = threadStateError
@@ -75,17 +99,16 @@ func (m threadModel) Update(msg tea.Msg) (threadModel, tea.Cmd) {
 
 				// Pre-render view lines
 				m.viewLines = m.renderArticles()
-				visibleLines := m.config.Display.ThreadHeight
-				m.maxScroll = len(m.viewLines) - visibleLines
-				if m.maxScroll < 0 {
-					m.maxScroll = 0
-				}
+				m.recalcScroll()
 			}
 		}
 		return m, nil
 
 	case threadStateResults:
 		switch msg := msg.(type) {
+		case tea.WindowSizeMsg:
+			m.viewHeight = msg.Height
+			m.recalcScroll()
 		case tea.KeyMsg:
 			switch {
 			case key.Matches(msg, m.keys.Up):
@@ -141,9 +164,8 @@ func (m threadModel) View(width, height int) string {
 		b.WriteString("\n\n")
 
 		// Show articles with scrolling
-		visibleLines := m.config.Display.ThreadHeight
 		start := m.scroll
-		end := start + visibleLines
+		end := start + m.visibleLines()
 		if end > len(m.viewLines) {
 			end = len(m.viewLines)
 		}
@@ -180,7 +202,7 @@ func (m threadModel) renderArticles() []string {
 	for i, article := range m.thread.Articles {
 		// Header line
 		header := fmt.Sprintf("--- %s · %s ---", article.Username, formatDate(article.PostDate))
-		lines = append(lines, m.styles.Label.Render(header))
+		lines = append(lines, m.styles.Label.Width(0).Render(header))
 
 		// Body lines (wrap text)
 		bodyLines := htmlToText(article.Body, m.config.Display.ThreadWidth)
