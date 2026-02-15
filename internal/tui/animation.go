@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -48,6 +49,12 @@ func stripAnsi(str string) string {
 	return ansiRegex.ReplaceAllString(str, "")
 }
 
+// hasKittyImage returns true if the line contains Kitty graphics protocol
+// sequences (\x1b_G) or the Kitty placeholder character (U+10EEEE).
+func hasKittyImage(line string) bool {
+	return strings.Contains(line, "\x1b_G") || strings.ContainsRune(line, 0x10EEEE)
+}
+
 // transitionState holds the state of an active view transition.
 type transitionState struct {
 	active   bool
@@ -81,7 +88,7 @@ func renderTransition(content string, t transitionState) string {
 	case "typing":
 		return renderTransitionTyping(content, t.frame)
 	case "wave":
-		// T07
+		return renderTransitionWave(content, t.frame)
 	case "glitch":
 		// T08
 	case "rainbow":
@@ -107,10 +114,53 @@ func renderTransitionFade(content string, progress float64) string {
 	lines := strings.Split(content, "\n")
 	var result []string
 	for _, line := range lines {
+		if hasKittyImage(line) {
+			result = append(result, line)
+			continue
+		}
 		plain := stripAnsi(line)
 		result = append(result, style.Render(plain))
 	}
 	return strings.Join(result, "\n")
+}
+
+// renderTransitionWave applies a wave color effect line-by-line from top to bottom.
+func renderTransitionWave(content string, frame int) string {
+	lines := strings.Split(content, "\n")
+	totalLines := len(lines)
+	if totalLines == 0 {
+		return content
+	}
+
+	// Number of visible lines increases with each frame
+	visibleLines := frame * totalLines / 15
+	if visibleLines > totalLines {
+		visibleLines = totalLines
+	}
+
+	var resultLines []string
+	charIdx := 0
+	for i, line := range lines {
+		if hasKittyImage(line) {
+			resultLines = append(resultLines, line)
+			continue
+		}
+		if i < visibleLines {
+			plain := stripAnsi(line)
+			var b strings.Builder
+			for _, ch := range plain {
+				wave := math.Sin(float64(frame)*0.15 + float64(charIdx)*0.3)
+				colorIdx := int((wave+1)/2*float64(len(waveColors)-1)) % len(waveColors)
+				style := lipgloss.NewStyle().Foreground(waveColors[colorIdx])
+				b.WriteString(style.Render(string(ch)))
+				charIdx++
+			}
+			resultLines = append(resultLines, b.String())
+		} else {
+			resultLines = append(resultLines, "")
+		}
+	}
+	return strings.Join(resultLines, "\n")
 }
 
 // renderTransitionTyping reveals lines top-to-bottom with a cursor on the last visible line.
@@ -129,6 +179,10 @@ func renderTransitionTyping(content string, frame int) string {
 
 	var result []string
 	for i := 0; i < totalLines; i++ {
+		if hasKittyImage(lines[i]) {
+			result = append(result, lines[i])
+			continue
+		}
 		if i < visibleLines {
 			result = append(result, lines[i])
 		} else if i == visibleLines {
