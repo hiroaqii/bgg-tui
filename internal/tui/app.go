@@ -469,15 +469,15 @@ func (m Model) renderCurrentView() string {
 	case ViewSettings:
 		return m.settings.View(m.width, m.height)
 	case ViewSearchInput, ViewSearchResults:
-		return m.search.View(m.width, m.height)
+		return m.search.View(m.width, m.height, m.selectionType, m.animFrame)
 	case ViewHot:
-		return m.hot.View(m.width, m.height)
+		return m.hot.View(m.width, m.height, m.selectionType, m.animFrame)
 	case ViewCollectionInput, ViewCollectionList:
-		return m.collection.View(m.width, m.height)
+		return m.collection.View(m.width, m.height, m.selectionType, m.animFrame)
 	case ViewDetail:
 		return m.detail.View(m.width, m.height)
 	case ViewForumList, ViewThreadList:
-		return m.forum.View(m.width, m.height)
+		return m.forum.View(m.width, m.height, m.selectionType, m.animFrame)
 	case ViewThreadView:
 		return m.thread.View(m.width, m.height)
 	}

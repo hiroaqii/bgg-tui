@@ -362,7 +362,7 @@ func (m searchModel) Update(msg tea.Msg, client *bgg.Client) (searchModel, tea.C
 	return m, nil
 }
 
-func (m searchModel) View(width, height int) string {
+func (m searchModel) View(width, height int, selType string, animFrame int) string {
 	var b strings.Builder
 	var transmit string
 
@@ -431,7 +431,12 @@ func (m searchModel) View(width, height int) string {
 					typeIndicator = " [Expansion]"
 				}
 
-				line := fmt.Sprintf("%s%s (%s)%s", cursor, style.Render(name), year, typeIndicator)
+				if i == m.cursor && selType != "" && selType != "none" {
+					name = renderSelectionAnim(name, selType, animFrame)
+				} else {
+					name = style.Render(name)
+				}
+				line := fmt.Sprintf("%s%s (%s)%s", cursor, name, year, typeIndicator)
 				b.WriteString(line)
 				b.WriteString("\n")
 			}

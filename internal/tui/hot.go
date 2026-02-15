@@ -239,7 +239,7 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 	return m, nil
 }
 
-func (m hotModel) View(width, height int) string {
+func (m hotModel) View(width, height int, selType string, animFrame int) string {
 	var b strings.Builder
 	var transmit string
 
@@ -295,7 +295,11 @@ func (m hotModel) View(width, height int) string {
 				}
 
 				rankStr := fmt.Sprintf("#%-3d", game.Rank)
-				line := fmt.Sprintf("%s%s %s (%s)", cursor, m.styles.Rank.Render(rankStr), style.Render(game.Name), year)
+				name := style.Render(game.Name)
+				if i == m.cursor && selType != "" && selType != "none" {
+					name = renderSelectionAnim(game.Name, selType, animFrame)
+				}
+				line := fmt.Sprintf("%s%s %s (%s)", cursor, m.styles.Rank.Render(rankStr), name, year)
 				b.WriteString(line)
 				b.WriteString("\n")
 			}
