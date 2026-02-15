@@ -40,6 +40,14 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Interface.ColorTheme != "default" {
 		t.Errorf("expected ColorTheme 'default', got '%s'", cfg.Interface.ColorTheme)
 	}
+
+	if cfg.Interface.Transition != "fade" {
+		t.Errorf("expected Transition 'fade', got '%s'", cfg.Interface.Transition)
+	}
+
+	if cfg.Interface.Selection != "rainbow" {
+		t.Errorf("expected Selection 'rainbow', got '%s'", cfg.Interface.Selection)
+	}
 }
 
 func TestLoadFromPath_NonExistent(t *testing.T) {
