@@ -282,8 +282,8 @@ func (m forumModel) View(width, height int) string {
 
 				// Second line: author, date, replies
 				meta := fmt.Sprintf("    %s · %s · %d replies",
-					thread.Author,
 					formatDate(thread.LastPostDate),
+					thread.Author,
 					thread.NumArticles-1)
 				b.WriteString(m.styles.Subtitle.Render(meta))
 				b.WriteString("\n")
