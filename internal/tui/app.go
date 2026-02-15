@@ -49,6 +49,12 @@ type Model struct {
 
 	// Help overlay
 	showHelp bool
+
+	// Animation
+	animFrame      int
+	transition     transitionState
+	transitionType string
+	selectionType  string
 }
 
 // New creates a new application model.
@@ -94,17 +100,23 @@ func New(cfg *config.Config) Model {
 		search:       newSearchModel(cfg, styles, keys, imgEnabled, imgCache),
 		hot:          newHotModel(cfg, styles, keys, imgEnabled, imgCache),
 		collection:   newCollectionModel(cfg, styles, keys, imgEnabled, imgCache),
-		imageEnabled: imgEnabled,
-		imageCache:   imgCache,
+		imageEnabled:   imgEnabled,
+		imageCache:     imgCache,
+		transitionType: cfg.Interface.Transition,
+		selectionType:  cfg.Interface.Selection,
 	}
 }
 
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
+	var cmds []tea.Cmd
 	if m.currentView == ViewSetupToken {
-		return textinput.Blink
+		cmds = append(cmds, textinput.Blink)
 	}
-	return nil
+	if m.needsAnimTick() {
+		cmds = append(cmds, animTickCmd())
+	}
+	return tea.Batch(cmds...)
 }
 
 // Update implements tea.Model.
@@ -117,6 +129,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if msg, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width = msg.Width
 		m.height = msg.Height
+	}
+
+	// Animation tick handling
+	if _, ok := msg.(animTickMsg); ok {
+		m.animFrame++
+		if m.transition.active {
+			m.transition.frame++
+			if m.transition.frame >= m.transition.maxFrame {
+				m.transition.active = false
+			}
+		}
+		var cmds []tea.Cmd
+		if m.needsAnimTick() {
+			cmds = append(cmds, animTickCmd())
+		}
+		return m, tea.Batch(cmds...)
 	}
 
 	// Help overlay handling
@@ -397,9 +425,20 @@ func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// setView changes the current view.
+// setView changes the current view, starting a transition if configured.
 func (m *Model) setView(view View) {
-	m.currentView = view
+	if view != m.currentView && m.transitionType != "" && m.transitionType != "none" {
+		oldView := m.renderCurrentView()
+		m.currentView = view
+		m.transition = startTransition(m.transitionType, oldView)
+	} else {
+		m.currentView = view
+	}
+}
+
+// needsAnimTick returns true if any animation requires periodic ticking.
+func (m Model) needsAnimTick() bool {
+	return m.transition.active || (m.selectionType != "" && m.selectionType != "none")
 }
 
 // renderCurrentView renders the content of the current view.
@@ -438,7 +477,12 @@ func (m Model) View() string {
 		prefix = kittyDeleteSeq
 	}
 
-	return prefix + m.renderCurrentView()
+	content := m.renderCurrentView()
+	if m.transition.active {
+		content = renderTransition(content, m.transition)
+	}
+
+	return prefix + content
 }
 
 // renderHelpOverlay renders a centered keybindings overlay.
