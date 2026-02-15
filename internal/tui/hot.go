@@ -38,6 +38,10 @@ type hotModel struct {
 	filterInput   textinput.Model
 	filteredGames []bgg.HotGame
 
+	// Stats fields (fetched via /thing endpoint)
+	stats       map[int]bgg.Game // game ID → Game (stats info)
+	statsLoaded bool
+
 	// Image fields
 	imageEnabled   bool
 	cache          *imageCache
@@ -51,6 +55,12 @@ type hotModel struct {
 // hotResultMsg is sent when hot games are received.
 type hotResultMsg struct {
 	games []bgg.HotGame
+	err   error
+}
+
+// hotStatsMsg is sent when game stats are received from /thing endpoint.
+type hotStatsMsg struct {
+	games []bgg.Game
 	err   error
 }
 
@@ -72,6 +82,25 @@ func (m hotModel) loadHotGames(client *bgg.Client) tea.Cmd {
 		}
 		games, err := client.GetHotGames()
 		return hotResultMsg{games: games, err: err}
+	}
+}
+
+func loadHotStats(client *bgg.Client, ids []int) tea.Cmd {
+	return func() tea.Msg {
+		var allGames []bgg.Game
+		// Split into batches of 20 (API limit)
+		for i := 0; i < len(ids); i += 20 {
+			end := i + 20
+			if end > len(ids) {
+				end = len(ids)
+			}
+			games, err := client.GetGames(ids[i:end])
+			if err != nil {
+				return hotStatsMsg{err: err}
+			}
+			allGames = append(allGames, games...)
+		}
+		return hotStatsMsg{games: allGames}
 	}
 }
 
@@ -114,8 +143,16 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 				m.state = hotStateResults
 				m.games = msg.games
 				m.cursor = 0
-				m, cmd := m.maybeLoadThumb()
-				return m, cmd
+				m.stats = nil
+				m.statsLoaded = false
+				m, thumbCmd := m.maybeLoadThumb()
+				// Collect game IDs for stats fetch
+				ids := make([]int, len(msg.games))
+				for i, g := range msg.games {
+					ids[i] = g.ID
+				}
+				statsCmd := loadHotStats(client, ids)
+				return m, tea.Batch(thumbCmd, statsCmd)
 			}
 		}
 		return m, nil
@@ -132,6 +169,18 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 					m.imgPlaceholder = msg.imgPlaceholder
 				}
 			}
+			return m, nil
+		}
+
+		// Handle stats loaded
+		if msg, ok := msg.(hotStatsMsg); ok {
+			if msg.err == nil {
+				m.stats = make(map[int]bgg.Game, len(msg.games))
+				for _, g := range msg.games {
+					m.stats[g.ID] = g
+				}
+			}
+			m.statsLoaded = true
 			return m, nil
 		}
 
@@ -215,6 +264,8 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 				m.state = hotStateLoading
 				m.games = nil
 				m.cursor = 0
+				m.stats = nil
+				m.statsLoaded = false
 				return m, m.loadHotGames(client)
 			case key.Matches(msg, m.keys.Back):
 				m.wantsBack = true
@@ -242,6 +293,21 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+const maxNameLen = 45
+
+func truncateName(s string, maxWidth int) string {
+	if lipgloss.Width(s) <= maxWidth {
+		return s
+	}
+	runes := []rune(s)
+	for i := len(runes) - 1; i >= 0; i-- {
+		if lipgloss.Width(string(runes[:i])+"...") <= maxWidth {
+			return string(runes[:i]) + "..."
+		}
+	}
+	return "..."
 }
 
 func (m hotModel) View(width, height int, selType string, animFrame int) string {
@@ -285,6 +351,20 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 				end = len(displayItems)
 			}
 
+			// First pass: find max name+year width for stats alignment
+			maxNameYearLen := 0
+			for i := start; i < end; i++ {
+				game := displayItems[i]
+				year := game.Year
+				if year == "" {
+					year = "N/A"
+				}
+				w := lipgloss.Width(truncateName(game.Name, maxNameLen)) + len(year) + 3 // " (" + year + ")"
+				if w > maxNameYearLen {
+					maxNameYearLen = w
+				}
+			}
+
 			for i := start; i < end; i++ {
 				game := displayItems[i]
 				cursor := "  "
@@ -300,11 +380,34 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 				}
 
 				rankStr := fmt.Sprintf("#%-3d", game.Rank)
-				name := style.Render(game.Name)
+				displayName := truncateName(game.Name, maxNameLen)
+				name := style.Render(displayName)
 				if i == m.cursor && selType != "" && selType != "none" {
-					name = renderSelectionAnim(game.Name, selType, animFrame)
+					name = renderSelectionAnim(displayName, selType, animFrame)
 				}
 				line := fmt.Sprintf("%s%s %s (%s)", cursor, m.styles.Rank.Render(rankStr), name, year)
+
+				// Append stats if available, aligned to a fixed column
+				if s, ok := m.stats[game.ID]; ok {
+					var parts []string
+					if s.Rating > 0 {
+						parts = append(parts, fmt.Sprintf("★%.2f", s.Rating))
+					}
+					if s.Weight > 0 {
+						parts = append(parts, fmt.Sprintf("W%.2f", s.Weight))
+					}
+					if s.Rank > 0 {
+						parts = append(parts, fmt.Sprintf("#%d", s.Rank))
+					} else {
+						parts = append(parts, "-")
+					}
+					if len(parts) > 0 {
+						nameYearLen := lipgloss.Width(displayName) + len(year) + 3
+						padding := maxNameYearLen - nameYearLen + 2
+						line += strings.Repeat(" ", padding) + m.styles.Subtitle.Render(strings.Join(parts, " "))
+					}
+				}
+
 				b.WriteString(line)
 				b.WriteString("\n")
 			}
