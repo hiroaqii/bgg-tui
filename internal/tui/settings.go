@@ -27,6 +27,7 @@ type settingsModel struct {
 	descWidthInput  textinput.Model
 	descHeightInput textinput.Model
 	wantsBack       bool
+	themeChanged    bool
 }
 
 func newSettingsModel(cfg *config.Config, styles Styles, keys KeyMap) settingsModel {
@@ -80,7 +81,7 @@ func newSettingsModel(cfg *config.Config, styles Styles, keys KeyMap) settingsMo
 }
 
 func (m settingsModel) itemCount() int {
-	return 9 // Token, Username, ShowImages, ThreadWidth, ThreadHeight, ListPageSize, DescriptionWidth, DescriptionHeight, ShowOnlyOwned
+	return 10 // Token, Username, ShowImages, ThreadWidth, ThreadHeight, ListPageSize, DescriptionWidth, DescriptionHeight, ShowOnlyOwned, ColorTheme
 }
 
 func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
@@ -223,6 +224,16 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 			case 8: // Show Only Owned
 				m.config.Collection.ShowOnlyOwned = !m.config.Collection.ShowOnlyOwned
 				m.config.Save()
+			case 9: // Color Theme
+				names := ThemeNames
+				for i, n := range names {
+					if n == m.config.Interface.ColorTheme {
+						m.config.Interface.ColorTheme = names[(i+1)%len(names)]
+						break
+					}
+				}
+				m.config.Save()
+				m.themeChanged = true
 			}
 		case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Escape):
 			m.wantsBack = true
@@ -397,6 +408,24 @@ func (m settingsModel) View(width, height int) string {
 		ownedValue = "ON"
 	}
 	b.WriteString(fmt.Sprintf("%s%s: [%s]\n", cursor, style.Render("Show Only Owned"), ownedValue))
+
+	b.WriteString("\n")
+
+	// Interface Section
+	b.WriteString(m.styles.Subtitle.Render("Interface"))
+	b.WriteString("\n")
+
+	// Color Theme
+	cursor = "  "
+	if m.cursor == 9 {
+		cursor = "> "
+	}
+	style = m.styles.MenuItem
+	if m.cursor == 9 {
+		style = m.styles.MenuItemFocus
+	}
+	themeValue := m.config.Interface.ColorTheme
+	b.WriteString(fmt.Sprintf("%s%s: [%s]\n", cursor, style.Render("Color Theme"), themeValue))
 
 	b.WriteString("\n")
 

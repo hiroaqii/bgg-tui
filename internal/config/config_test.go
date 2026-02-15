@@ -37,8 +37,8 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("expected ListPageSize 25, got %d", cfg.Display.ListPageSize)
 	}
 
-	if cfg.Interface.ColorTheme != "dark" {
-		t.Errorf("expected ColorTheme 'dark', got '%s'", cfg.Interface.ColorTheme)
+	if cfg.Interface.ColorTheme != "default" {
+		t.Errorf("expected ColorTheme 'default', got '%s'", cfg.Interface.ColorTheme)
 	}
 }
 

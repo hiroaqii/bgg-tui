@@ -7,15 +7,82 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// ThemePalette defines the color palette for a theme.
+type ThemePalette struct {
+	Primary    lipgloss.Color
+	Secondary  lipgloss.Color
+	Accent     lipgloss.Color
+	Error      lipgloss.Color
+	Muted      lipgloss.Color
+	Border     lipgloss.Color
+	Foreground lipgloss.Color
+}
+
+var themes = map[string]ThemePalette{
+	"default": {
+		Primary:    lipgloss.Color("#CBA6F7"),
+		Secondary:  lipgloss.Color("#89B4FA"),
+		Accent:     lipgloss.Color("#FAB387"),
+		Error:      lipgloss.Color("#F38BA8"),
+		Muted:      lipgloss.Color("#6C7086"),
+		Border:     lipgloss.Color("#313244"),
+		Foreground: lipgloss.Color("#CDD6F4"),
+	},
+	"blue": {
+		Primary:    lipgloss.Color("#88C0D0"),
+		Secondary:  lipgloss.Color("#8FBCBB"),
+		Accent:     lipgloss.Color("#81A1C1"),
+		Error:      lipgloss.Color("#BF616A"),
+		Muted:      lipgloss.Color("#5E81AC"),
+		Border:     lipgloss.Color("#3B4252"),
+		Foreground: lipgloss.Color("#D8DEE9"),
+	},
+	"orange": {
+		Primary:    lipgloss.Color("#E0944A"),
+		Secondary:  lipgloss.Color("#D4A84B"),
+		Accent:     lipgloss.Color("#CC8B5E"),
+		Error:      lipgloss.Color("#C96B6B"),
+		Muted:      lipgloss.Color("#8C7A65"),
+		Border:     lipgloss.Color("#4A3D32"),
+		Foreground: lipgloss.Color("#E8DDD0"),
+	},
+	"green": {
+		Primary:    lipgloss.Color("#33FF33"),
+		Secondary:  lipgloss.Color("#20C020"),
+		Accent:     lipgloss.Color("#66FF66"),
+		Error:      lipgloss.Color("#FF4444"),
+		Muted:      lipgloss.Color("#2E8B2E"),
+		Border:     lipgloss.Color("#1A3A1A"),
+		Foreground: lipgloss.Color("#B8FFB8"),
+	},
+}
+
+// ThemeNames is the ordered list of theme names for cycling.
+var ThemeNames = []string{"default", "blue", "orange", "green"}
+
 // Colors for the application.
 var (
-	ColorPrimary   = lipgloss.Color("#7C3AED") // Purple
-	ColorSecondary = lipgloss.Color("#10B981") // Green
-	ColorAccent    = lipgloss.Color("#F59E0B") // Amber
-	ColorError     = lipgloss.Color("#EF4444") // Red
-	ColorMuted     = lipgloss.Color("#6B7280") // Gray
-	ColorBorder    = lipgloss.Color("#374151") // Dark gray
+	ColorPrimary   = lipgloss.Color("#7C3AED")
+	ColorSecondary = lipgloss.Color("#10B981")
+	ColorAccent    = lipgloss.Color("#F59E0B")
+	ColorError     = lipgloss.Color("#EF4444")
+	ColorMuted     = lipgloss.Color("#6B7280")
+	ColorBorder    = lipgloss.Color("#374151")
 )
+
+// ApplyTheme updates the package-level color variables based on the theme.
+func ApplyTheme(theme string) {
+	palette, ok := themes[theme]
+	if !ok {
+		palette = themes["default"]
+	}
+	ColorPrimary = palette.Primary
+	ColorSecondary = palette.Secondary
+	ColorAccent = palette.Accent
+	ColorError = palette.Error
+	ColorMuted = palette.Muted
+	ColorBorder = palette.Border
+}
 
 // Styles contains all the styles used in the application.
 type Styles struct {
@@ -38,8 +105,16 @@ type Styles struct {
 	Value         lipgloss.Style
 }
 
-// DefaultStyles returns the default styles for the application.
-func DefaultStyles() Styles {
+// NewStyles returns styles for the application based on the given theme.
+func NewStyles(theme string) Styles {
+	ApplyTheme(theme)
+
+	palette, ok := themes[theme]
+	if !ok {
+		palette = themes["default"]
+	}
+	fgColor := palette.Foreground
+
 	return Styles{
 		Title: lipgloss.NewStyle().
 			Bold(true).
@@ -84,7 +159,7 @@ func DefaultStyles() Styles {
 			Padding(1),
 
 		Badge: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")).
+			Foreground(fgColor).
 			Background(ColorPrimary).
 			Padding(0, 1),
 
@@ -105,7 +180,7 @@ func DefaultStyles() Styles {
 			Width(12),
 
 		Value: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")),
+			Foreground(fgColor),
 	}
 }
 

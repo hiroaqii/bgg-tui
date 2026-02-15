@@ -53,7 +53,7 @@ type Model struct {
 
 // New creates a new application model.
 func New(cfg *config.Config) Model {
-	styles := DefaultStyles()
+	styles := NewStyles(cfg.Interface.ColorTheme)
 	keys := DefaultKeyMap()
 
 	// Create BGG client if token is available
@@ -208,6 +208,12 @@ func (m Model) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.settings, cmd = m.settings.Update(msg)
+
+	if m.settings.themeChanged {
+		m.settings.themeChanged = false
+		m.styles = NewStyles(m.config.Interface.ColorTheme)
+		m.settings.styles = m.styles
+	}
 
 	if m.settings.wantsBack {
 		m.settings.wantsBack = false

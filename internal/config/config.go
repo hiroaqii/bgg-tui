@@ -39,7 +39,7 @@ type CollectionConfig struct {
 
 // InterfaceConfig contains interface-related configuration.
 type InterfaceConfig struct {
-	ColorTheme string `toml:"color_theme"` // "dark", "light"
+	ColorTheme string `toml:"color_theme"` // "default", "blue", "orange", "green"
 }
 
 // DefaultConfig returns the default configuration.
@@ -62,7 +62,7 @@ func DefaultConfig() *Config {
 			ShowOnlyOwned:   false,
 		},
 		Interface: InterfaceConfig{
-			ColorTheme: "dark",
+			ColorTheme: "default",
 		},
 	}
 }
