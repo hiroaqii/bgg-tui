@@ -41,7 +41,7 @@ type CollectionConfig struct {
 type InterfaceConfig struct {
 	ColorTheme string `toml:"color_theme"` // "default", "blue", "orange", "green"
 	Transition string `toml:"transition"`  // "none", "fade", "typing", "wave", "glitch", "rainbow", "blink"
-	Selection  string `toml:"selection"`   // "none", "rainbow", "wave", "blink", "glitch"
+	Selection  string `toml:"selection"`   // "none", "wave", "blink", "glitch"
 }
 
 // DefaultConfig returns the default configuration.
@@ -66,7 +66,7 @@ func DefaultConfig() *Config {
 		Interface: InterfaceConfig{
 			ColorTheme: "default",
 			Transition: "fade",
-			Selection:  "rainbow",
+			Selection:  "wave",
 		},
 	}
 }

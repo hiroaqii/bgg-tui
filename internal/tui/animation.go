@@ -31,10 +31,6 @@ var (
 		"#FF6B6B", "#FFE66D", "#4ECDC4", "#45B7D1", "#96CEB4",
 	}
 
-	rainbowColors = []lipgloss.Color{
-		"#FF0000", "#FF7F00", "#FFFF00", "#00FF00", "#0000FF", "#4B0082", "#9400D3",
-	}
-
 	glitchChars = []rune("@#$%&*!?░▒▓█")
 )
 
@@ -42,7 +38,7 @@ var (
 var TransitionNames = []string{"none", "fade", "typing", "glitch"}
 
 // SelectionNames lists all available selection animation types for cycling in settings.
-var SelectionNames = []string{"none", "rainbow", "wave", "blink", "glitch"}
+var SelectionNames = []string{"none", "wave", "blink", "glitch"}
 
 // stripAnsi removes ANSI escape sequences from a string.
 func stripAnsi(str string) string {
@@ -183,8 +179,6 @@ func renderTransitionTyping(content string, frame int) string {
 // Returns the text as-is if the selection type is unknown or "none".
 func renderSelectionAnim(text string, selType string, frame int) string {
 	switch selType {
-	case "rainbow":
-		return renderSelectionRainbow(text, frame)
 	case "wave":
 		return renderSelectionWave(text, frame)
 	case "blink":
@@ -195,22 +189,11 @@ func renderSelectionAnim(text string, selType string, frame int) string {
 	return text
 }
 
-// renderSelectionRainbow applies rainbow colors per character with bold.
-func renderSelectionRainbow(text string, frame int) string {
-	var b strings.Builder
-	for i, ch := range text {
-		colorIdx := (i + frame) % len(rainbowColors)
-		style := lipgloss.NewStyle().Foreground(rainbowColors[colorIdx]).Bold(true)
-		b.WriteString(style.Render(string(ch)))
-	}
-	return b.String()
-}
-
 // renderSelectionWave applies sin-based 5-color wave per character with bold.
 func renderSelectionWave(text string, frame int) string {
 	var b strings.Builder
 	for i, ch := range text {
-		wave := math.Sin(float64(frame)*0.15 + float64(i)*0.3)
+		wave := math.Sin(float64(frame)*0.25 + float64(i)*0.3)
 		colorIdx := int((wave+1)/2*float64(len(waveColors)-1)) % len(waveColors)
 		style := lipgloss.NewStyle().Foreground(waveColors[colorIdx]).Bold(true)
 		b.WriteString(style.Render(string(ch)))
@@ -221,7 +204,7 @@ func renderSelectionWave(text string, frame int) string {
 // renderSelectionBlink toggles between bright and dim colors with bold.
 func renderSelectionBlink(text string, frame int) string {
 	var color lipgloss.Color
-	if (frame/15)%2 == 0 {
+	if (frame/10)%2 == 0 {
 		color = lipgloss.Color("#F8F8F2")
 	} else {
 		color = lipgloss.Color("#44475A")

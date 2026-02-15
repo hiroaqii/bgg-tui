@@ -45,8 +45,8 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("expected Transition 'fade', got '%s'", cfg.Interface.Transition)
 	}
 
-	if cfg.Interface.Selection != "rainbow" {
-		t.Errorf("expected Selection 'rainbow', got '%s'", cfg.Interface.Selection)
+	if cfg.Interface.Selection != "wave" {
+		t.Errorf("expected Selection 'wave', got '%s'", cfg.Interface.Selection)
 	}
 }
 
