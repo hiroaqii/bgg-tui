@@ -33,6 +33,7 @@ type threadModel struct {
 	viewHeight int      // Terminal height for dynamic layout
 	errMsg     string
 	wantsBack  bool
+	wantsMenu  bool
 }
 
 // threadResultMsg is sent when thread content is received.
@@ -123,8 +124,10 @@ func (m threadModel) Update(msg tea.Msg) (threadModel, tea.Cmd) {
 				// Open in browser
 				url := fmt.Sprintf("https://boardgamegeek.com/thread/%d", m.threadID)
 				openBrowser(url)
-			case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Escape):
+			case key.Matches(msg, m.keys.Back):
 				m.wantsBack = true
+			case key.Matches(msg, m.keys.Escape):
+				m.wantsMenu = true
 			}
 		}
 		return m, nil
@@ -133,8 +136,10 @@ func (m threadModel) Update(msg tea.Msg) (threadModel, tea.Cmd) {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch {
-			case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Escape):
+			case key.Matches(msg, m.keys.Back):
 				m.wantsBack = true
+			case key.Matches(msg, m.keys.Escape):
+				m.wantsMenu = true
 			}
 		}
 		return m, nil
@@ -181,14 +186,14 @@ func (m threadModel) View(width, height int) string {
 		}
 
 		b.WriteString("\n")
-		b.WriteString(m.styles.Help.Render("j/k: Scroll  o: Open BGG  b: Back"))
+		b.WriteString(m.styles.Help.Render("j/k: Scroll  o: Open BGG  b: Back  Esc: Menu"))
 
 	case threadStateError:
 		b.WriteString(m.styles.Title.Render("Thread"))
 		b.WriteString("\n\n")
 		b.WriteString(m.styles.Error.Render("Error: " + m.errMsg))
 		b.WriteString("\n\n")
-		b.WriteString(m.styles.Help.Render("b: Back"))
+		b.WriteString(m.styles.Help.Render("b: Back  Esc: Menu"))
 	}
 
 	content := b.String()

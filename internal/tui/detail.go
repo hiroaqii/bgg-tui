@@ -37,6 +37,7 @@ type detailModel struct {
 	descLines       []string // Pre-wrapped description lines
 	maxContentWidth int      // max lipgloss.Width across all contentLines
 	wantsBack    bool
+	wantsMenu    bool
 	wantsForum   bool // Navigate to forum view
 
 	// Layout fields
@@ -302,8 +303,10 @@ func (m detailModel) Update(msg tea.Msg) (detailModel, tea.Cmd) {
 				openBrowser(url)
 			case key.Matches(msg, m.keys.Forum):
 				m.wantsForum = true
-			case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Escape):
+			case key.Matches(msg, m.keys.Back):
 				m.wantsBack = true
+			case key.Matches(msg, m.keys.Escape):
+				m.wantsMenu = true
 			}
 		}
 		return m, nil
@@ -312,8 +315,10 @@ func (m detailModel) Update(msg tea.Msg) (detailModel, tea.Cmd) {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch {
-			case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Escape):
+			case key.Matches(msg, m.keys.Back):
 				m.wantsBack = true
+			case key.Matches(msg, m.keys.Escape):
+				m.wantsMenu = true
 			}
 		}
 		return m, nil
@@ -364,7 +369,7 @@ func (m detailModel) View(width, height int) string {
 		}
 
 		b.WriteString("\n")
-		helpLine := m.styles.Help.Render("j/k: Scroll  o: Open BGG  f: Forum  ?: Help  b: Back")
+		helpLine := m.styles.Help.Render("j/k: Scroll  o: Open BGG  f: Forum  ?: Help  b: Back  Esc: Menu")
 		if helpWidth := lipgloss.Width(helpLine); helpWidth < m.maxContentWidth {
 			helpLine += strings.Repeat(" ", m.maxContentWidth-helpWidth)
 		}
@@ -375,7 +380,7 @@ func (m detailModel) View(width, height int) string {
 		b.WriteString("\n\n")
 		b.WriteString(m.styles.Error.Render("Error: " + m.errMsg))
 		b.WriteString("\n\n")
-		b.WriteString(m.styles.Help.Render("b: Back"))
+		b.WriteString(m.styles.Help.Render("b: Back  Esc: Menu"))
 	}
 
 	content := b.String()

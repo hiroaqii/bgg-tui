@@ -32,6 +32,7 @@ type hotModel struct {
 	errMsg    string
 	selected  *int // Selected game ID for detail view
 	wantsBack bool
+	wantsMenu bool
 
 	filtering     bool
 	filterInput   textinput.Model
@@ -215,8 +216,10 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 				m.games = nil
 				m.cursor = 0
 				return m, m.loadHotGames(client)
-			case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Escape):
+			case key.Matches(msg, m.keys.Back):
 				m.wantsBack = true
+			case key.Matches(msg, m.keys.Escape):
+				m.wantsMenu = true
 			}
 		}
 		return m, nil
@@ -229,8 +232,10 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 				m.state = hotStateLoading
 				m.errMsg = ""
 				return m, m.loadHotGames(client)
-			case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Escape):
+			case key.Matches(msg, m.keys.Back):
 				m.wantsBack = true
+			case key.Matches(msg, m.keys.Escape):
+				m.wantsMenu = true
 			}
 		}
 		return m, nil
@@ -309,7 +314,7 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 		if m.filtering {
 			b.WriteString(m.styles.Help.Render("↑/↓: Navigate  Enter: Detail  Esc: Clear filter"))
 		} else {
-			b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Detail  /: Filter  r: Refresh  ?: Help  b: Back"))
+			b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Detail  /: Filter  r: Refresh  ?: Help  Esc: Menu"))
 		}
 
 		// Add image panel
@@ -336,7 +341,7 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 		b.WriteString("\n\n")
 		b.WriteString(m.styles.Error.Render("Error: " + m.errMsg))
 		b.WriteString("\n\n")
-		b.WriteString(m.styles.Help.Render("Enter/r: Retry  b: Back"))
+		b.WriteString(m.styles.Help.Render("Enter/r: Retry  Esc: Menu"))
 	}
 
 	content := b.String()

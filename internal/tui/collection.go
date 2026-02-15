@@ -34,6 +34,7 @@ type collectionModel struct {
 	errMsg    string
 	selected  *int // Selected game ID for detail view
 	wantsBack bool
+	wantsMenu bool
 
 	filtering     bool
 	filterInput   textinput.Model
@@ -129,7 +130,7 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 					return m, m.loadCollection(client, username, m.config.Collection.ShowOnlyOwned)
 				}
 			case key.Matches(msg, m.keys.Escape):
-				m.wantsBack = true
+				m.wantsMenu = true
 				return m, nil
 			}
 		}
@@ -249,8 +250,10 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 				m.items = nil
 				m.cursor = 0
 				return m, textinput.Blink
-			case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Escape):
+			case key.Matches(msg, m.keys.Back):
 				m.wantsBack = true
+			case key.Matches(msg, m.keys.Escape):
+				m.wantsMenu = true
 			}
 		}
 		return m, nil
@@ -265,8 +268,10 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 				m.input.Focus()
 				m.errMsg = ""
 				return m, textinput.Blink
-			case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Escape):
+			case key.Matches(msg, m.keys.Back):
 				m.wantsBack = true
+			case key.Matches(msg, m.keys.Escape):
+				m.wantsMenu = true
 			}
 		}
 		return m, nil
@@ -286,7 +291,7 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 		b.WriteString("Enter BGG username:\n")
 		b.WriteString(m.input.View())
 		b.WriteString("\n\n")
-		b.WriteString(m.styles.Help.Render("Enter: Load Collection  Esc: Back"))
+		b.WriteString(m.styles.Help.Render("Enter: Load Collection  Esc: Menu"))
 
 	case collectionStateLoading:
 		b.WriteString(m.styles.Title.Render("User Collection"))
@@ -361,7 +366,7 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 		if m.filtering {
 			b.WriteString(m.styles.Help.Render("↑/↓: Navigate  Enter: Detail  Esc: Clear filter"))
 		} else {
-			b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Detail  /: Filter  u: Change User  ?: Help  b: Back"))
+			b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Detail  /: Filter  u: Change User  ?: Help  b: Back  Esc: Menu"))
 		}
 
 		// Add image panel
@@ -388,7 +393,7 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 		b.WriteString("\n\n")
 		b.WriteString(m.styles.Error.Render("Error: " + m.errMsg))
 		b.WriteString("\n\n")
-		b.WriteString(m.styles.Help.Render("Enter: Retry  Esc: Back"))
+		b.WriteString(m.styles.Help.Render("Enter: Retry  b: Back  Esc: Menu"))
 	}
 
 	content := b.String()

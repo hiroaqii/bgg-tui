@@ -262,6 +262,11 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = animTickCmd()
 	}
 
+	if m.settings.wantsMenu {
+		m.settings.wantsMenu = false
+		m.setView(ViewMenu)
+	}
+
 	if m.settings.wantsBack {
 		m.settings.wantsBack = false
 		m.setView(ViewMenu)
@@ -280,6 +285,14 @@ func (m Model) updateSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setView(ViewSearchInput)
 	case searchStateLoading, searchStateResults, searchStateError:
 		m.setView(ViewSearchResults)
+	}
+
+	if m.search.wantsMenu {
+		m.search.wantsMenu = false
+		m.setView(ViewMenu)
+		if m.imageEnabled {
+			m.needsClearImages = true
+		}
 	}
 
 	if m.search.wantsBack {
@@ -310,6 +323,14 @@ func (m Model) updateSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) updateHot(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.hot, cmd = m.hot.Update(msg, m.bggClient)
+
+	if m.hot.wantsMenu {
+		m.hot.wantsMenu = false
+		m.setView(ViewMenu)
+		if m.imageEnabled {
+			m.needsClearImages = true
+		}
+	}
 
 	if m.hot.wantsBack {
 		m.hot.wantsBack = false
@@ -348,6 +369,14 @@ func (m Model) updateCollection(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setView(ViewCollectionList)
 	}
 
+	if m.collection.wantsMenu {
+		m.collection.wantsMenu = false
+		m.setView(ViewMenu)
+		if m.imageEnabled {
+			m.needsClearImages = true
+		}
+	}
+
 	if m.collection.wantsBack {
 		m.collection.wantsBack = false
 		m.setView(ViewMenu)
@@ -376,6 +405,14 @@ func (m Model) updateCollection(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.detail, cmd = m.detail.Update(msg)
+
+	if m.detail.wantsMenu {
+		m.detail.wantsMenu = false
+		m.setView(ViewMenu)
+		if m.imageEnabled {
+			m.needsClearImages = true
+		}
+	}
 
 	if m.detail.wantsBack {
 		m.detail.wantsBack = false
@@ -415,6 +452,11 @@ func (m Model) updateForum(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setView(ViewThreadList)
 	}
 
+	if m.forum.wantsMenu {
+		m.forum.wantsMenu = false
+		m.setView(ViewMenu)
+	}
+
 	if m.forum.wantsBack {
 		m.forum.wantsBack = false
 		m.setView(ViewDetail)
@@ -435,6 +477,11 @@ func (m Model) updateForum(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) updateThread(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.thread, cmd = m.thread.Update(msg)
+
+	if m.thread.wantsMenu {
+		m.thread.wantsMenu = false
+		m.setView(ViewMenu)
+	}
 
 	if m.thread.wantsBack {
 		m.thread.wantsBack = false
