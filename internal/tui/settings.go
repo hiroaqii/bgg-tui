@@ -139,7 +139,6 @@ func (m *settingsModel) buildItems() []settingItem {
 			onEnter: func() {
 				cfg.Interface.ColorTheme = cycleValue(cfg.Interface.ColorTheme, ThemeNames)
 				cfg.Save()
-				m.themeChanged = true
 			},
 		},
 		{
@@ -148,7 +147,6 @@ func (m *settingsModel) buildItems() []settingItem {
 			onEnter: func() {
 				cfg.Interface.Transition = cycleValue(cfg.Interface.Transition, TransitionNames)
 				cfg.Save()
-				m.transitionChanged = true
 			},
 		},
 		{
@@ -157,7 +155,6 @@ func (m *settingsModel) buildItems() []settingItem {
 			onEnter: func() {
 				cfg.Interface.Selection = cycleValue(cfg.Interface.Selection, SelectionNames)
 				cfg.Save()
-				m.selectionChanged = true
 			},
 		},
 		{
@@ -320,7 +317,13 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 			case settingText:
 				return m, m.startEditing(item.editField)
 			case settingCycle, settingToggle:
+				oldTheme := m.config.Interface.ColorTheme
+				oldTransition := m.config.Interface.Transition
+				oldSelection := m.config.Interface.Selection
 				item.onEnter()
+				m.themeChanged = m.config.Interface.ColorTheme != oldTheme
+				m.transitionChanged = m.config.Interface.Transition != oldTransition
+				m.selectionChanged = m.config.Interface.Selection != oldSelection
 			}
 		case key.Matches(msg, m.keys.Back):
 			m.wantsBack = true
