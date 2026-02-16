@@ -70,14 +70,26 @@ func NewClient(cfg Config) (*Client, error) {
 	}, nil
 }
 
-// doRequest performs an HTTP GET request with authentication and retry logic.
-func (c *Client) doRequest(endpoint string) ([]byte, error) {
+// requestOptions controls retry behavior for HTTP requests.
+type requestOptions struct {
+	maxRetries         int
+	exponentialBackoff bool // true: delay*attempt, false: fixed delay
+	retryOn429         bool // retry on 429 with sleep
+	retryOn503         bool // retry on 503
+}
+
+// doRequestWithOpts performs an HTTP GET request with configurable retry behavior.
+func (c *Client) doRequestWithOpts(endpoint string, opts requestOptions) ([]byte, error) {
 	url := c.baseURL + endpoint
 
 	var lastErr error
-	for attempt := 0; attempt <= c.retryCount; attempt++ {
+	for attempt := 0; attempt <= opts.maxRetries; attempt++ {
 		if attempt > 0 {
-			time.Sleep(c.retryDelay * time.Duration(attempt)) // Exponential backoff
+			if opts.exponentialBackoff {
+				time.Sleep(c.retryDelay * time.Duration(attempt))
+			} else {
+				time.Sleep(c.retryDelay)
+			}
 		}
 
 		req, err := http.NewRequest(http.MethodGet, url, nil)
@@ -117,7 +129,16 @@ func (c *Client) doRequest(endpoint string) ([]byte, error) {
 			return nil, newNotFoundError(0)
 
 		case http.StatusTooManyRequests:
-			retryAfter := 5 * time.Second // Default retry after
+			if !opts.retryOn429 {
+				retryAfter := 5 * time.Second
+				if ra := resp.Header.Get("Retry-After"); ra != "" {
+					if d, err := time.ParseDuration(ra + "s"); err == nil {
+						retryAfter = d
+					}
+				}
+				return nil, newRateLimitError("rate limit exceeded", retryAfter)
+			}
+			retryAfter := 5 * time.Second
 			if ra := resp.Header.Get("Retry-After"); ra != "" {
 				if d, err := time.ParseDuration(ra + "s"); err == nil {
 					retryAfter = d
@@ -128,6 +149,9 @@ func (c *Client) doRequest(endpoint string) ([]byte, error) {
 			continue
 
 		case http.StatusServiceUnavailable:
+			if !opts.retryOn503 {
+				return nil, newNetworkError(fmt.Sprintf("unexpected status code: %d", resp.StatusCode), resp.StatusCode, nil)
+			}
 			lastErr = newNetworkError("service unavailable", resp.StatusCode, nil)
 			continue
 
@@ -142,68 +166,23 @@ func (c *Client) doRequest(endpoint string) ([]byte, error) {
 	return nil, newNetworkError("max retries exceeded", 0, nil)
 }
 
+// doRequest performs an HTTP GET request with authentication and retry logic.
+func (c *Client) doRequest(endpoint string) ([]byte, error) {
+	return c.doRequestWithOpts(endpoint, requestOptions{
+		maxRetries:         c.retryCount,
+		exponentialBackoff: true,
+		retryOn429:         true,
+		retryOn503:         true,
+	})
+}
+
 // doRequestWithRetryOn202 performs a request with special handling for 202 responses.
 // This is used for Collection API which returns 202 when data is being prepared.
 func (c *Client) doRequestWithRetryOn202(endpoint string, maxRetries int) ([]byte, error) {
-	url := c.baseURL + endpoint
-
-	var lastErr error
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		if attempt > 0 {
-			time.Sleep(c.retryDelay)
-		}
-
-		req, err := http.NewRequest(http.MethodGet, url, nil)
-		if err != nil {
-			return nil, newNetworkError("failed to create request", 0, err)
-		}
-
-		req.Header.Set("Authorization", "Bearer "+c.token)
-		req.Header.Set("Accept", "application/xml")
-
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			lastErr = newNetworkError("request failed", 0, err)
-			continue
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			lastErr = newNetworkError("failed to read response body", 0, err)
-			continue
-		}
-
-		switch resp.StatusCode {
-		case http.StatusOK:
-			return body, nil
-
-		case http.StatusAccepted:
-			// 202 - Collection is being prepared, retry
-			continue
-
-		case http.StatusUnauthorized:
-			return nil, newAuthError("invalid or expired token", nil)
-
-		case http.StatusNotFound:
-			return nil, newNotFoundError(0)
-
-		case http.StatusTooManyRequests:
-			retryAfter := 5 * time.Second
-			if ra := resp.Header.Get("Retry-After"); ra != "" {
-				if d, err := time.ParseDuration(ra + "s"); err == nil {
-					retryAfter = d
-				}
-			}
-			return nil, newRateLimitError("rate limit exceeded", retryAfter)
-
-		default:
-			return nil, newNetworkError(fmt.Sprintf("unexpected status code: %d", resp.StatusCode), resp.StatusCode, nil)
-		}
-	}
-
-	if lastErr != nil {
-		return nil, lastErr
-	}
-	return nil, newNetworkError("collection not ready after max retries", http.StatusAccepted, nil)
+	return c.doRequestWithOpts(endpoint, requestOptions{
+		maxRetries:         maxRetries,
+		exponentialBackoff: false,
+		retryOn429:         false,
+		retryOn503:         false,
+	})
 }

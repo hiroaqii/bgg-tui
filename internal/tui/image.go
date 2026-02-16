@@ -230,6 +230,44 @@ func kittyPlaceholder(id uint32, rows, cols int) string {
 	return sb.String()
 }
 
+// renderedImage holds the results of rendering a Kitty protocol image.
+type renderedImage struct {
+	transmit    string
+	placeholder string
+	rows        int
+	cols        int
+}
+
+// renderKittyImage downloads, resizes, and encodes an image for the Kitty protocol.
+// If pad is true, the placeholder is padded to exactly maxRows x maxCols.
+func renderKittyImage(cache *imageCache, url string, id uint32, maxCols, maxRows int, pad bool) (renderedImage, error) {
+	path, err := cache.Download(url)
+	if err != nil {
+		return renderedImage{}, err
+	}
+
+	cellW, cellH := termCellSize()
+	img, err := loadAndResize(path, maxCols*cellW, maxRows*cellH)
+	if err != nil {
+		return renderedImage{}, err
+	}
+
+	bounds := img.Bounds()
+	actualCols := max((bounds.Dx()+cellW-1)/cellW, 1)
+	actualRows := max((bounds.Dy()+cellH-1)/cellH, 1)
+
+	transmit, err := kittyTransmitString(img, id)
+	if err != nil {
+		return renderedImage{}, err
+	}
+
+	placeholder := kittyPlaceholder(id, actualRows, actualCols)
+	if pad {
+		placeholder = padPlaceholder(placeholder, maxRows, maxCols)
+	}
+	return renderedImage{transmit: transmit, placeholder: placeholder, rows: actualRows, cols: actualCols}, nil
+}
+
 // imageLoadedMsg is sent when an image has been loaded and rendered (Detail view).
 type imageLoadedMsg struct {
 	url            string
@@ -239,7 +277,11 @@ type imageLoadedMsg struct {
 	err            error
 }
 
-const listImageID uint32 = 2 // Detail uses 1
+const detailImageID uint32 = 1
+const detailImageCols = 20
+const detailImageRows = 10
+
+const listImageID uint32 = 2
 
 // listImageMsg is sent when a list thumbnail has been loaded (Hot/Collection views).
 type listImageMsg struct {
@@ -326,40 +368,54 @@ func fixedSizeNoImagePanel(cols, rows int) string {
 	return sb.String()
 }
 
+// listImageState manages image display state for list views (hot/collection).
+type listImageState struct {
+	enabled      bool
+	cache        *imageCache
+	transmit     string
+	placeholder  string
+	loading      bool
+	hasError     bool
+	lastThumbURL string
+}
+
+// maybeLoad starts loading a thumbnail if the URL has changed.
+func (s *listImageState) maybeLoad(thumbURL string) tea.Cmd {
+	if !s.enabled || s.cache == nil {
+		return nil
+	}
+	if thumbURL == "" || thumbURL == s.lastThumbURL {
+		return nil
+	}
+	s.lastThumbURL = thumbURL
+	s.loading = true
+	s.hasError = false
+	s.transmit = ""
+	s.placeholder = ""
+	return loadListImage(s.cache, thumbURL)
+}
+
+// handleLoaded processes a listImageMsg and updates image state.
+func (s *listImageState) handleLoaded(msg listImageMsg) {
+	if msg.url != s.lastThumbURL {
+		return
+	}
+	s.loading = false
+	if msg.err != nil {
+		s.hasError = true
+	} else {
+		s.transmit = msg.imgTransmit
+		s.placeholder = msg.imgPlaceholder
+	}
+}
+
 // loadListImage loads a thumbnail image for list views (hot/collection).
 func loadListImage(cache *imageCache, url string) tea.Cmd {
 	return func() tea.Msg {
-		path, err := cache.Download(url)
+		ri, err := renderKittyImage(cache, url, listImageID, listImageCols, listImageRows, true)
 		if err != nil {
 			return listImageMsg{url: url, err: err}
 		}
-
-		cellW, cellH := termCellSize()
-		pixW := listImageCols * cellW
-		pixH := listImageRows * cellH
-
-		img, err := loadAndResize(path, pixW, pixH)
-		if err != nil {
-			return listImageMsg{url: url, err: err}
-		}
-
-		bounds := img.Bounds()
-		actualCols := (bounds.Dx() + cellW - 1) / cellW
-		actualRows := (bounds.Dy() + cellH - 1) / cellH
-		if actualCols < 1 {
-			actualCols = 1
-		}
-		if actualRows < 1 {
-			actualRows = 1
-		}
-
-		transmit, err := kittyTransmitString(img, listImageID)
-		if err != nil {
-			return listImageMsg{url: url, err: err}
-		}
-
-		placeholder := kittyPlaceholder(listImageID, actualRows, actualCols)
-		placeholder = padPlaceholder(placeholder, listImageRows, listImageCols)
-		return listImageMsg{url: url, imgTransmit: transmit, imgPlaceholder: placeholder}
+		return listImageMsg{url: url, imgTransmit: ri.transmit, imgPlaceholder: ri.placeholder}
 	}
 }

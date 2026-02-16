@@ -78,7 +78,7 @@ func (m *threadModel) recalcScroll() {
 func (m threadModel) loadThread(client *bgg.Client) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
-			return threadResultMsg{err: fmt.Errorf("API token not configured. Please set your token in Settings.")}
+			return threadResultMsg{err: fmt.Errorf(errNoToken)}
 		}
 		thread, err := client.GetThread(m.threadID)
 		return threadResultMsg{thread: thread, err: err}
@@ -168,16 +168,11 @@ func (m threadModel) View(width, height int) string {
 
 	switch m.state {
 	case threadStateLoading:
-		b.WriteString(m.styles.Title.Render("Thread"))
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Loading.Render("Loading thread..."))
+		writeLoadingView(&b, m.styles, "Thread", "Loading thread...")
 
 	case threadStateResults:
 		// Title
-		subject := m.thread.Subject
-		if len(subject) > 60 {
-			subject = subject[:57] + "..."
-		}
+		subject := truncateName(m.thread.Subject, 60)
 		b.WriteString(m.styles.Title.Render(subject))
 		b.WriteString("\n")
 		sortLabel := "↑Old"
@@ -208,11 +203,7 @@ func (m threadModel) View(width, height int) string {
 		b.WriteString(m.styles.Help.Render("j/k ↑↓: Scroll  s: Sort  o: Open BGG  b: Back  Esc: Menu"))
 
 	case threadStateError:
-		b.WriteString(m.styles.Title.Render("Thread"))
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Error.Render("Error: " + m.errMsg))
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Help.Render("b: Back  Esc: Menu"))
+		writeErrorView(&b, m.styles, "Thread", m.errMsg, "b: Back  Esc: Menu")
 	}
 
 	content := b.String()

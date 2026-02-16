@@ -96,24 +96,16 @@ type Styles struct {
 	Error         lipgloss.Style
 	Loading       lipgloss.Style
 	Border        lipgloss.Style
-	Badge         lipgloss.Style
 	Rating        lipgloss.Style
 	Rank          lipgloss.Style
 	Players       lipgloss.Style
 	Time          lipgloss.Style
 	Label         lipgloss.Style
-	Value         lipgloss.Style
 }
 
 // NewStyles returns styles for the application based on the given theme.
 func NewStyles(theme string) Styles {
 	ApplyTheme(theme)
-
-	palette, ok := themes[theme]
-	if !ok {
-		palette = themes["default"]
-	}
-	fgColor := palette.Foreground
 
 	return Styles{
 		Title: lipgloss.NewStyle().
@@ -158,11 +150,6 @@ func NewStyles(theme string) Styles {
 			BorderForeground(ColorBorder).
 			Padding(1),
 
-		Badge: lipgloss.NewStyle().
-			Foreground(fgColor).
-			Background(ColorPrimary).
-			Padding(0, 1),
-
 		Rating: lipgloss.NewStyle().
 			Foreground(ColorAccent),
 
@@ -178,9 +165,6 @@ func NewStyles(theme string) Styles {
 		Label: lipgloss.NewStyle().
 			Foreground(ColorMuted).
 			Width(12),
-
-		Value: lipgloss.NewStyle().
-			Foreground(fgColor),
 	}
 }
 

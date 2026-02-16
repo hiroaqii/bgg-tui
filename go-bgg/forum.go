@@ -1,8 +1,6 @@
 package bgg
 
 import (
-	"encoding/json"
-	"encoding/xml"
 	"fmt"
 	"html"
 )
@@ -19,9 +17,9 @@ func (c *Client) GetForums(gameID int) ([]Forum, error) {
 		return nil, err
 	}
 
-	var xmlResp xmlForumList
-	if err := xml.Unmarshal(body, &xmlResp); err != nil {
-		return nil, newParseError("failed to parse forums response", err)
+	xmlResp, err := parseXML[xmlForumList](body, "failed to parse forums response")
+	if err != nil {
+		return nil, err
 	}
 
 	forums := make([]Forum, 0, len(xmlResp.Forums))
@@ -45,13 +43,7 @@ func (c *Client) GetForumsJSON(gameID int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
-	jsonBytes, err := json.MarshalIndent(forums, "", "  ")
-	if err != nil {
-		return "", newParseError("failed to marshal forums to JSON", err)
-	}
-
-	return string(jsonBytes), nil
+	return toJSON(forums)
 }
 
 // GetForumThreads retrieves threads in a forum.
@@ -70,9 +62,9 @@ func (c *Client) GetForumThreads(forumID int, page int) (*ThreadList, error) {
 		return nil, err
 	}
 
-	var xmlResp xmlForumPage
-	if err := xml.Unmarshal(body, &xmlResp); err != nil {
-		return nil, newParseError("failed to parse forum threads response", err)
+	xmlResp, err := parseXML[xmlForumPage](body, "failed to parse forum threads response")
+	if err != nil {
+		return nil, err
 	}
 
 	threads := make([]ThreadSummary, 0, len(xmlResp.Threads.Threads))
@@ -107,13 +99,7 @@ func (c *Client) GetForumThreadsJSON(forumID int, page int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
-	jsonBytes, err := json.MarshalIndent(threadList, "", "  ")
-	if err != nil {
-		return "", newParseError("failed to marshal thread list to JSON", err)
-	}
-
-	return string(jsonBytes), nil
+	return toJSON(threadList)
 }
 
 // GetThread retrieves a thread with its articles.
@@ -128,9 +114,9 @@ func (c *Client) GetThread(threadID int) (*Thread, error) {
 		return nil, err
 	}
 
-	var xmlResp xmlThread
-	if err := xml.Unmarshal(body, &xmlResp); err != nil {
-		return nil, newParseError("failed to parse thread response", err)
+	xmlResp, err := parseXML[xmlThread](body, "failed to parse thread response")
+	if err != nil {
+		return nil, err
 	}
 
 	articles := make([]Article, 0, len(xmlResp.Articles))
@@ -156,11 +142,5 @@ func (c *Client) GetThreadJSON(threadID int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
-	jsonBytes, err := json.MarshalIndent(thread, "", "  ")
-	if err != nil {
-		return "", newParseError("failed to marshal thread to JSON", err)
-	}
-
-	return string(jsonBytes), nil
+	return toJSON(thread)
 }

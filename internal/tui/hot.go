@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -27,30 +26,24 @@ type hotModel struct {
 	config    *config.Config
 	styles    Styles
 	keys      KeyMap
-	games     []bgg.HotGame
-	cursor    int
 	errMsg    string
 	selected  *int // Selected game ID for detail view
 	wantsBack bool
 	wantsMenu bool
 
-	filtering     bool
-	filterInput   textinput.Model
-	filteredGames []bgg.HotGame
+	filter filterState[bgg.HotGame]
 
 	// Stats fields (fetched via /thing endpoint)
 	stats       map[int]bgg.Game // game ID → Game (stats info)
 	statsLoaded bool
 
-	// Image fields
-	imageEnabled   bool
-	cache          *imageCache
-	imgTransmit    string
-	imgPlaceholder string
-	imgLoading     bool
-	imgError       bool
-	lastThumbURL   string
+	img listImageState
 }
+
+func (m *hotModel) WantsMenu() bool  { return m.wantsMenu }
+func (m *hotModel) WantsBack() bool  { return m.wantsBack }
+func (m *hotModel) Selected() *int   { return m.selected }
+func (m *hotModel) ClearSignals()    { m.wantsMenu = false; m.wantsBack = false; m.selected = nil }
 
 // hotResultMsg is sent when hot games are received.
 type hotResultMsg struct {
@@ -66,19 +59,22 @@ type hotStatsMsg struct {
 
 func newHotModel(cfg *config.Config, styles Styles, keys KeyMap, imageEnabled bool, cache *imageCache) hotModel {
 	return hotModel{
-		state:        hotStateLoading,
-		config:       cfg,
-		styles:       styles,
-		keys:         keys,
-		imageEnabled: imageEnabled,
-		cache:        cache,
+		state:  hotStateLoading,
+		config: cfg,
+		styles: styles,
+		keys:   keys,
+		img:    listImageState{enabled: imageEnabled, cache: cache},
+		filter: filterState[bgg.HotGame]{
+			getName: func(g bgg.HotGame) string { return g.Name },
+			getID:   func(g bgg.HotGame) int { return g.ID },
+		},
 	}
 }
 
 func (m hotModel) loadHotGames(client *bgg.Client) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
-			return hotResultMsg{err: fmt.Errorf("API token not configured. Please set your token in Settings.")}
+			return hotResultMsg{err: fmt.Errorf(errNoToken)}
 		}
 		games, err := client.GetHotGames()
 		return hotResultMsg{games: games, err: err}
@@ -105,30 +101,16 @@ func loadHotStats(client *bgg.Client, ids []int) tea.Cmd {
 }
 
 func (m hotModel) currentThumbURL() string {
-	items := m.games
-	if m.filtering || m.filteredGames != nil {
-		items = m.filteredGames
-	}
-	if m.cursor >= 0 && m.cursor < len(items) {
-		return items[m.cursor].Thumbnail
+	items := m.filter.displayItems()
+	if m.filter.cursor >= 0 && m.filter.cursor < len(items) {
+		return items[m.filter.cursor].Thumbnail
 	}
 	return ""
 }
 
 func (m hotModel) maybeLoadThumb() (hotModel, tea.Cmd) {
-	if !m.imageEnabled || m.cache == nil {
-		return m, nil
-	}
-	url := m.currentThumbURL()
-	if url == "" || url == m.lastThumbURL {
-		return m, nil
-	}
-	m.lastThumbURL = url
-	m.imgLoading = true
-	m.imgError = false
-	m.imgTransmit = ""
-	m.imgPlaceholder = ""
-	return m, loadListImage(m.cache, url)
+	cmd := m.img.maybeLoad(m.currentThumbURL())
+	return m, cmd
 }
 
 func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
@@ -141,8 +123,8 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 				m.errMsg = msg.err.Error()
 			} else {
 				m.state = hotStateResults
-				m.games = msg.games
-				m.cursor = 0
+				m.filter.items = msg.games
+				m.filter.cursor = 0
 				m.stats = nil
 				m.statsLoaded = false
 				m, thumbCmd := m.maybeLoadThumb()
@@ -160,15 +142,7 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 	case hotStateResults:
 		// Handle image loaded
 		if msg, ok := msg.(listImageMsg); ok {
-			if msg.url == m.lastThumbURL {
-				m.imgLoading = false
-				if msg.err != nil {
-					m.imgError = true
-				} else {
-					m.imgTransmit = msg.imgTransmit
-					m.imgPlaceholder = msg.imgPlaceholder
-				}
-			}
+			m.img.handleLoaded(msg)
 			return m, nil
 		}
 
@@ -184,86 +158,48 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 			return m, nil
 		}
 
-		if m.filtering {
-			switch msg := msg.(type) {
-			case tea.KeyMsg:
-				switch {
-				case key.Matches(msg, m.keys.Escape):
-					m.filtering = false
-					m.filteredGames = nil
-					m.filterInput.SetValue("")
-					m.cursor = 0
-					m, cmd := m.maybeLoadThumb()
-					return m, cmd
-				case key.Matches(msg, m.keys.Enter):
-					if len(m.filteredGames) > 0 {
-						id := m.filteredGames[m.cursor].ID
-						m.selected = &id
-					}
-					return m, nil
-				case msg.String() == "up":
-					if m.cursor > 0 {
-						m.cursor--
-					}
-					m, cmd := m.maybeLoadThumb()
-					return m, cmd
-				case msg.String() == "down":
-					if m.cursor < len(m.filteredGames)-1 {
-						m.cursor++
-					}
-					m, cmd := m.maybeLoadThumb()
-					return m, cmd
-				}
+		if m.filter.active {
+			result, _, cmd := m.filter.updateFilter(msg, m.keys)
+			switch result {
+			case filterExited:
+				m, thumbCmd := m.maybeLoadThumb()
+				return m, thumbCmd
+			case filterSelected:
+				m.selected = m.filter.selectedID()
+				return m, nil
 			}
-			var cmd tea.Cmd
-			m.filterInput, cmd = m.filterInput.Update(msg)
-			query := strings.ToLower(m.filterInput.Value())
-			m.filteredGames = nil
-			for _, g := range m.games {
-				if strings.Contains(strings.ToLower(g.Name), query) {
-					m.filteredGames = append(m.filteredGames, g)
-				}
-			}
-			if m.cursor >= len(m.filteredGames) {
-				m.cursor = max(0, len(m.filteredGames)-1)
-			}
-			m2, cmd2 := m.maybeLoadThumb()
-			return m2, tea.Batch(cmd, cmd2)
+			m, thumbCmd := m.maybeLoadThumb()
+			return m, tea.Batch(cmd, thumbCmd)
 		}
 
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch {
 			case key.Matches(msg, m.keys.Up):
-				if m.cursor > 0 {
-					m.cursor--
+				if m.filter.cursor > 0 {
+					m.filter.cursor--
 				}
 				m, cmd := m.maybeLoadThumb()
 				return m, cmd
 			case key.Matches(msg, m.keys.Down):
-				if m.cursor < len(m.games)-1 {
-					m.cursor++
+				if m.filter.cursor < len(m.filter.items)-1 {
+					m.filter.cursor++
 				}
 				m, cmd := m.maybeLoadThumb()
 				return m, cmd
 			case key.Matches(msg, m.keys.Enter):
-				if len(m.games) > 0 {
-					id := m.games[m.cursor].ID
+				if len(m.filter.items) > 0 {
+					id := m.filter.items[m.filter.cursor].ID
 					m.selected = &id
 				}
 			case key.Matches(msg, m.keys.Filter):
-				m.filtering = true
-				m.filterInput = newFilterInput()
-				m.filterInput.Focus()
-				m.filteredGames = make([]bgg.HotGame, len(m.games))
-				copy(m.filteredGames, m.games)
-				m.cursor = 0
-				m, cmd := m.maybeLoadThumb()
-				return m, tea.Batch(textinput.Blink, cmd)
+				filterCmd := m.filter.startFilter()
+				m, thumbCmd := m.maybeLoadThumb()
+				return m, tea.Batch(filterCmd, thumbCmd)
 			case key.Matches(msg, m.keys.Refresh):
 				m.state = hotStateLoading
-				m.games = nil
-				m.cursor = 0
+				m.filter.items = nil
+				m.filter.cursor = 0
 				m.stats = nil
 				m.statsLoaded = false
 				return m, m.loadHotGames(client)
@@ -295,20 +231,6 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 	return m, nil
 }
 
-const maxNameLen = 45
-
-func truncateName(s string, maxWidth int) string {
-	if lipgloss.Width(s) <= maxWidth {
-		return s
-	}
-	runes := []rune(s)
-	for i := len(runes) - 1; i >= 0; i-- {
-		if lipgloss.Width(string(runes[:i])+"...") <= maxWidth {
-			return string(runes[:i]) + "..."
-		}
-	}
-	return "..."
-}
 
 func (m hotModel) View(width, height int, selType string, animFrame int) string {
 	var b strings.Builder
@@ -316,24 +238,19 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 
 	switch m.state {
 	case hotStateLoading:
-		b.WriteString(m.styles.Title.Render("Hot Games"))
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Loading.Render("Loading..."))
+		writeLoadingView(&b, m.styles, "Hot Games", "Loading...")
 
 	case hotStateResults:
 		b.WriteString(m.styles.Title.Render("Hot Games"))
-		if m.filtering {
+		if m.filter.active {
 			b.WriteString("  Filter: ")
-			b.WriteString(m.filterInput.View())
+			b.WriteString(m.filter.input.View())
 		}
 		b.WriteString("\n")
 
-		displayItems := m.games
-		if m.filtering || m.filteredGames != nil {
-			displayItems = m.filteredGames
-		}
+		displayItems := m.filter.displayItems()
 
-		b.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("%d/%d trending games", len(displayItems), len(m.games))))
+		b.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("%d/%d trending games", len(displayItems), len(m.filter.items))))
 		b.WriteString("\n\n")
 
 		if len(displayItems) == 0 {
@@ -341,15 +258,7 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 			b.WriteString("\n")
 		} else {
 			// Show results with scrolling
-			start := 0
-			visible := calcListVisible(height, m.config.Interface.ListDensity)
-			if m.cursor >= visible {
-				start = m.cursor - visible + 1
-			}
-			end := start + visible
-			if end > len(displayItems) {
-				end = len(displayItems)
-			}
+			start, end := calcListRange(m.filter.cursor, len(displayItems), height, m.config.Interface.ListDensity)
 
 			// First pass: find max name+year width for stats alignment
 			maxNameYearLen := 0
@@ -367,12 +276,6 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 
 			for i := start; i < end; i++ {
 				game := displayItems[i]
-				cursor := "  "
-				style := m.styles.ListItem
-				if i == m.cursor {
-					cursor = "> "
-					style = m.styles.ListItemFocus
-				}
 
 				year := game.Year
 				if year == "" {
@@ -381,11 +284,8 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 
 				rankStr := fmt.Sprintf("#%-3d", game.Rank)
 				displayName := truncateName(game.Name, maxNameLen)
-				name := style.Render(displayName)
-				if i == m.cursor && selType != "" && selType != "none" {
-					name = renderSelectionAnim(displayName, selType, animFrame)
-				}
-				line := fmt.Sprintf("%s%s %s (%s)", cursor, m.styles.Rank.Render(rankStr), name, year)
+				prefix, name := renderListItem(i, m.filter.cursor, displayName, m.styles, selType, animFrame)
+				line := fmt.Sprintf("%s%s %s (%s)", prefix, m.styles.Rank.Render(rankStr), name, year)
 
 				// Append stats if available, aligned to a fixed column
 				if s, ok := m.stats[game.ID]; ok {
@@ -414,37 +314,17 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 		}
 
 		b.WriteString("\n")
-		if m.filtering {
-			b.WriteString(m.styles.Help.Render("↑/↓: Navigate  Enter: Detail  Esc: Clear filter"))
+		if m.filter.active {
+			b.WriteString(m.styles.Help.Render(helpFilterActive))
 		} else {
 			b.WriteString(m.styles.Help.Render("j/k ↑↓: Navigate  Enter: Detail  /: Filter  r: Refresh  ?: Help  Esc: Menu"))
 		}
 
 		// Add image panel
-		if m.imageEnabled && m.imgPlaceholder != "" {
-			transmit = m.imgTransmit
-			listContent := b.String()
-			imgPanel := "\n" + m.imgPlaceholder + "\n"
-			b.Reset()
-			b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listContent, "  ", imgPanel))
-		} else if m.imageEnabled && m.imgLoading {
-			listContent := b.String()
-			imgPanel := "\n" + fixedSizeLoadingPanel(listImageCols, listImageRows) + "\n"
-			b.Reset()
-			b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listContent, "  ", imgPanel))
-		} else if m.imageEnabled && m.imgError {
-			listContent := b.String()
-			imgPanel := "\n" + fixedSizeNoImagePanel(listImageCols, listImageRows) + "\n"
-			b.Reset()
-			b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listContent, "  ", imgPanel))
-		}
+		transmit = renderImagePanel(&b, m.img.enabled, m.img.placeholder, m.img.transmit, m.img.loading, m.img.hasError)
 
 	case hotStateError:
-		b.WriteString(m.styles.Title.Render("Hot Games"))
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Error.Render("Error: " + m.errMsg))
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Help.Render("Enter/r: Retry  Esc: Menu"))
+		writeErrorView(&b, m.styles, "Hot Games", m.errMsg, "Enter/r: Retry  Esc: Menu")
 	}
 
 	content := b.String()

@@ -6,7 +6,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 type menuItem struct {
@@ -86,7 +85,7 @@ func (m menuModel) View(width, height int, selType string, animFrame int) string
 	b.WriteString("\n\n")
 
 	if !m.hasToken {
-		b.WriteString(m.styles.Error.Render("API token not configured. Please set your token in Settings."))
+		b.WriteString(m.styles.Error.Render(errNoToken))
 		b.WriteString("\n\n")
 	}
 
@@ -100,7 +99,7 @@ func (m menuModel) View(width, height int, selType string, animFrame int) string
 		}
 
 		label := style.Render(item.label)
-		if i == m.cursor && selType != "" && selType != "none" {
+		if i == m.cursor {
 			label = renderSelectionAnim(item.label, selType, animFrame)
 		}
 		line := fmt.Sprintf("%s[%s] %s", cursor, item.key, label)
@@ -118,38 +117,6 @@ func (m menuModel) View(width, height int, selType string, animFrame int) string
 	help := m.styles.Help.Render("j/k ↑↓: Navigate  Enter: Select  ?: Help  q: Quit")
 	b.WriteString(help)
 
-	// Center the content
 	content := b.String()
-	contentHeight := strings.Count(content, "\n") + 1
-
-	// Vertical padding
-	topPadding := (height - contentHeight) / 3
-	if topPadding < 0 {
-		topPadding = 0
-	}
-
-	// Horizontal centering (block as a whole, left-aligned inside)
-	lines := strings.Split(content, "\n")
-
-	// Find max width
-	maxWidth := 0
-	for _, line := range lines {
-		if w := lipgloss.Width(line); w > maxWidth {
-			maxWidth = w
-		}
-	}
-
-	// Apply same padding to all lines
-	leftPadding := (width - maxWidth) / 2
-	if leftPadding < 0 {
-		leftPadding = 0
-	}
-
-	var centered []string
-	for _, line := range lines {
-		centered = append(centered, strings.Repeat(" ", leftPadding)+line)
-	}
-
-	result := strings.Repeat("\n", topPadding) + strings.Join(centered, "\n")
-	return lipgloss.NewStyle().Width(width).Height(height).Render(result)
+	return centerContent(content, width, height)
 }

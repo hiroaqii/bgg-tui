@@ -1,8 +1,6 @@
 package bgg
 
 import (
-	"encoding/json"
-	"encoding/xml"
 	"fmt"
 	"net/url"
 )
@@ -21,9 +19,9 @@ func (c *Client) SearchGames(query string) ([]GameSearchResult, error) {
 		return nil, err
 	}
 
-	var xmlResp xmlItems
-	if err := xml.Unmarshal(body, &xmlResp); err != nil {
-		return nil, newParseError("failed to parse search response", err)
+	xmlResp, err := parseXML[xmlItems](body, "failed to parse search response")
+	if err != nil {
+		return nil, err
 	}
 
 	results := make([]GameSearchResult, 0, len(xmlResp.Items))
@@ -45,11 +43,5 @@ func (c *Client) SearchGamesJSON(query string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
-	jsonBytes, err := json.MarshalIndent(results, "", "  ")
-	if err != nil {
-		return "", newParseError("failed to marshal results to JSON", err)
-	}
-
-	return string(jsonBytes), nil
+	return toJSON(results)
 }

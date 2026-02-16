@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -59,14 +60,12 @@ func TestNewClient(t *testing.T) {
 	}
 }
 
-func TestClient_doRequest_Success(t *testing.T) {
+func TestDoRequest_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify authorization header
 		auth := r.Header.Get("Authorization")
 		if auth != "Bearer test-token" {
-			t.Errorf("expected Authorization header 'Bearer test-token', got '%s'", auth)
+			t.Errorf("expected Authorization 'Bearer test-token', got %q", auth)
 		}
-
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("<items></items>"))
 	}))
@@ -76,24 +75,20 @@ func TestClient_doRequest_Success(t *testing.T) {
 		httpClient: server.Client(),
 		token:      "test-token",
 		retryCount: 3,
-		retryDelay: 100 * time.Millisecond,
+		retryDelay: 10 * time.Millisecond,
+		baseURL:    server.URL,
 	}
 
-	// We need to test with the actual server URL
-	req, _ := http.NewRequest(http.MethodGet, server.URL, nil)
-	req.Header.Set("Authorization", "Bearer test-token")
-	resp, err := client.httpClient.Do(req)
+	body, err := client.doRequest("/hot")
 	if err != nil {
-		t.Fatalf("request failed: %v", err)
+		t.Fatalf("doRequest() error = %v", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	if string(body) != "<items></items>" {
+		t.Errorf("body = %q, want %q", string(body), "<items></items>")
 	}
 }
 
-func TestClient_doRequest_AuthError(t *testing.T) {
+func TestDoRequest_AuthError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
@@ -103,49 +98,22 @@ func TestClient_doRequest_AuthError(t *testing.T) {
 		httpClient: server.Client(),
 		token:      "invalid-token",
 		retryCount: 0,
-		retryDelay: 100 * time.Millisecond,
+		retryDelay: 10 * time.Millisecond,
+		baseURL:    server.URL,
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, server.URL, nil)
-	req.Header.Set("Authorization", "Bearer invalid-token")
-	resp, _ := client.httpClient.Do(req)
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("expected status 401, got %d", resp.StatusCode)
-	}
-}
-
-func TestClient_doRequest_RateLimit(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Retry-After", "5")
-		w.WriteHeader(http.StatusTooManyRequests)
-	}))
-	defer server.Close()
-
-	client := &Client{
-		httpClient: server.Client(),
-		token:      "test-token",
-		retryCount: 0,
-		retryDelay: 100 * time.Millisecond,
+	_, err := client.doRequest("/hot")
+	if err == nil {
+		t.Fatal("expected error for 401 response")
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, server.URL, nil)
-	req.Header.Set("Authorization", "Bearer test-token")
-	resp, _ := client.httpClient.Do(req)
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusTooManyRequests {
-		t.Errorf("expected status 429, got %d", resp.StatusCode)
-	}
-
-	retryAfter := resp.Header.Get("Retry-After")
-	if retryAfter != "5" {
-		t.Errorf("expected Retry-After '5', got '%s'", retryAfter)
+	var authErr *AuthError
+	if !errors.As(err, &authErr) {
+		t.Errorf("expected AuthError, got %T: %v", err, err)
 	}
 }
 
-func TestClient_doRequest_NotFound(t *testing.T) {
+func TestDoRequest_NotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
@@ -155,16 +123,138 @@ func TestClient_doRequest_NotFound(t *testing.T) {
 		httpClient: server.Client(),
 		token:      "test-token",
 		retryCount: 0,
-		retryDelay: 100 * time.Millisecond,
+		retryDelay: 10 * time.Millisecond,
+		baseURL:    server.URL,
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, server.URL, nil)
-	req.Header.Set("Authorization", "Bearer test-token")
-	resp, _ := client.httpClient.Do(req)
-	defer resp.Body.Close()
+	_, err := client.doRequest("/thing?id=999999")
+	if err == nil {
+		t.Fatal("expected error for 404 response")
+	}
 
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("expected status 404, got %d", resp.StatusCode)
+	var notFoundErr *NotFoundError
+	if !errors.As(err, &notFoundErr) {
+		t.Errorf("expected NotFoundError, got %T: %v", err, err)
+	}
+}
+
+func TestDoRequest_RetryOn202(t *testing.T) {
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&attempts, 1)
+		if n < 3 {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("<ok/>"))
+	}))
+	defer server.Close()
+
+	client := &Client{
+		httpClient: server.Client(),
+		token:      "test-token",
+		retryCount: 5,
+		retryDelay: 10 * time.Millisecond,
+		baseURL:    server.URL,
+	}
+
+	body, err := client.doRequest("/collection")
+	if err != nil {
+		t.Fatalf("doRequest() error = %v", err)
+	}
+	if string(body) != "<ok/>" {
+		t.Errorf("body = %q, want %q", string(body), "<ok/>")
+	}
+	if atomic.LoadInt32(&attempts) != 3 {
+		t.Errorf("expected 3 attempts, got %d", atomic.LoadInt32(&attempts))
+	}
+}
+
+func TestDoRequest_429WithRetry(t *testing.T) {
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&attempts, 1)
+		if n == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("<ok/>"))
+	}))
+	defer server.Close()
+
+	client := &Client{
+		httpClient: server.Client(),
+		token:      "test-token",
+		retryCount: 3,
+		retryDelay: 10 * time.Millisecond,
+		baseURL:    server.URL,
+	}
+
+	body, err := client.doRequest("/hot")
+	if err != nil {
+		t.Fatalf("doRequest() error = %v", err)
+	}
+	if string(body) != "<ok/>" {
+		t.Errorf("body = %q, want %q", string(body), "<ok/>")
+	}
+}
+
+func TestDoRequestWithRetryOn202_429ReturnsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "5")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	client := &Client{
+		httpClient: server.Client(),
+		token:      "test-token",
+		retryCount: 3,
+		retryDelay: 10 * time.Millisecond,
+		baseURL:    server.URL,
+	}
+
+	_, err := client.doRequestWithRetryOn202("/collection", 1)
+	if err == nil {
+		t.Fatal("expected error for 429 in doRequestWithRetryOn202")
+	}
+
+	var rateLimitErr *RateLimitError
+	if !errors.As(err, &rateLimitErr) {
+		t.Errorf("expected RateLimitError, got %T: %v", err, err)
+	}
+}
+
+func TestDoRequest_503Retry(t *testing.T) {
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&attempts, 1)
+		if n == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("<ok/>"))
+	}))
+	defer server.Close()
+
+	client := &Client{
+		httpClient: server.Client(),
+		token:      "test-token",
+		retryCount: 3,
+		retryDelay: 10 * time.Millisecond,
+		baseURL:    server.URL,
+	}
+
+	body, err := client.doRequest("/hot")
+	if err != nil {
+		t.Fatalf("doRequest() error = %v", err)
+	}
+	if string(body) != "<ok/>" {
+		t.Errorf("body = %q, want %q", string(body), "<ok/>")
 	}
 }
 
@@ -253,4 +343,38 @@ func TestError_Unwrap(t *testing.T) {
 	if unwrapped != cause {
 		t.Errorf("expected unwrapped error to be root cause")
 	}
+}
+
+func TestToJSON(t *testing.T) {
+	type sample struct {
+		Name string `json:"name"`
+		Age  int    `json:"age"`
+	}
+
+	result, err := toJSON(sample{Name: "test", Age: 42})
+	if err != nil {
+		t.Fatalf("toJSON() error = %v", err)
+	}
+	if result == "" {
+		t.Error("toJSON() returned empty string")
+	}
+	if !contains(result, `"name": "test"`) {
+		t.Errorf("toJSON() result missing name field: %s", result)
+	}
+	if !contains(result, `"age": 42`) {
+		t.Errorf("toJSON() result missing age field: %s", result)
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
+}
+
+func containsHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
