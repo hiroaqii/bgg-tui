@@ -86,7 +86,7 @@ func newSearchModel(cfg *config.Config, styles Styles, keys KeyMap, imageEnabled
 func (m searchModel) doSearch(client *bgg.Client, query string) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
-			return searchResultMsg{err: fmt.Errorf("API token not configured. Please set your token in Settings.")}
+			return searchResultMsg{err: fmt.Errorf(errNoToken)}
 		}
 		results, err := client.SearchGames(query)
 		return searchResultMsg{results: results, err: err}
@@ -138,42 +138,15 @@ func loadSearchThumb(client *bgg.Client, cache *imageCache, gameID int) tea.Cmd 
 			return searchThumbMsg{gameID: gameID, err: fmt.Errorf("no thumbnail")}
 		}
 
-		path, err := cache.Download(game.Thumbnail)
+		ri, err := renderKittyImage(cache, game.Thumbnail, listImageID, listImageCols, listImageRows, true)
 		if err != nil {
 			return searchThumbMsg{gameID: gameID, thumbURL: game.Thumbnail, err: err}
 		}
-
-		cellW, cellH := termCellSize()
-		pixW := listImageCols * cellW
-		pixH := listImageRows * cellH
-
-		img, err := loadAndResize(path, pixW, pixH)
-		if err != nil {
-			return searchThumbMsg{gameID: gameID, thumbURL: game.Thumbnail, err: err}
-		}
-
-		bounds := img.Bounds()
-		actualCols := (bounds.Dx() + cellW - 1) / cellW
-		actualRows := (bounds.Dy() + cellH - 1) / cellH
-		if actualCols < 1 {
-			actualCols = 1
-		}
-		if actualRows < 1 {
-			actualRows = 1
-		}
-
-		transmit, err := kittyTransmitString(img, listImageID)
-		if err != nil {
-			return searchThumbMsg{gameID: gameID, thumbURL: game.Thumbnail, err: err}
-		}
-
-		placeholder := kittyPlaceholder(listImageID, actualRows, actualCols)
-		placeholder = padPlaceholder(placeholder, listImageRows, listImageCols)
 		return searchThumbMsg{
 			gameID:         gameID,
 			thumbURL:       game.Thumbnail,
-			imgTransmit:    transmit,
-			imgPlaceholder: placeholder,
+			imgTransmit:    ri.transmit,
+			imgPlaceholder: ri.placeholder,
 		}
 	}
 }
@@ -247,7 +220,7 @@ func (m searchModel) Update(msg tea.Msg, client *bgg.Client) (searchModel, tea.C
 		}
 
 		if m.filter.active {
-			result, cursorMoved, cmd := m.filter.updateFilter(msg, m.keys)
+			result, _, cmd := m.filter.updateFilter(msg, m.keys)
 			switch result {
 			case filterExited:
 				m, thumbCmd := m.maybeLoadThumb(client)
@@ -255,10 +228,6 @@ func (m searchModel) Update(msg tea.Msg, client *bgg.Client) (searchModel, tea.C
 			case filterSelected:
 				m.selected = m.filter.selectedID()
 				return m, nil
-			}
-			if cursorMoved {
-				m, thumbCmd := m.maybeLoadThumb(client)
-				return m, tea.Batch(cmd, thumbCmd)
 			}
 			m, thumbCmd := m.maybeLoadThumb(client)
 			return m, tea.Batch(cmd, thumbCmd)
@@ -340,9 +309,7 @@ func (m searchModel) View(width, height int, selType string, animFrame int) stri
 		b.WriteString(m.styles.Help.Render("Enter: Search  Esc: Menu"))
 
 	case searchStateLoading:
-		b.WriteString(m.styles.Title.Render("Search Games"))
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Loading.Render("Searching..."))
+		writeLoadingView(&b, m.styles, "Search Games", "Searching...")
 
 	case searchStateResults:
 		b.WriteString(m.styles.Title.Render("Search Results"))
@@ -366,14 +333,7 @@ func (m searchModel) View(width, height int, selType string, animFrame int) stri
 
 			for i := start; i < end; i++ {
 				result := displayItems[i]
-				cursor := "  "
-				style := m.styles.ListItem
-				if i == m.filter.cursor {
-					cursor = "> "
-					style = m.styles.ListItemFocus
-				}
 
-				name := result.Name
 				year := result.Year
 				if year == "" {
 					year = "N/A"
@@ -384,12 +344,8 @@ func (m searchModel) View(width, height int, selType string, animFrame int) stri
 					typeIndicator = " [Expansion]"
 				}
 
-				if i == m.filter.cursor && selType != "" && selType != "none" {
-					name = renderSelectionAnim(name, selType, animFrame)
-				} else {
-					name = style.Render(name)
-				}
-				line := fmt.Sprintf("%s%s (%s)%s", cursor, name, year, typeIndicator)
+				prefix, name := renderListItem(i, m.filter.cursor, result.Name, m.styles, selType, animFrame)
+				line := fmt.Sprintf("%s%s (%s)%s", prefix, name, year, typeIndicator)
 				b.WriteString(line)
 				b.WriteString("\n")
 			}
@@ -397,7 +353,7 @@ func (m searchModel) View(width, height int, selType string, animFrame int) stri
 
 		b.WriteString("\n")
 		if m.filter.active {
-			b.WriteString(m.styles.Help.Render("↑/↓: Navigate  Enter: Detail  Esc: Clear filter"))
+			b.WriteString(m.styles.Help.Render(helpFilterActive))
 		} else {
 			b.WriteString(m.styles.Help.Render("j/k ↑↓: Navigate  Enter: Detail  /: Filter  s: New Search  ?: Help  b: Back  Esc: Menu"))
 		}
@@ -406,11 +362,7 @@ func (m searchModel) View(width, height int, selType string, animFrame int) stri
 		transmit = renderImagePanel(&b, m.img.enabled, m.img.placeholder, m.img.transmit, m.img.loading, m.img.hasError)
 
 	case searchStateError:
-		b.WriteString(m.styles.Title.Render("Search Games"))
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Error.Render("Error: " + m.errMsg))
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Help.Render("Enter: Retry  b: Back  Esc: Menu"))
+		writeErrorView(&b, m.styles, "Search Games", m.errMsg, "Enter: Retry  b: Back  Esc: Menu")
 	}
 
 	content := b.String()

@@ -93,6 +93,27 @@ func TestCalcListRangeMultiLine(t *testing.T) {
 	}
 }
 
+func TestRenderListItem(t *testing.T) {
+	styles := NewStyles("default")
+
+	t.Run("selected item", func(t *testing.T) {
+		prefix, _ := renderListItem(3, 3, "Game Name", styles, "none", 0)
+		if prefix != "> " {
+			t.Errorf("prefix = %q, want %q", prefix, "> ")
+		}
+	})
+
+	t.Run("non-selected item", func(t *testing.T) {
+		prefix, rendered := renderListItem(1, 3, "Game Name", styles, "none", 0)
+		if prefix != "  " {
+			t.Errorf("prefix = %q, want %q", prefix, "  ")
+		}
+		if !strings.Contains(rendered, "Game Name") {
+			t.Errorf("rendered = %q, should contain %q", rendered, "Game Name")
+		}
+	})
+}
+
 func TestWriteLoadingView(t *testing.T) {
 	styles := NewStyles("default")
 	var b strings.Builder

@@ -1,10 +1,5 @@
 package bgg
 
-import (
-	"encoding/json"
-	"encoding/xml"
-)
-
 // GetHotGames retrieves the current hot games list.
 func (c *Client) GetHotGames() ([]HotGame, error) {
 	endpoint := "/hot?type=boardgame"
@@ -14,9 +9,9 @@ func (c *Client) GetHotGames() ([]HotGame, error) {
 		return nil, err
 	}
 
-	var xmlResp xmlHot
-	if err := xml.Unmarshal(body, &xmlResp); err != nil {
-		return nil, newParseError("failed to parse hot games response", err)
+	xmlResp, err := parseXML[xmlHot](body, "failed to parse hot games response")
+	if err != nil {
+		return nil, err
 	}
 
 	games := make([]HotGame, 0, len(xmlResp.Items))
@@ -39,11 +34,5 @@ func (c *Client) GetHotGamesJSON() (string, error) {
 	if err != nil {
 		return "", err
 	}
-
-	jsonBytes, err := json.MarshalIndent(games, "", "  ")
-	if err != nil {
-		return "", newParseError("failed to marshal hot games to JSON", err)
-	}
-
-	return string(jsonBytes), nil
+	return toJSON(games)
 }

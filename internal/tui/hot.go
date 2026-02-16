@@ -74,7 +74,7 @@ func newHotModel(cfg *config.Config, styles Styles, keys KeyMap, imageEnabled bo
 func (m hotModel) loadHotGames(client *bgg.Client) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
-			return hotResultMsg{err: fmt.Errorf("API token not configured. Please set your token in Settings.")}
+			return hotResultMsg{err: fmt.Errorf(errNoToken)}
 		}
 		games, err := client.GetHotGames()
 		return hotResultMsg{games: games, err: err}
@@ -159,7 +159,7 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 		}
 
 		if m.filter.active {
-			result, cursorMoved, cmd := m.filter.updateFilter(msg, m.keys)
+			result, _, cmd := m.filter.updateFilter(msg, m.keys)
 			switch result {
 			case filterExited:
 				m, thumbCmd := m.maybeLoadThumb()
@@ -167,10 +167,6 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 			case filterSelected:
 				m.selected = m.filter.selectedID()
 				return m, nil
-			}
-			if cursorMoved {
-				m, thumbCmd := m.maybeLoadThumb()
-				return m, tea.Batch(cmd, thumbCmd)
 			}
 			m, thumbCmd := m.maybeLoadThumb()
 			return m, tea.Batch(cmd, thumbCmd)
@@ -235,20 +231,6 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 	return m, nil
 }
 
-const maxNameLen = 45
-
-func truncateName(s string, maxWidth int) string {
-	if lipgloss.Width(s) <= maxWidth {
-		return s
-	}
-	runes := []rune(s)
-	for i := len(runes) - 1; i >= 0; i-- {
-		if lipgloss.Width(string(runes[:i])+"...") <= maxWidth {
-			return string(runes[:i]) + "..."
-		}
-	}
-	return "..."
-}
 
 func (m hotModel) View(width, height int, selType string, animFrame int) string {
 	var b strings.Builder
@@ -256,9 +238,7 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 
 	switch m.state {
 	case hotStateLoading:
-		b.WriteString(m.styles.Title.Render("Hot Games"))
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Loading.Render("Loading..."))
+		writeLoadingView(&b, m.styles, "Hot Games", "Loading...")
 
 	case hotStateResults:
 		b.WriteString(m.styles.Title.Render("Hot Games"))
@@ -296,12 +276,6 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 
 			for i := start; i < end; i++ {
 				game := displayItems[i]
-				cursor := "  "
-				style := m.styles.ListItem
-				if i == m.filter.cursor {
-					cursor = "> "
-					style = m.styles.ListItemFocus
-				}
 
 				year := game.Year
 				if year == "" {
@@ -310,11 +284,8 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 
 				rankStr := fmt.Sprintf("#%-3d", game.Rank)
 				displayName := truncateName(game.Name, maxNameLen)
-				name := style.Render(displayName)
-				if i == m.filter.cursor && selType != "" && selType != "none" {
-					name = renderSelectionAnim(displayName, selType, animFrame)
-				}
-				line := fmt.Sprintf("%s%s %s (%s)", cursor, m.styles.Rank.Render(rankStr), name, year)
+				prefix, name := renderListItem(i, m.filter.cursor, displayName, m.styles, selType, animFrame)
+				line := fmt.Sprintf("%s%s %s (%s)", prefix, m.styles.Rank.Render(rankStr), name, year)
 
 				// Append stats if available, aligned to a fixed column
 				if s, ok := m.stats[game.ID]; ok {
@@ -344,7 +315,7 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 
 		b.WriteString("\n")
 		if m.filter.active {
-			b.WriteString(m.styles.Help.Render("↑/↓: Navigate  Enter: Detail  Esc: Clear filter"))
+			b.WriteString(m.styles.Help.Render(helpFilterActive))
 		} else {
 			b.WriteString(m.styles.Help.Render("j/k ↑↓: Navigate  Enter: Detail  /: Filter  r: Refresh  ?: Help  Esc: Menu"))
 		}
@@ -353,11 +324,7 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 		transmit = renderImagePanel(&b, m.img.enabled, m.img.placeholder, m.img.transmit, m.img.loading, m.img.hasError)
 
 	case hotStateError:
-		b.WriteString(m.styles.Title.Render("Hot Games"))
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Error.Render("Error: " + m.errMsg))
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Help.Render("Enter/r: Retry  Esc: Menu"))
+		writeErrorView(&b, m.styles, "Hot Games", m.errMsg, "Enter/r: Retry  Esc: Menu")
 	}
 
 	content := b.String()

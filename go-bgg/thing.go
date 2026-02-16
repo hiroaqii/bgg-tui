@@ -1,8 +1,6 @@
 package bgg
 
 import (
-	"encoding/json"
-	"encoding/xml"
 	"fmt"
 	"html"
 	"strconv"
@@ -22,9 +20,9 @@ func (c *Client) GetGame(id int) (*Game, error) {
 		return nil, err
 	}
 
-	var xmlResp xmlThing
-	if err := xml.Unmarshal(body, &xmlResp); err != nil {
-		return nil, newParseError("failed to parse thing response", err)
+	xmlResp, err := parseXML[xmlThing](body, "failed to parse thing response")
+	if err != nil {
+		return nil, err
 	}
 
 	if len(xmlResp.Items) == 0 {
@@ -41,13 +39,7 @@ func (c *Client) GetGameJSON(id int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
-	jsonBytes, err := json.MarshalIndent(game, "", "  ")
-	if err != nil {
-		return "", newParseError("failed to marshal game to JSON", err)
-	}
-
-	return string(jsonBytes), nil
+	return toJSON(game)
 }
 
 // GetGames retrieves detailed information about multiple games (max 20).
@@ -73,9 +65,9 @@ func (c *Client) GetGames(ids []int) ([]Game, error) {
 		return nil, err
 	}
 
-	var xmlResp xmlThing
-	if err := xml.Unmarshal(body, &xmlResp); err != nil {
-		return nil, newParseError("failed to parse thing response", err)
+	xmlResp, err := parseXML[xmlThing](body, "failed to parse thing response")
+	if err != nil {
+		return nil, err
 	}
 
 	games := make([]Game, 0, len(xmlResp.Items))

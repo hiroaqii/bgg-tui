@@ -12,13 +12,43 @@ import (
 	"github.com/hiroaqii/bgg-tui/internal/config"
 )
 
+// editField identifies which text input field is being edited.
+type editField int
+
+const (
+	editFieldToken editField = iota
+	editFieldUsername
+	editFieldThreadWidth
+	editFieldThreadHeight
+	editFieldDescWidth
+)
+
+// settingItemKind describes the interaction type for a settings item.
+type settingItemKind int
+
+const (
+	settingText   settingItemKind = iota // Enter opens text input
+	settingCycle                         // Enter cycles to next value
+	settingToggle                        // Enter toggles boolean
+)
+
+// settingItem describes a single settings menu entry.
+type settingItem struct {
+	label     string
+	section   string          // section header (shown before this item if non-empty)
+	kind      settingItemKind
+	editField editField       // for settingText: which input to activate
+	getValue  func() string   // current display value
+	onEnter   func()          // for settingCycle/settingToggle
+}
+
 type settingsModel struct {
 	cursor            int
 	styles            Styles
 	keys              KeyMap
 	config            *config.Config
 	editing           bool
-	editingField      int
+	editingField      editField
 	tokenInput        textinput.Model
 	usernameInput     textinput.Model
 	widthInput        textinput.Model
@@ -29,6 +59,15 @@ type settingsModel struct {
 	themeChanged      bool
 	transitionChanged bool
 	selectionChanged  bool
+	items             []settingItem
+}
+
+func (m *settingsModel) blurAllInputs() {
+	m.tokenInput.Blur()
+	m.usernameInput.Blur()
+	m.widthInput.Blur()
+	m.heightInput.Blur()
+	m.descWidthInput.Blur()
 }
 
 func newSettingsModel(cfg *config.Config, styles Styles, keys KeyMap) settingsModel {
@@ -56,7 +95,7 @@ func newSettingsModel(cfg *config.Config, styles Styles, keys KeyMap) settingsMo
 	dwi.CharLimit = 3
 	dwi.SetValue(fmt.Sprintf("%d", cfg.Display.DescriptionWidth))
 
-	return settingsModel{
+	m := settingsModel{
 		cursor:         0,
 		styles:         styles,
 		keys:           keys,
@@ -67,10 +106,177 @@ func newSettingsModel(cfg *config.Config, styles Styles, keys KeyMap) settingsMo
 		heightInput:    hi,
 		descWidthInput: dwi,
 	}
+	m.items = m.buildItems()
+	return m
+}
+
+func (m *settingsModel) buildItems() []settingItem {
+	cfg := m.config
+	return []settingItem{
+		{
+			label: "Token", section: "API", kind: settingText,
+			editField: editFieldToken,
+			getValue: func() string {
+				if cfg.API.Token != "" {
+					return maskToken(cfg.API.Token)
+				}
+				return "(not set)"
+			},
+		},
+		{
+			label: "Default Username", section: "Collection", kind: settingText,
+			editField: editFieldUsername,
+			getValue: func() string {
+				if cfg.Collection.DefaultUsername != "" {
+					return cfg.Collection.DefaultUsername
+				}
+				return "(not set)"
+			},
+		},
+		{
+			label: "Color Theme", section: "Interface", kind: settingCycle,
+			getValue: func() string { return cfg.Interface.ColorTheme },
+			onEnter: func() {
+				cfg.Interface.ColorTheme = cycleValue(cfg.Interface.ColorTheme, ThemeNames)
+				cfg.Save()
+				m.themeChanged = true
+			},
+		},
+		{
+			label: "Transition", kind: settingCycle,
+			getValue: func() string { return cfg.Interface.Transition },
+			onEnter: func() {
+				cfg.Interface.Transition = cycleValue(cfg.Interface.Transition, TransitionNames)
+				cfg.Save()
+				m.transitionChanged = true
+			},
+		},
+		{
+			label: "Selection", kind: settingCycle,
+			getValue: func() string { return cfg.Interface.Selection },
+			onEnter: func() {
+				cfg.Interface.Selection = cycleValue(cfg.Interface.Selection, SelectionNames)
+				cfg.Save()
+				m.selectionChanged = true
+			},
+		},
+		{
+			label: "List Density", kind: settingCycle,
+			getValue: func() string { return cfg.Interface.ListDensity },
+			onEnter: func() {
+				cfg.Interface.ListDensity = cycleValue(cfg.Interface.ListDensity, ListDensityNames)
+				cfg.Save()
+			},
+		},
+		{
+			label: "Show Images", section: "Display", kind: settingToggle,
+			getValue: func() string {
+				if cfg.Display.ShowImages {
+					return "ON"
+				}
+				return "OFF"
+			},
+			onEnter: func() {
+				cfg.Display.ShowImages = !cfg.Display.ShowImages
+				cfg.Save()
+			},
+		},
+		{
+			label: "Show Only Owned", kind: settingToggle,
+			getValue: func() string {
+				if cfg.Collection.ShowOnlyOwned {
+					return "ON"
+				}
+				return "OFF"
+			},
+			onEnter: func() {
+				cfg.Collection.ShowOnlyOwned = !cfg.Collection.ShowOnlyOwned
+				cfg.Save()
+			},
+		},
+		{
+			label: "Thread Width", kind: settingText,
+			editField: editFieldThreadWidth,
+			getValue:  func() string { return fmt.Sprintf("%d", cfg.Display.ThreadWidth) },
+		},
+		{
+			label: "Thread Height", kind: settingText,
+			editField: editFieldThreadHeight,
+			getValue:  func() string { return fmt.Sprintf("%d", cfg.Display.ThreadHeight) },
+		},
+		{
+			label: "Description Width", kind: settingText,
+			editField: editFieldDescWidth,
+			getValue:  func() string { return fmt.Sprintf("%d", cfg.Display.DescriptionWidth) },
+		},
+	}
 }
 
 func (m settingsModel) itemCount() int {
-	return 11 // Token, Username, ColorTheme, Transition, Selection, ListDensity, ShowImages, ShowOnlyOwned, ThreadWidth, ThreadHeight, DescriptionWidth
+	return len(m.items)
+}
+
+// textInputForField returns a pointer to the text input model for the given editField.
+func (m *settingsModel) textInputForField(field editField) *textinput.Model {
+	switch field {
+	case editFieldToken:
+		return &m.tokenInput
+	case editFieldUsername:
+		return &m.usernameInput
+	case editFieldThreadWidth:
+		return &m.widthInput
+	case editFieldThreadHeight:
+		return &m.heightInput
+	case editFieldDescWidth:
+		return &m.descWidthInput
+	}
+	return nil
+}
+
+// saveEditField saves the current value of the active text input.
+func (m *settingsModel) saveEditField() {
+	switch m.editingField {
+	case editFieldToken:
+		val := strings.TrimSpace(m.tokenInput.Value())
+		if val != "" {
+			m.config.API.Token = val
+		}
+	case editFieldUsername:
+		m.config.Collection.DefaultUsername = strings.TrimSpace(m.usernameInput.Value())
+	case editFieldThreadWidth:
+		if v, err := strconv.Atoi(strings.TrimSpace(m.widthInput.Value())); err == nil && v >= 20 && v <= 200 {
+			m.config.Display.ThreadWidth = v
+		}
+	case editFieldThreadHeight:
+		if v, err := strconv.Atoi(strings.TrimSpace(m.heightInput.Value())); err == nil && v >= 5 && v <= 100 {
+			m.config.Display.ThreadHeight = v
+		}
+	case editFieldDescWidth:
+		if v, err := strconv.Atoi(strings.TrimSpace(m.descWidthInput.Value())); err == nil && v >= 20 && v <= 200 {
+			m.config.Display.DescriptionWidth = v
+		}
+	}
+	m.config.Save()
+}
+
+// startEditing activates text editing for the given field.
+func (m *settingsModel) startEditing(field editField) tea.Cmd {
+	m.editing = true
+	m.editingField = field
+	input := m.textInputForField(field)
+	if field == editFieldToken {
+		input.SetValue("")
+	} else {
+		// Pre-populate with current value from the item
+		for _, item := range m.items {
+			if item.kind == settingText && item.editField == field {
+				input.SetValue(item.getValue())
+				break
+			}
+		}
+	}
+	input.Focus()
+	return textinput.Blink
 }
 
 func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
@@ -81,59 +287,19 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 		case tea.KeyMsg:
 			switch {
 			case key.Matches(msg, m.keys.Enter):
-				// Save the value
-				switch m.editingField {
-				case 0:
-					val := strings.TrimSpace(m.tokenInput.Value())
-					if val != "" {
-						m.config.API.Token = val
-					}
-				case 1:
-					m.config.Collection.DefaultUsername = strings.TrimSpace(m.usernameInput.Value())
-				case 2:
-					if v, err := strconv.Atoi(strings.TrimSpace(m.widthInput.Value())); err == nil && v >= 20 && v <= 200 {
-						m.config.Display.ThreadWidth = v
-					}
-				case 3:
-					if v, err := strconv.Atoi(strings.TrimSpace(m.heightInput.Value())); err == nil && v >= 5 && v <= 100 {
-						m.config.Display.ThreadHeight = v
-					}
-				case 4:
-					if v, err := strconv.Atoi(strings.TrimSpace(m.descWidthInput.Value())); err == nil && v >= 20 && v <= 200 {
-						m.config.Display.DescriptionWidth = v
-					}
-				}
+				m.saveEditField()
 				m.editing = false
-				m.tokenInput.Blur()
-				m.usernameInput.Blur()
-				m.widthInput.Blur()
-				m.heightInput.Blur()
-				m.descWidthInput.Blur()
-				m.config.Save()
+				m.blurAllInputs()
 				return m, nil
 			case key.Matches(msg, m.keys.Escape):
 				m.editing = false
-				m.tokenInput.Blur()
-				m.usernameInput.Blur()
-				m.widthInput.Blur()
-				m.heightInput.Blur()
-				m.descWidthInput.Blur()
+				m.blurAllInputs()
 				return m, nil
 			}
 		}
 
-		switch m.editingField {
-		case 0:
-			m.tokenInput, cmd = m.tokenInput.Update(msg)
-		case 1:
-			m.usernameInput, cmd = m.usernameInput.Update(msg)
-		case 2:
-			m.widthInput, cmd = m.widthInput.Update(msg)
-		case 3:
-			m.heightInput, cmd = m.heightInput.Update(msg)
-		case 4:
-			m.descWidthInput, cmd = m.descWidthInput.Update(msg)
-		}
+		input := m.textInputForField(m.editingField)
+		*input, cmd = input.Update(msg)
 		return m, cmd
 	}
 
@@ -149,57 +315,12 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 				m.cursor++
 			}
 		case key.Matches(msg, m.keys.Enter):
-			switch m.cursor {
-			case 0: // Token
-				m.editing = true
-				m.editingField = 0
-				m.tokenInput.SetValue("")
-				m.tokenInput.Focus()
-				return m, textinput.Blink
-			case 1: // Username
-				m.editing = true
-				m.editingField = 1
-				m.usernameInput.Focus()
-				return m, textinput.Blink
-			case 2: // Color Theme
-				m.config.Interface.ColorTheme = cycleValue(m.config.Interface.ColorTheme, ThemeNames)
-				m.config.Save()
-				m.themeChanged = true
-			case 3: // Transition
-				m.config.Interface.Transition = cycleValue(m.config.Interface.Transition, TransitionNames)
-				m.config.Save()
-				m.transitionChanged = true
-			case 4: // Selection
-				m.config.Interface.Selection = cycleValue(m.config.Interface.Selection, SelectionNames)
-				m.config.Save()
-				m.selectionChanged = true
-			case 5: // List Density
-				m.config.Interface.ListDensity = cycleValue(m.config.Interface.ListDensity, ListDensityNames)
-				m.config.Save()
-			case 6: // Show Images
-				m.config.Display.ShowImages = !m.config.Display.ShowImages
-				m.config.Save()
-			case 7: // Show Only Owned
-				m.config.Collection.ShowOnlyOwned = !m.config.Collection.ShowOnlyOwned
-				m.config.Save()
-			case 8: // Thread Width
-				m.editing = true
-				m.editingField = 2
-				m.widthInput.SetValue(fmt.Sprintf("%d", m.config.Display.ThreadWidth))
-				m.widthInput.Focus()
-				return m, textinput.Blink
-			case 9: // Thread Height
-				m.editing = true
-				m.editingField = 3
-				m.heightInput.SetValue(fmt.Sprintf("%d", m.config.Display.ThreadHeight))
-				m.heightInput.Focus()
-				return m, textinput.Blink
-			case 10: // Description Width
-				m.editing = true
-				m.editingField = 4
-				m.descWidthInput.SetValue(fmt.Sprintf("%d", m.config.Display.DescriptionWidth))
-				m.descWidthInput.Focus()
-				return m, textinput.Blink
+			item := m.items[m.cursor]
+			switch item.kind {
+			case settingText:
+				return m, m.startEditing(item.editField)
+			case settingCycle, settingToggle:
+				item.onEnter()
 			}
 		case key.Matches(msg, m.keys.Back):
 			m.wantsBack = true
@@ -214,193 +335,47 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 func (m settingsModel) View(width, height int) string {
 	var b strings.Builder
 
-	title := m.styles.Title.Render("Settings")
-	b.WriteString(title)
+	b.WriteString(m.styles.Title.Render("Settings"))
 	b.WriteString("\n\n")
 
-	// API Section
-	b.WriteString(m.styles.Subtitle.Render("API"))
-	b.WriteString("\n")
+	for i, item := range m.items {
+		// Section header
+		if item.section != "" {
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(m.styles.Subtitle.Render(item.section))
+			b.WriteString("\n")
+		}
 
-	// Token
-	cursor := "  "
-	if m.cursor == 0 {
-		cursor = "> "
-	}
-	tokenValue := "(not set)"
-	if m.config.API.Token != "" {
-		tokenValue = maskToken(m.config.API.Token)
-	}
-	if m.editing && m.editingField == 0 {
-		b.WriteString(fmt.Sprintf("%sToken: %s\n", cursor, m.tokenInput.View()))
-	} else {
+		cursor := "  "
+		if i == m.cursor {
+			cursor = "> "
+		}
+
+		// Text input items can be in editing mode
+		if item.kind == settingText && m.editing && m.editingField == item.editField {
+			input := m.textInputForField(item.editField)
+			b.WriteString(fmt.Sprintf("%s%s: %s\n", cursor, item.label, input.View()))
+			continue
+		}
+
 		style := m.styles.MenuItem
-		if m.cursor == 0 {
+		if i == m.cursor {
 			style = m.styles.MenuItemFocus
 		}
-		b.WriteString(fmt.Sprintf("%s%s: %s\n", cursor, style.Render("Token"), tokenValue))
-	}
 
-	b.WriteString("\n")
-
-	// Collection Section
-	b.WriteString(m.styles.Subtitle.Render("Collection"))
-	b.WriteString("\n")
-
-	// Username
-	cursor = "  "
-	if m.cursor == 1 {
-		cursor = "> "
-	}
-	usernameValue := "(not set)"
-	if m.config.Collection.DefaultUsername != "" {
-		usernameValue = m.config.Collection.DefaultUsername
-	}
-	if m.editing && m.editingField == 1 {
-		b.WriteString(fmt.Sprintf("%sDefault Username: %s\n", cursor, m.usernameInput.View()))
-	} else {
-		style := m.styles.MenuItem
-		if m.cursor == 1 {
-			style = m.styles.MenuItemFocus
+		value := item.getValue()
+		switch item.kind {
+		case settingCycle, settingToggle:
+			b.WriteString(fmt.Sprintf("%s%s: [%s]\n", cursor, style.Render(item.label), value))
+		default:
+			b.WriteString(fmt.Sprintf("%s%s: %s\n", cursor, style.Render(item.label), value))
 		}
-		b.WriteString(fmt.Sprintf("%s%s: %s\n", cursor, style.Render("Default Username"), usernameValue))
 	}
 
 	b.WriteString("\n")
 
-	// Interface Section
-	b.WriteString(m.styles.Subtitle.Render("Interface"))
-	b.WriteString("\n")
-
-	// Color Theme
-	cursor = "  "
-	if m.cursor == 2 {
-		cursor = "> "
-	}
-	style := m.styles.MenuItem
-	if m.cursor == 2 {
-		style = m.styles.MenuItemFocus
-	}
-	themeValue := m.config.Interface.ColorTheme
-	b.WriteString(fmt.Sprintf("%s%s: [%s]\n", cursor, style.Render("Color Theme"), themeValue))
-
-	// Transition
-	cursor = "  "
-	if m.cursor == 3 {
-		cursor = "> "
-	}
-	style = m.styles.MenuItem
-	if m.cursor == 3 {
-		style = m.styles.MenuItemFocus
-	}
-	b.WriteString(fmt.Sprintf("%s%s: [%s]\n", cursor, style.Render("Transition"), m.config.Interface.Transition))
-
-	// Selection
-	cursor = "  "
-	if m.cursor == 4 {
-		cursor = "> "
-	}
-	style = m.styles.MenuItem
-	if m.cursor == 4 {
-		style = m.styles.MenuItemFocus
-	}
-	b.WriteString(fmt.Sprintf("%s%s: [%s]\n", cursor, style.Render("Selection"), m.config.Interface.Selection))
-
-	// List Density
-	cursor = "  "
-	if m.cursor == 5 {
-		cursor = "> "
-	}
-	style = m.styles.MenuItem
-	if m.cursor == 5 {
-		style = m.styles.MenuItemFocus
-	}
-	b.WriteString(fmt.Sprintf("%s%s: [%s]\n", cursor, style.Render("List Density"), m.config.Interface.ListDensity))
-
-	b.WriteString("\n")
-
-	// Display Section
-	b.WriteString(m.styles.Subtitle.Render("Display"))
-	b.WriteString("\n")
-
-	// Show Images
-	cursor = "  "
-	if m.cursor == 6 {
-		cursor = "> "
-	}
-	style = m.styles.MenuItem
-	if m.cursor == 6 {
-		style = m.styles.MenuItemFocus
-	}
-	imagesValue := "OFF"
-	if m.config.Display.ShowImages {
-		imagesValue = "ON"
-	}
-	b.WriteString(fmt.Sprintf("%s%s: [%s]\n", cursor, style.Render("Show Images"), imagesValue))
-
-	// Show Only Owned
-	cursor = "  "
-	if m.cursor == 7 {
-		cursor = "> "
-	}
-	style = m.styles.MenuItem
-	if m.cursor == 7 {
-		style = m.styles.MenuItemFocus
-	}
-	ownedValue := "OFF"
-	if m.config.Collection.ShowOnlyOwned {
-		ownedValue = "ON"
-	}
-	b.WriteString(fmt.Sprintf("%s%s: [%s]\n", cursor, style.Render("Show Only Owned"), ownedValue))
-
-	// Thread Width
-	cursor = "  "
-	if m.cursor == 8 {
-		cursor = "> "
-	}
-	if m.editing && m.editingField == 2 {
-		b.WriteString(fmt.Sprintf("%sThread Width: %s\n", cursor, m.widthInput.View()))
-	} else {
-		style = m.styles.MenuItem
-		if m.cursor == 8 {
-			style = m.styles.MenuItemFocus
-		}
-		b.WriteString(fmt.Sprintf("%s%s: %d\n", cursor, style.Render("Thread Width"), m.config.Display.ThreadWidth))
-	}
-
-	// Thread Height
-	cursor = "  "
-	if m.cursor == 9 {
-		cursor = "> "
-	}
-	if m.editing && m.editingField == 3 {
-		b.WriteString(fmt.Sprintf("%sThread Height: %s\n", cursor, m.heightInput.View()))
-	} else {
-		style = m.styles.MenuItem
-		if m.cursor == 9 {
-			style = m.styles.MenuItemFocus
-		}
-		b.WriteString(fmt.Sprintf("%s%s: %d\n", cursor, style.Render("Thread Height"), m.config.Display.ThreadHeight))
-	}
-
-	// Description Width
-	cursor = "  "
-	if m.cursor == 10 {
-		cursor = "> "
-	}
-	if m.editing && m.editingField == 4 {
-		b.WriteString(fmt.Sprintf("%sDescription Width: %s\n", cursor, m.descWidthInput.View()))
-	} else {
-		style = m.styles.MenuItem
-		if m.cursor == 10 {
-			style = m.styles.MenuItemFocus
-		}
-		b.WriteString(fmt.Sprintf("%s%s: %d\n", cursor, style.Render("Description Width"), m.config.Display.DescriptionWidth))
-	}
-
-	b.WriteString("\n")
-
-	// Help
 	if m.editing {
 		b.WriteString(m.styles.Help.Render("Enter: Save  Esc: Cancel"))
 	} else {

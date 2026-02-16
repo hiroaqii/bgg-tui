@@ -12,6 +12,8 @@ const errNoToken = "API token not configured. Please set your token in Settings.
 
 const maxNameLen = 45
 
+const helpFilterActive = "↑/↓: Navigate  Enter: Detail  Esc: Clear filter"
+
 // truncateName truncates a string to maxWidth based on display width (not byte count).
 func truncateName(s string, maxWidth int) string {
 	if lipgloss.Width(s) <= maxWidth {
@@ -118,6 +120,16 @@ func renderImagePanel(b *strings.Builder, imageEnabled bool, placeholder, transm
 	b.Reset()
 	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listContent, "  ", imgPanel))
 	return tx
+}
+
+// renderListItem returns the cursor prefix and styled text for a list item.
+// If the item is at the cursor position, it uses "> " prefix and selection animation;
+// otherwise it uses "  " prefix and the normal ListItem style.
+func renderListItem(index, cursor int, text string, styles Styles, selType string, animFrame int) (string, string) {
+	if index == cursor {
+		return "> ", renderSelectionAnim(text, selType, animFrame)
+	}
+	return "  ", styles.ListItem.Render(text)
 }
 
 // listNavigator provides navigation signals from list sub-models.

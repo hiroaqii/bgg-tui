@@ -61,6 +61,8 @@ type detailResultMsg struct {
 	err  error
 }
 
+const detailViewOverhead = 6
+
 func newDetailModel(gameID int, styles Styles, keys KeyMap, imgEnabled bool, cache *imageCache, cfg *config.Config) detailModel {
 	return detailModel{
 		state:        detailStateLoading,
@@ -69,10 +71,19 @@ func newDetailModel(gameID int, styles Styles, keys KeyMap, imgEnabled bool, cac
 		config:       cfg,
 		gameID:       gameID,
 		imageEnabled: imgEnabled,
-		imgCols:      20,
-		imgRows:      10,
+		imgCols:      detailImageCols,
+		imgRows:      detailImageRows,
 		cache:        cache,
 	}
+}
+
+// visibleLines returns the number of content lines visible in the viewport.
+func (m detailModel) visibleLines() int {
+	v := m.viewHeight - detailViewOverhead
+	if v < 1 {
+		v = 1
+	}
+	return v
 }
 
 // buildContentLines pre-renders all content lines for full-screen scrolling.
@@ -176,12 +187,7 @@ func (m *detailModel) buildContentLines() {
 		}
 	}
 
-	// maxScroll: visibleLines = viewHeight - 6
-	visibleLines := m.viewHeight - 6
-	if visibleLines < 1 {
-		visibleLines = 1
-	}
-	m.maxScroll = len(m.contentLines) - visibleLines
+	m.maxScroll = len(m.contentLines) - m.visibleLines()
 	if m.maxScroll < 0 {
 		m.maxScroll = 0
 	}
@@ -193,7 +199,7 @@ func (m *detailModel) buildContentLines() {
 func (m detailModel) loadGame(client *bgg.Client) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
-			return detailResultMsg{err: fmt.Errorf("API token not configured. Please set your token in Settings.")}
+			return detailResultMsg{err: fmt.Errorf(errNoToken)}
 		}
 		game, err := client.GetGame(m.gameID)
 		return detailResultMsg{game: game, err: err}
@@ -202,40 +208,11 @@ func (m detailModel) loadGame(client *bgg.Client) tea.Cmd {
 
 func (m detailModel) loadImage(url string) tea.Cmd {
 	return func() tea.Msg {
-		path, err := m.cache.Download(url)
+		ri, err := renderKittyImage(m.cache, url, detailImageID, m.imgCols, m.imgRows, false)
 		if err != nil {
 			return imageLoadedMsg{url: url, err: err}
 		}
-
-		cellW, cellH := termCellSize()
-		pixW := m.imgCols * cellW
-		pixH := m.imgRows * cellH
-
-		img, err := loadAndResize(path, pixW, pixH)
-		if err != nil {
-			return imageLoadedMsg{url: url, err: err}
-		}
-
-		// Compute actual placeholder size from resized image bounds
-		bounds := img.Bounds()
-		actualCols := (bounds.Dx() + cellW - 1) / cellW
-		actualRows := (bounds.Dy() + cellH - 1) / cellH
-		if actualCols < 1 {
-			actualCols = 1
-		}
-		if actualRows < 1 {
-			actualRows = 1
-		}
-
-		const imageID uint32 = 1
-		transmit, err := kittyTransmitString(img, imageID)
-		if err != nil {
-			return imageLoadedMsg{url: url, err: err}
-		}
-
-		placeholder := kittyPlaceholder(imageID, actualRows, actualCols)
-
-		return imageLoadedMsg{url: url, imgTransmit: transmit, imgPlaceholder: placeholder, imgRows: actualRows}
+		return imageLoadedMsg{url: url, imgTransmit: ri.transmit, imgPlaceholder: ri.placeholder, imgRows: ri.rows}
 	}
 }
 
@@ -333,18 +310,11 @@ func (m detailModel) View(width, height int) string {
 
 	switch m.state {
 	case detailStateLoading:
-		b.WriteString(m.styles.Title.Render("Game Details"))
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Loading.Render("Loading..."))
+		writeLoadingView(&b, m.styles, "Game Details", "Loading...")
 
 	case detailStateResults:
-		visibleLines := m.viewHeight - 6
-		if visibleLines < 1 {
-			visibleLines = 1
-		}
-
 		start := m.scroll
-		end := start + visibleLines
+		end := start + m.visibleLines()
 		if end > len(m.contentLines) {
 			end = len(m.contentLines)
 		}
@@ -376,11 +346,7 @@ func (m detailModel) View(width, height int) string {
 		b.WriteString(helpLine)
 
 	case detailStateError:
-		b.WriteString(m.styles.Title.Render("Game Details"))
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Error.Render("Error: " + m.errMsg))
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Help.Render("b: Back  Esc: Menu"))
+		writeErrorView(&b, m.styles, "Game Details", m.errMsg, "b: Back  Esc: Menu")
 	}
 
 	content := b.String()

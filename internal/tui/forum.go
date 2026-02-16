@@ -222,18 +222,8 @@ func (m forumModel) View(width, height int, selType string, animFrame int) strin
 		} else {
 			titles, metas := formatForumColumns(m.forums)
 			for i := range m.forums {
-				cursor := "  "
-				style := m.styles.ListItem
-				if i == m.forumCursor {
-					cursor = "> "
-					style = m.styles.ListItemFocus
-				}
-
-				title := style.Render(titles[i])
-				if i == m.forumCursor {
-					title = renderSelectionAnim(titles[i], selType, animFrame)
-				}
-				line := fmt.Sprintf("%s%s  %s", cursor, title, m.styles.Subtitle.Render(metas[i]))
+				prefix, title := renderListItem(i, m.forumCursor, titles[i], m.styles, selType, animFrame)
+				line := fmt.Sprintf("%s%s  %s", prefix, title, m.styles.Subtitle.Render(metas[i]))
 				b.WriteString(line)
 				b.WriteString("\n")
 			}
@@ -261,20 +251,10 @@ func (m forumModel) View(width, height int, selType string, animFrame int) strin
 
 			for i := start; i < end; i++ {
 				thread := m.threads.Threads[i]
-				cursor := "  "
-				style := m.styles.ListItem
-				if i == m.threadCursor {
-					cursor = "> "
-					style = m.styles.ListItemFocus
-				}
 
 				subject := truncateName(thread.Subject, 50)
-
-				renderedSubject := style.Render(subject)
-			if i == m.threadCursor {
-				renderedSubject = renderSelectionAnim(subject, selType, animFrame)
-			}
-			line := fmt.Sprintf("%s%s", cursor, renderedSubject)
+				prefix, renderedSubject := renderListItem(i, m.threadCursor, subject, m.styles, selType, animFrame)
+				line := fmt.Sprintf("%s%s", prefix, renderedSubject)
 				b.WriteString(line)
 				b.WriteString("\n")
 

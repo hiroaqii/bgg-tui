@@ -74,7 +74,7 @@ func newCollectionModel(cfg *config.Config, styles Styles, keys KeyMap, imageEna
 func (m collectionModel) loadCollection(client *bgg.Client, username string, ownedOnly bool) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
-			return collectionResultMsg{err: fmt.Errorf("API token not configured. Please set your token in Settings.")}
+			return collectionResultMsg{err: fmt.Errorf(errNoToken)}
 		}
 		opts := bgg.CollectionOptions{
 			OwnedOnly: ownedOnly,
@@ -143,7 +143,7 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 		}
 
 		if m.filter.active {
-			result, cursorMoved, cmd := m.filter.updateFilter(msg, m.keys)
+			result, _, cmd := m.filter.updateFilter(msg, m.keys)
 			switch result {
 			case filterExited:
 				m, thumbCmd := m.maybeLoadThumb()
@@ -151,10 +151,6 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 			case filterSelected:
 				m.selected = m.filter.selectedID()
 				return m, nil
-			}
-			if cursorMoved {
-				m, thumbCmd := m.maybeLoadThumb()
-				return m, tea.Batch(cmd, thumbCmd)
 			}
 			m, thumbCmd := m.maybeLoadThumb()
 			return m, tea.Batch(cmd, thumbCmd)
@@ -264,12 +260,6 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 
 			for i := start; i < end; i++ {
 				item := displayItems[i]
-				cursor := "  "
-				style := m.styles.ListItem
-				if i == m.filter.cursor {
-					cursor = "> "
-					style = m.styles.ListItemFocus
-				}
 
 				year := item.Year
 				if year == "" {
@@ -282,11 +272,8 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 					ratingStr = fmt.Sprintf(" %.1f", item.Rating)
 				}
 
-				name := style.Render(item.Name)
-				if i == m.filter.cursor && selType != "" && selType != "none" {
-					name = renderSelectionAnim(item.Name, selType, animFrame)
-				}
-				line := fmt.Sprintf("%s%s (%s)%s", cursor, name, year, m.styles.Rating.Render(ratingStr))
+				prefix, name := renderListItem(i, m.filter.cursor, item.Name, m.styles, selType, animFrame)
+				line := fmt.Sprintf("%s%s (%s)%s", prefix, name, year, m.styles.Rating.Render(ratingStr))
 				b.WriteString(line)
 				b.WriteString("\n")
 			}
@@ -294,7 +281,7 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 
 		b.WriteString("\n")
 		if m.filter.active {
-			b.WriteString(m.styles.Help.Render("↑/↓: Navigate  Enter: Detail  Esc: Clear filter"))
+			b.WriteString(m.styles.Help.Render(helpFilterActive))
 		} else {
 			b.WriteString(m.styles.Help.Render("j/k ↑↓: Navigate  Enter: Detail  /: Filter  u: Change User  ?: Help  b: Back  Esc: Menu"))
 		}
@@ -303,11 +290,7 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 		transmit = renderImagePanel(&b, m.img.enabled, m.img.placeholder, m.img.transmit, m.img.loading, m.img.hasError)
 
 	case collectionStateError:
-		b.WriteString(m.styles.Title.Render("User Collection"))
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Error.Render("Error: " + m.errMsg))
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Help.Render("Enter: Retry  b: Back  Esc: Menu"))
+		writeErrorView(&b, m.styles, "User Collection", m.errMsg, "Enter: Retry  b: Back  Esc: Menu")
 	}
 
 	content := b.String()

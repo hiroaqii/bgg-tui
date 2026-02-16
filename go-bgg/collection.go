@@ -1,8 +1,6 @@
 package bgg
 
 import (
-	"encoding/json"
-	"encoding/xml"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -29,9 +27,9 @@ func (c *Client) GetCollection(username string, opts CollectionOptions) ([]Colle
 		return nil, err
 	}
 
-	var xmlResp xmlCollection
-	if err := xml.Unmarshal(body, &xmlResp); err != nil {
-		return nil, newParseError("failed to parse collection response", err)
+	xmlResp, err := parseXML[xmlCollection](body, "failed to parse collection response")
+	if err != nil {
+		return nil, err
 	}
 
 	items := make([]CollectionItem, 0, len(xmlResp.Items))
@@ -48,13 +46,7 @@ func (c *Client) GetCollectionJSON(username string, opts CollectionOptions) (str
 	if err != nil {
 		return "", err
 	}
-
-	jsonBytes, err := json.MarshalIndent(items, "", "  ")
-	if err != nil {
-		return "", newParseError("failed to marshal collection to JSON", err)
-	}
-
-	return string(jsonBytes), nil
+	return toJSON(items)
 }
 
 // convertXMLToCollectionItem converts an XML collection item to a CollectionItem struct.

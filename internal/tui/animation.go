@@ -40,9 +40,10 @@ var TransitionNames = []string{"none", "fade", "typing", "glitch"}
 // SelectionNames lists all available selection animation types for cycling in settings.
 var SelectionNames = []string{"none", "wave", "blink", "glitch"}
 
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
 // stripAnsi removes ANSI escape sequences from a string.
 func stripAnsi(str string) string {
-	ansiRegex := regexp.MustCompile(`\x1b\[[0-9;]*m`)
 	return ansiRegex.ReplaceAllString(str, "")
 }
 
@@ -176,8 +177,11 @@ func renderTransitionTyping(content string, frame int) string {
 }
 
 // renderSelectionAnim dispatches to the appropriate selection animation renderer.
-// Returns the text as-is if the selection type is unknown or "none".
+// Returns the text as-is if the selection type is empty, "none", or unknown.
 func renderSelectionAnim(text string, selType string, frame int) string {
+	if selType == "" || selType == "none" {
+		return text
+	}
 	switch selType {
 	case "wave":
 		return renderSelectionWave(text, frame)
