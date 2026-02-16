@@ -18,17 +18,18 @@ func htmlToText(htmlContent string, width int) []string {
 	tokenizer := xhtml.NewTokenizer(strings.NewReader(decoded))
 
 	var (
-		result       strings.Builder
-		inBlockquote bool
+		result        strings.Builder
+		quoteDepth    int
 		inOrderedList bool
-		olCounter    int
-		skipContent  bool
+		olCounter     int
+		skipContent   bool
 	)
 
 	// tagStack tracks open tags for context
 	type tagInfo struct {
-		name string
-		href string
+		name    string
+		href    string
+		isQuote bool
 	}
 	var tagStack []tagInfo
 
@@ -57,8 +58,8 @@ func htmlToText(htmlContent string, width int) []string {
 						result.WriteString("\n\n")
 					}
 				}
-			case "blockquote":
-				inBlockquote = true
+			case "blockquote", "gg-markup-quote":
+				quoteDepth++
 				text := result.String()
 				if len(text) > 0 && !strings.HasSuffix(text, "\n") {
 					result.WriteString("\n")
@@ -93,16 +94,37 @@ func htmlToText(htmlContent string, width int) []string {
 				} else {
 					result.WriteString("- ")
 				}
+			case "div":
+				isQuote := false
+				if hasAttr {
+					for {
+						key, val, more := tokenizer.TagAttr()
+						if string(key) == "class" && string(val) == "quote" {
+							isQuote = true
+						}
+						if !more {
+							break
+						}
+					}
+				}
+				if isQuote {
+					quoteDepth++
+					text := result.String()
+					if len(text) > 0 && !strings.HasSuffix(text, "\n") {
+						result.WriteString("\n")
+					}
+				}
+				tagStack = append(tagStack, tagInfo{name: "div", isQuote: isQuote})
 			case "img":
 				skipContent = false // img is self-closing, just skip
 			case "script", "style":
 				skipContent = true
 			default:
-				// For other tags (b, i, u, span, div, etc.), just continue
+				// For other tags (b, i, u, span, font, etc.), just continue
 			}
 
-			// Push non-a tags to stack if needed
-			if tagName != "a" && tt == xhtml.StartTagToken {
+			// Push non-a/div tags to stack if needed
+			if tagName != "a" && tagName != "div" && tt == xhtml.StartTagToken {
 				tagStack = append(tagStack, tagInfo{name: tagName})
 			}
 
@@ -122,8 +144,14 @@ func htmlToText(htmlContent string, width int) []string {
 						break
 					}
 				}
-			case "blockquote":
-				inBlockquote = false
+			case "blockquote", "gg-markup-quote":
+				if quoteDepth > 0 {
+					quoteDepth--
+				}
+				text := result.String()
+				if len(text) > 0 && !strings.HasSuffix(text, "\n") {
+					result.WriteString("\n")
+				}
 			case "ol":
 				inOrderedList = false
 				olCounter = 0
@@ -134,6 +162,23 @@ func htmlToText(htmlContent string, width int) []string {
 						result.WriteString("\n")
 					} else {
 						result.WriteString("\n\n")
+					}
+				}
+			case "div":
+				// Pop the div from tag stack and decrement quoteDepth if it was a quote div
+				for i := len(tagStack) - 1; i >= 0; i-- {
+					if tagStack[i].name == "div" {
+						if tagStack[i].isQuote {
+							if quoteDepth > 0 {
+								quoteDepth--
+							}
+							text := result.String()
+							if len(text) > 0 && !strings.HasSuffix(text, "\n") {
+								result.WriteString("\n")
+							}
+						}
+						tagStack = append(tagStack[:i], tagStack[i+1:]...)
+						break
 					}
 				}
 			case "script", "style":
@@ -164,13 +209,13 @@ func htmlToText(htmlContent string, width int) []string {
 				continue
 			}
 
-			if inBlockquote {
-				// Prefix each line with "> "
+			if quoteDepth > 0 {
+				prefix := strings.Repeat("│ ", quoteDepth)
 				lines := strings.Split(text, "\n")
 				for i, line := range lines {
 					trimmed := strings.TrimSpace(line)
 					if trimmed != "" {
-						result.WriteString("> " + trimmed)
+						result.WriteString(prefix + trimmed)
 					}
 					if i < len(lines)-1 {
 						result.WriteString("\n")

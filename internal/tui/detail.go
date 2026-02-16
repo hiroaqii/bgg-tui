@@ -61,8 +61,6 @@ type detailResultMsg struct {
 	err  error
 }
 
-const detailViewOverhead = 6
-
 func newDetailModel(gameID int, styles Styles, keys KeyMap, imgEnabled bool, cache *imageCache, cfg *config.Config) detailModel {
 	return detailModel{
 		state:        detailStateLoading,
@@ -79,7 +77,7 @@ func newDetailModel(gameID int, styles Styles, keys KeyMap, imgEnabled bool, cac
 
 // visibleLines returns the number of content lines visible in the viewport.
 func (m detailModel) visibleLines() int {
-	v := m.viewHeight - detailViewOverhead
+	v := m.viewHeight - overheadForDensity(m.config.Interface.ListDensity)
 	if v < 1 {
 		v = 1
 	}
@@ -364,22 +362,35 @@ func wrapText(text string, width int) []string {
 			continue
 		}
 
-		words := strings.Fields(para)
+		// 引用プレフィックス（"│ " の繰り返し）を検出
+		prefix := ""
+		rest := para
+		for strings.HasPrefix(rest, "│ ") {
+			prefix += "│ "
+			rest = rest[len("│ "):]
+		}
+
+		effectiveWidth := width - len(prefix)
+		if effectiveWidth < 10 {
+			effectiveWidth = 10
+		}
+
+		words := strings.Fields(rest)
 		if len(words) == 0 {
-			lines = append(lines, "")
+			lines = append(lines, prefix)
 			continue
 		}
 
 		currentLine := words[0]
 		for _, word := range words[1:] {
-			if len(currentLine)+1+len(word) <= width {
+			if len(currentLine)+1+len(word) <= effectiveWidth {
 				currentLine += " " + word
 			} else {
-				lines = append(lines, currentLine)
+				lines = append(lines, prefix+currentLine)
 				currentLine = word
 			}
 		}
-		lines = append(lines, currentLine)
+		lines = append(lines, prefix+currentLine)
 	}
 
 	return lines

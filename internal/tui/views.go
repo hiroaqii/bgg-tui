@@ -47,8 +47,8 @@ func writeErrorView(b *strings.Builder, styles Styles, title, errMsg, helpText s
 // ListDensityNames lists all available list density options for cycling in settings.
 var ListDensityNames = []string{"compact", "normal", "relaxed"}
 
-// listOverheadForDensity returns the list view overhead for the given density.
-func listOverheadForDensity(density string) int {
+// overheadForDensity returns the view overhead for the given density.
+func overheadForDensity(density string) int {
 	switch density {
 	case "compact":
 		return 8
@@ -61,7 +61,7 @@ func listOverheadForDensity(density string) int {
 
 // calcListVisible returns the number of list items that fit in the given terminal height.
 func calcListVisible(height int, density string) int {
-	v := height - listOverheadForDensity(density)
+	v := height - overheadForDensity(density)
 	if v < 1 {
 		v = 1
 	}
