@@ -115,7 +115,7 @@ func (m menuModel) View(width, height int, selType string, animFrame int) string
 
 	// Help
 	b.WriteString("\n")
-	help := m.styles.Help.Render("j/k: Navigate  Enter: Select  ?: Help  q: Quit")
+	help := m.styles.Help.Render("j/k ↑↓: Navigate  Enter: Select  ?: Help  q: Quit")
 	b.WriteString(help)
 
 	// Center the content

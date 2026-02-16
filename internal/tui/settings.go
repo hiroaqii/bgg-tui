@@ -404,7 +404,7 @@ func (m settingsModel) View(width, height int) string {
 	if m.editing {
 		b.WriteString(m.styles.Help.Render("Enter: Save  Esc: Cancel"))
 	} else {
-		b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Edit/Toggle  Esc: Menu"))
+		b.WriteString(m.styles.Help.Render("j/k ↑↓: Navigate  Enter: Edit/Toggle  Esc: Menu"))
 	}
 
 	content := b.String()

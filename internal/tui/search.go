@@ -451,7 +451,7 @@ func (m searchModel) View(width, height int, selType string, animFrame int) stri
 		if m.filtering {
 			b.WriteString(m.styles.Help.Render("↑/↓: Navigate  Enter: Detail  Esc: Clear filter"))
 		} else {
-			b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Detail  /: Filter  s: New Search  ?: Help  b: Back  Esc: Menu"))
+			b.WriteString(m.styles.Help.Render("j/k ↑↓: Navigate  Enter: Detail  /: Filter  s: New Search  ?: Help  b: Back  Esc: Menu"))
 		}
 
 		// Add image panel

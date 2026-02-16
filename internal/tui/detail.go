@@ -369,7 +369,7 @@ func (m detailModel) View(width, height int) string {
 		}
 
 		b.WriteString("\n")
-		helpLine := m.styles.Help.Render("j/k: Scroll  o: Open BGG  f: Forum  ?: Help  b: Back  Esc: Menu")
+		helpLine := m.styles.Help.Render("j/k ↑↓: Scroll  o: Open BGG  f: Forum  ?: Help  b: Back  Esc: Menu")
 		if helpWidth := lipgloss.Width(helpLine); helpWidth < m.maxContentWidth {
 			helpLine += strings.Repeat(" ", m.maxContentWidth-helpWidth)
 		}

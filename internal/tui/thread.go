@@ -205,7 +205,7 @@ func (m threadModel) View(width, height int) string {
 		}
 
 		b.WriteString("\n")
-		b.WriteString(m.styles.Help.Render("j/k: Scroll  s: Sort  o: Open BGG  b: Back  Esc: Menu"))
+		b.WriteString(m.styles.Help.Render("j/k ↑↓: Scroll  s: Sort  o: Open BGG  b: Back  Esc: Menu"))
 
 	case threadStateError:
 		b.WriteString(m.styles.Title.Render("Thread"))

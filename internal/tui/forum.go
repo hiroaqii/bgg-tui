@@ -242,7 +242,7 @@ func (m forumModel) View(width, height int, selType string, animFrame int) strin
 		}
 
 		b.WriteString("\n")
-		b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Open  b: Back  Esc: Menu"))
+		b.WriteString(m.styles.Help.Render("j/k ↑↓: Navigate  Enter: Open  b: Back  Esc: Menu"))
 
 	case forumStateLoadingThreads:
 		b.WriteString(m.styles.Title.Render(m.selectedForumTitle))

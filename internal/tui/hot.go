@@ -417,7 +417,7 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 		if m.filtering {
 			b.WriteString(m.styles.Help.Render("↑/↓: Navigate  Enter: Detail  Esc: Clear filter"))
 		} else {
-			b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Detail  /: Filter  r: Refresh  ?: Help  Esc: Menu"))
+			b.WriteString(m.styles.Help.Render("j/k ↑↓: Navigate  Enter: Detail  /: Filter  r: Refresh  ?: Help  Esc: Menu"))
 		}
 
 		// Add image panel
