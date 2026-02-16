@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -31,6 +32,7 @@ type threadModel struct {
 	maxScroll  int
 	viewLines  []string // Pre-rendered view lines
 	viewHeight int      // Terminal height for dynamic layout
+	sortNewest bool // true=newest first, false=oldest first (default)
 	errMsg     string
 	wantsBack  bool
 	wantsMenu  bool
@@ -124,6 +126,19 @@ func (m threadModel) Update(msg tea.Msg) (threadModel, tea.Cmd) {
 				// Open in browser
 				url := fmt.Sprintf("https://boardgamegeek.com/thread/%d", m.threadID)
 				openBrowser(url)
+			case key.Matches(msg, m.keys.Sort):
+				m.sortNewest = !m.sortNewest
+				sort.Slice(m.thread.Articles, func(i, j int) bool {
+					ti := parseDate(m.thread.Articles[i].PostDate)
+					tj := parseDate(m.thread.Articles[j].PostDate)
+					if m.sortNewest {
+						return ti.After(tj)
+					}
+					return ti.Before(tj)
+				})
+				m.viewLines = m.renderArticles()
+				m.scroll = 0
+				m.recalcScroll()
 			case key.Matches(msg, m.keys.Back):
 				m.wantsBack = true
 			case key.Matches(msg, m.keys.Escape):
@@ -165,7 +180,11 @@ func (m threadModel) View(width, height int) string {
 		}
 		b.WriteString(m.styles.Title.Render(subject))
 		b.WriteString("\n")
-		b.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("%d posts", len(m.thread.Articles))))
+		sortLabel := "↑Old"
+		if m.sortNewest {
+			sortLabel = "↓New"
+		}
+		b.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("%d posts · %s", len(m.thread.Articles), sortLabel)))
 		b.WriteString("\n\n")
 
 		// Show articles with scrolling
@@ -186,7 +205,7 @@ func (m threadModel) View(width, height int) string {
 		}
 
 		b.WriteString("\n")
-		b.WriteString(m.styles.Help.Render("j/k: Scroll  o: Open BGG  b: Back  Esc: Menu"))
+		b.WriteString(m.styles.Help.Render("j/k: Scroll  s: Sort  o: Open BGG  b: Back  Esc: Menu"))
 
 	case threadStateError:
 		b.WriteString(m.styles.Title.Render("Thread"))

@@ -22,6 +22,7 @@ type KeyMap struct {
 	Refresh  key.Binding
 	User     key.Binding
 	Filter   key.Binding
+	Sort     key.Binding
 }
 
 // DefaultKeyMap returns the default key bindings.
@@ -99,6 +100,10 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("/"),
 			key.WithHelp("/", "filter"),
 		),
+		Sort: key.NewBinding(
+			key.WithKeys("s"),
+			key.WithHelp("s", "sort"),
+		),
 	}
 }
 
@@ -113,6 +118,6 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		{k.Up, k.Down, k.Enter, k.Back},
 		{k.Search, k.Hot, k.Collect, k.Settings},
 		{k.NextPage, k.PrevPage, k.Forum, k.Open},
-		{k.Refresh, k.Filter, k.Help, k.Quit},
+		{k.Refresh, k.Filter, k.Sort, k.Help, k.Quit},
 	}
 }
