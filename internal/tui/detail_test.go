@@ -1,26 +1,35 @@
 package tui
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/hiroaqii/bgg-tui/internal/config"
+)
 
 func TestDetailVisibleLines(t *testing.T) {
 	tests := []struct {
 		name       string
 		viewHeight int
+		density    string
 		want       int
 	}{
-		{"normal height", 30, 24},
-		{"small height", 10, 4},
-		{"very small height", 5, 1},
-		{"zero height", 0, 1},
-		{"negative result clamped", 3, 1},
+		{"compact density", 30, "compact", 22},
+		{"normal density", 30, "normal", 18},
+		{"relaxed density", 30, "relaxed", 14},
+		{"small height normal", 10, "normal", 1},
+		{"very small height", 5, "normal", 1},
+		{"zero height", 0, "normal", 1},
+		{"negative result clamped", 3, "normal", 1},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := detailModel{viewHeight: tt.viewHeight}
+			cfg := config.DefaultConfig()
+			cfg.Interface.ListDensity = tt.density
+			m := detailModel{viewHeight: tt.viewHeight, config: cfg}
 			got := m.visibleLines()
 			if got != tt.want {
-				t.Errorf("visibleLines() with viewHeight=%d = %d, want %d", tt.viewHeight, got, tt.want)
+				t.Errorf("visibleLines() with viewHeight=%d density=%s = %d, want %d", tt.viewHeight, tt.density, got, tt.want)
 			}
 		})
 	}

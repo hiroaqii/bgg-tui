@@ -61,8 +61,6 @@ type detailResultMsg struct {
 	err  error
 }
 
-const detailViewOverhead = 6
-
 func newDetailModel(gameID int, styles Styles, keys KeyMap, imgEnabled bool, cache *imageCache, cfg *config.Config) detailModel {
 	return detailModel{
 		state:        detailStateLoading,
@@ -79,7 +77,7 @@ func newDetailModel(gameID int, styles Styles, keys KeyMap, imgEnabled bool, cac
 
 // visibleLines returns the number of content lines visible in the viewport.
 func (m detailModel) visibleLines() int {
-	v := m.viewHeight - detailViewOverhead
+	v := m.viewHeight - overheadForDensity(m.config.Interface.ListDensity)
 	if v < 1 {
 		v = 1
 	}

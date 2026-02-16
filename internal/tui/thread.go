@@ -56,10 +56,11 @@ func newThreadModel(threadID int, styles Styles, keys KeyMap, cfg *config.Config
 	}
 }
 
+const threadExtraOverhead = 2
+
 // visibleLines returns the number of content lines that fit in the viewport.
-// Overhead: title(1+marginBottom1) + subtitle(1) + blank(1) + scrollPos(2) + help(1+marginTop1) = 8
 func (m threadModel) visibleLines() int {
-	v := m.viewHeight - 8
+	v := m.viewHeight - overheadForDensity(m.config.Interface.ListDensity) - threadExtraOverhead
 	if v < 1 {
 		v = 1
 	}
