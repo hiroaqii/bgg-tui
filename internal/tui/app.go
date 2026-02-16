@@ -287,34 +287,8 @@ func (m Model) updateSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setView(ViewSearchResults)
 	}
 
-	if m.search.wantsMenu {
-		m.search.wantsMenu = false
-		m.setView(ViewMenu)
-		if m.imageEnabled {
-			m.needsClearImages = true
-		}
-	}
-
-	if m.search.wantsBack {
-		m.search.wantsBack = false
-		m.setView(ViewMenu)
-		if m.imageEnabled {
-			m.needsClearImages = true
-		}
-	}
-
-	// Handle detail selection
-	if m.search.selected != nil {
-		gameID := *m.search.selected
-		m.search.selected = nil
-		m.previousView = ViewSearchResults
-		m.detail = newDetailModel(gameID, m.styles, m.keys, m.imageEnabled, m.imageCache, m.config)
-		m.detail.viewHeight = m.height
-		m.setView(ViewDetail)
-		if m.imageEnabled {
-			m.needsClearImages = true
-		}
-		return m, m.detail.loadGame(m.bggClient)
+	if handled, navCmd := m.handleListNav(&m.search, ViewSearchResults); handled {
+		return m, navCmd
 	}
 
 	return m, cmd
@@ -324,34 +298,8 @@ func (m Model) updateHot(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.hot, cmd = m.hot.Update(msg, m.bggClient)
 
-	if m.hot.wantsMenu {
-		m.hot.wantsMenu = false
-		m.setView(ViewMenu)
-		if m.imageEnabled {
-			m.needsClearImages = true
-		}
-	}
-
-	if m.hot.wantsBack {
-		m.hot.wantsBack = false
-		m.setView(ViewMenu)
-		if m.imageEnabled {
-			m.needsClearImages = true
-		}
-	}
-
-	// Handle detail selection
-	if m.hot.selected != nil {
-		gameID := *m.hot.selected
-		m.hot.selected = nil
-		m.previousView = ViewHot
-		m.detail = newDetailModel(gameID, m.styles, m.keys, m.imageEnabled, m.imageCache, m.config)
-		m.detail.viewHeight = m.height
-		m.setView(ViewDetail)
-		if m.imageEnabled {
-			m.needsClearImages = true
-		}
-		return m, m.detail.loadGame(m.bggClient)
+	if handled, navCmd := m.handleListNav(&m.hot, ViewHot); handled {
+		return m, navCmd
 	}
 
 	return m, cmd
@@ -369,34 +317,8 @@ func (m Model) updateCollection(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setView(ViewCollectionList)
 	}
 
-	if m.collection.wantsMenu {
-		m.collection.wantsMenu = false
-		m.setView(ViewMenu)
-		if m.imageEnabled {
-			m.needsClearImages = true
-		}
-	}
-
-	if m.collection.wantsBack {
-		m.collection.wantsBack = false
-		m.setView(ViewMenu)
-		if m.imageEnabled {
-			m.needsClearImages = true
-		}
-	}
-
-	// Handle detail selection
-	if m.collection.selected != nil {
-		gameID := *m.collection.selected
-		m.collection.selected = nil
-		m.previousView = ViewCollectionList
-		m.detail = newDetailModel(gameID, m.styles, m.keys, m.imageEnabled, m.imageCache, m.config)
-		m.detail.viewHeight = m.height
-		m.setView(ViewDetail)
-		if m.imageEnabled {
-			m.needsClearImages = true
-		}
-		return m, m.detail.loadGame(m.bggClient)
+	if handled, navCmd := m.handleListNav(&m.collection, ViewCollectionList); handled {
+		return m, navCmd
 	}
 
 	return m, cmd

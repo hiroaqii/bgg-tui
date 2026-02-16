@@ -326,6 +326,47 @@ func fixedSizeNoImagePanel(cols, rows int) string {
 	return sb.String()
 }
 
+// listImageState manages image display state for list views (hot/collection).
+type listImageState struct {
+	enabled      bool
+	cache        *imageCache
+	transmit     string
+	placeholder  string
+	loading      bool
+	hasError     bool
+	lastThumbURL string
+}
+
+// maybeLoad starts loading a thumbnail if the URL has changed.
+func (s *listImageState) maybeLoad(thumbURL string) tea.Cmd {
+	if !s.enabled || s.cache == nil {
+		return nil
+	}
+	if thumbURL == "" || thumbURL == s.lastThumbURL {
+		return nil
+	}
+	s.lastThumbURL = thumbURL
+	s.loading = true
+	s.hasError = false
+	s.transmit = ""
+	s.placeholder = ""
+	return loadListImage(s.cache, thumbURL)
+}
+
+// handleLoaded processes a listImageMsg and updates image state.
+func (s *listImageState) handleLoaded(msg listImageMsg) {
+	if msg.url != s.lastThumbURL {
+		return
+	}
+	s.loading = false
+	if msg.err != nil {
+		s.hasError = true
+	} else {
+		s.transmit = msg.imgTransmit
+		s.placeholder = msg.imgPlaceholder
+	}
+}
+
 // loadListImage loads a thumbnail image for list views (hot/collection).
 func loadListImage(cache *imageCache, url string) tea.Cmd {
 	return func() tea.Msg {

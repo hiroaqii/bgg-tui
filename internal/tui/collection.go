@@ -7,7 +7,6 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	bgg "github.com/hiroaqii/go-bgg"
 
@@ -29,26 +28,20 @@ type collectionModel struct {
 	keys      KeyMap
 	config    *config.Config
 	input     textinput.Model
-	items     []bgg.CollectionItem
-	cursor    int
 	errMsg    string
 	selected  *int // Selected game ID for detail view
 	wantsBack bool
 	wantsMenu bool
 
-	filtering     bool
-	filterInput   textinput.Model
-	filteredItems []bgg.CollectionItem
+	filter filterState[bgg.CollectionItem]
 
-	// Image fields
-	imageEnabled   bool
-	cache          *imageCache
-	imgTransmit    string
-	imgPlaceholder string
-	imgLoading     bool
-	imgError       bool
-	lastThumbURL   string
+	img listImageState
 }
+
+func (m *collectionModel) WantsMenu() bool  { return m.wantsMenu }
+func (m *collectionModel) WantsBack() bool  { return m.wantsBack }
+func (m *collectionModel) Selected() *int   { return m.selected }
+func (m *collectionModel) ClearSignals()    { m.wantsMenu = false; m.wantsBack = false; m.selected = nil }
 
 // collectionResultMsg is sent when collection results are received.
 type collectionResultMsg struct {
@@ -65,13 +58,16 @@ func newCollectionModel(cfg *config.Config, styles Styles, keys KeyMap, imageEna
 	ti.Focus()
 
 	return collectionModel{
-		state:        collectionStateInput,
-		styles:       styles,
-		keys:         keys,
-		config:       cfg,
-		input:        ti,
-		imageEnabled: imageEnabled,
-		cache:        cache,
+		state:  collectionStateInput,
+		styles: styles,
+		keys:   keys,
+		config: cfg,
+		input:  ti,
+		img:    listImageState{enabled: imageEnabled, cache: cache},
+		filter: filterState[bgg.CollectionItem]{
+			getName: func(item bgg.CollectionItem) string { return item.Name },
+			getID:   func(item bgg.CollectionItem) int { return item.ID },
+		},
 	}
 }
 
@@ -89,30 +85,16 @@ func (m collectionModel) loadCollection(client *bgg.Client, username string, own
 }
 
 func (m collectionModel) currentThumbURL() string {
-	items := m.items
-	if m.filtering || m.filteredItems != nil {
-		items = m.filteredItems
-	}
-	if m.cursor >= 0 && m.cursor < len(items) {
-		return items[m.cursor].Thumbnail
+	items := m.filter.displayItems()
+	if m.filter.cursor >= 0 && m.filter.cursor < len(items) {
+		return items[m.filter.cursor].Thumbnail
 	}
 	return ""
 }
 
 func (m collectionModel) maybeLoadThumb() (collectionModel, tea.Cmd) {
-	if !m.imageEnabled || m.cache == nil {
-		return m, nil
-	}
-	url := m.currentThumbURL()
-	if url == "" || url == m.lastThumbURL {
-		return m, nil
-	}
-	m.lastThumbURL = url
-	m.imgLoading = true
-	m.imgError = false
-	m.imgTransmit = ""
-	m.imgPlaceholder = ""
-	return m, loadListImage(m.cache, url)
+	cmd := m.img.maybeLoad(m.currentThumbURL())
+	return m, cmd
 }
 
 func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionModel, tea.Cmd) {
@@ -145,8 +127,8 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 				m.errMsg = msg.err.Error()
 			} else {
 				m.state = collectionStateResults
-				m.items = msg.items
-				m.cursor = 0
+				m.filter.items = msg.items
+				m.filter.cursor = 0
 				m, cmd := m.maybeLoadThumb()
 				return m, cmd
 			}
@@ -156,99 +138,58 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 	case collectionStateResults:
 		// Handle image loaded
 		if msg, ok := msg.(listImageMsg); ok {
-			if msg.url == m.lastThumbURL {
-				m.imgLoading = false
-				if msg.err != nil {
-					m.imgError = true
-				} else {
-					m.imgTransmit = msg.imgTransmit
-					m.imgPlaceholder = msg.imgPlaceholder
-				}
-			}
+			m.img.handleLoaded(msg)
 			return m, nil
 		}
 
-		if m.filtering {
-			switch msg := msg.(type) {
-			case tea.KeyMsg:
-				switch {
-				case key.Matches(msg, m.keys.Escape):
-					m.filtering = false
-					m.filteredItems = nil
-					m.filterInput.SetValue("")
-					m.cursor = 0
-					m, cmd := m.maybeLoadThumb()
-					return m, cmd
-				case key.Matches(msg, m.keys.Enter):
-					if len(m.filteredItems) > 0 {
-						id := m.filteredItems[m.cursor].ID
-						m.selected = &id
-					}
-					return m, nil
-				case msg.String() == "up":
-					if m.cursor > 0 {
-						m.cursor--
-					}
-					m, cmd := m.maybeLoadThumb()
-					return m, cmd
-				case msg.String() == "down":
-					if m.cursor < len(m.filteredItems)-1 {
-						m.cursor++
-					}
-					m, cmd := m.maybeLoadThumb()
-					return m, cmd
-				}
+		if m.filter.active {
+			result, cursorMoved, cmd := m.filter.updateFilter(msg, m.keys)
+			switch result {
+			case filterExited:
+				m, thumbCmd := m.maybeLoadThumb()
+				return m, thumbCmd
+			case filterSelected:
+				m.selected = m.filter.selectedID()
+				return m, nil
 			}
-			m.filterInput, cmd = m.filterInput.Update(msg)
-			query := strings.ToLower(m.filterInput.Value())
-			m.filteredItems = nil
-			for _, item := range m.items {
-				if strings.Contains(strings.ToLower(item.Name), query) {
-					m.filteredItems = append(m.filteredItems, item)
-				}
+			if cursorMoved {
+				m, thumbCmd := m.maybeLoadThumb()
+				return m, tea.Batch(cmd, thumbCmd)
 			}
-			if m.cursor >= len(m.filteredItems) {
-				m.cursor = max(0, len(m.filteredItems)-1)
-			}
-			m2, cmd2 := m.maybeLoadThumb()
-			return m2, tea.Batch(cmd, cmd2)
+			m, thumbCmd := m.maybeLoadThumb()
+			return m, tea.Batch(cmd, thumbCmd)
 		}
 
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch {
 			case key.Matches(msg, m.keys.Up):
-				if m.cursor > 0 {
-					m.cursor--
+				if m.filter.cursor > 0 {
+					m.filter.cursor--
 				}
 				m, cmd := m.maybeLoadThumb()
 				return m, cmd
 			case key.Matches(msg, m.keys.Down):
-				if m.cursor < len(m.items)-1 {
-					m.cursor++
+				if m.filter.cursor < len(m.filter.items)-1 {
+					m.filter.cursor++
 				}
 				m, cmd := m.maybeLoadThumb()
 				return m, cmd
 			case key.Matches(msg, m.keys.Enter):
-				if len(m.items) > 0 {
-					id := m.items[m.cursor].ID
+				if len(m.filter.items) > 0 {
+					id := m.filter.items[m.filter.cursor].ID
 					m.selected = &id
 				}
 			case key.Matches(msg, m.keys.Filter):
-				m.filtering = true
-				m.filterInput = newFilterInput()
-				m.filterInput.Focus()
-				m.filteredItems = make([]bgg.CollectionItem, len(m.items))
-				copy(m.filteredItems, m.items)
-				m.cursor = 0
-				m, cmd := m.maybeLoadThumb()
-				return m, tea.Batch(textinput.Blink, cmd)
+				filterCmd := m.filter.startFilter()
+				m, thumbCmd := m.maybeLoadThumb()
+				return m, tea.Batch(filterCmd, thumbCmd)
 			case key.Matches(msg, m.keys.User):
 				// Change user - go back to input
 				m.state = collectionStateInput
 				m.input.Focus()
-				m.items = nil
-				m.cursor = 0
+				m.filter.items = nil
+				m.filter.cursor = 0
 				return m, textinput.Blink
 			case key.Matches(msg, m.keys.Back):
 				m.wantsBack = true
@@ -303,18 +244,15 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 	case collectionStateResults:
 		username := strings.TrimSpace(m.input.Value())
 		b.WriteString(m.styles.Title.Render(fmt.Sprintf("%s's Collection", username)))
-		if m.filtering {
+		if m.filter.active {
 			b.WriteString("  Filter: ")
-			b.WriteString(m.filterInput.View())
+			b.WriteString(m.filter.input.View())
 		}
 		b.WriteString("\n")
 
-		displayItems := m.items
-		if m.filtering || m.filteredItems != nil {
-			displayItems = m.filteredItems
-		}
+		displayItems := m.filter.displayItems()
 
-		b.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("%d/%d games", len(displayItems), len(m.items))))
+		b.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("%d/%d games", len(displayItems), len(m.filter.items))))
 		b.WriteString("\n\n")
 
 		if len(displayItems) == 0 {
@@ -322,21 +260,13 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 			b.WriteString("\n")
 		} else {
 			// Show results with scrolling
-			start := 0
-			visible := calcListVisible(height, m.config.Interface.ListDensity)
-			if m.cursor >= visible {
-				start = m.cursor - visible + 1
-			}
-			end := start + visible
-			if end > len(displayItems) {
-				end = len(displayItems)
-			}
+			start, end := calcListRange(m.filter.cursor, len(displayItems), height, m.config.Interface.ListDensity)
 
 			for i := start; i < end; i++ {
 				item := displayItems[i]
 				cursor := "  "
 				style := m.styles.ListItem
-				if i == m.cursor {
+				if i == m.filter.cursor {
 					cursor = "> "
 					style = m.styles.ListItemFocus
 				}
@@ -353,7 +283,7 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 				}
 
 				name := style.Render(item.Name)
-				if i == m.cursor && selType != "" && selType != "none" {
+				if i == m.filter.cursor && selType != "" && selType != "none" {
 					name = renderSelectionAnim(item.Name, selType, animFrame)
 				}
 				line := fmt.Sprintf("%s%s (%s)%s", cursor, name, year, m.styles.Rating.Render(ratingStr))
@@ -363,30 +293,14 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 		}
 
 		b.WriteString("\n")
-		if m.filtering {
+		if m.filter.active {
 			b.WriteString(m.styles.Help.Render("↑/↓: Navigate  Enter: Detail  Esc: Clear filter"))
 		} else {
 			b.WriteString(m.styles.Help.Render("j/k ↑↓: Navigate  Enter: Detail  /: Filter  u: Change User  ?: Help  b: Back  Esc: Menu"))
 		}
 
 		// Add image panel
-		if m.imageEnabled && m.imgPlaceholder != "" {
-			transmit = m.imgTransmit
-			listContent := b.String()
-			imgPanel := "\n" + m.imgPlaceholder + "\n"
-			b.Reset()
-			b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listContent, "  ", imgPanel))
-		} else if m.imageEnabled && m.imgLoading {
-			listContent := b.String()
-			imgPanel := "\n" + fixedSizeLoadingPanel(listImageCols, listImageRows) + "\n"
-			b.Reset()
-			b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listContent, "  ", imgPanel))
-		} else if m.imageEnabled && m.imgError {
-			listContent := b.String()
-			imgPanel := "\n" + fixedSizeNoImagePanel(listImageCols, listImageRows) + "\n"
-			b.Reset()
-			b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listContent, "  ", imgPanel))
-		}
+		transmit = renderImagePanel(&b, m.img.enabled, m.img.placeholder, m.img.transmit, m.img.loading, m.img.hasError)
 
 	case collectionStateError:
 		b.WriteString(m.styles.Title.Render("User Collection"))
