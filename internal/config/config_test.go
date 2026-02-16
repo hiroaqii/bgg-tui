@@ -33,10 +33,6 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("expected ThreadHeight 30, got %d", cfg.Display.ThreadHeight)
 	}
 
-	if cfg.Display.ListPageSize != 25 {
-		t.Errorf("expected ListPageSize 25, got %d", cfg.Display.ListPageSize)
-	}
-
 	if cfg.Interface.ColorTheme != "default" {
 		t.Errorf("expected ColorTheme 'default', got '%s'", cfg.Interface.ColorTheme)
 	}
@@ -47,6 +43,10 @@ func TestDefaultConfig(t *testing.T) {
 
 	if cfg.Interface.Selection != "wave" {
 		t.Errorf("expected Selection 'wave', got '%s'", cfg.Interface.Selection)
+	}
+
+	if cfg.Interface.ListDensity != "normal" {
+		t.Errorf("expected ListDensity 'normal', got '%s'", cfg.Interface.ListDensity)
 	}
 }
 
@@ -71,7 +71,6 @@ func TestSaveAndLoad(t *testing.T) {
 	cfg.Display.ShowImages = false
 	cfg.Collection.DefaultUsername = "testuser"
 	cfg.Display.ThreadHeight = 50
-	cfg.Display.ListPageSize = 30
 
 	if err := cfg.SaveToPath(path); err != nil {
 		t.Fatalf("failed to save config: %v", err)
@@ -102,10 +101,6 @@ func TestSaveAndLoad(t *testing.T) {
 
 	if loaded.Display.ThreadHeight != 50 {
 		t.Errorf("expected ThreadHeight 50, got %d", loaded.Display.ThreadHeight)
-	}
-
-	if loaded.Display.ListPageSize != 30 {
-		t.Errorf("expected ListPageSize 30, got %d", loaded.Display.ListPageSize)
 	}
 }
 

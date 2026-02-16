@@ -26,7 +26,6 @@ type DisplayConfig struct {
 	ImageProtocol     string `toml:"image_protocol"` // "auto", "kitty", "off"
 	ThreadWidth       int    `toml:"thread_width"`
 	ThreadHeight      int    `toml:"thread_height"`
-	ListPageSize      int    `toml:"list_page_size"`
 	DescriptionWidth  int    `toml:"description_width"`
 }
 
@@ -38,9 +37,10 @@ type CollectionConfig struct {
 
 // InterfaceConfig contains interface-related configuration.
 type InterfaceConfig struct {
-	ColorTheme string `toml:"color_theme"` // "default", "blue", "orange", "green"
-	Transition string `toml:"transition"`  // "none", "fade", "typing", "wave", "glitch", "rainbow", "blink"
-	Selection  string `toml:"selection"`   // "none", "wave", "blink", "glitch"
+	ColorTheme  string `toml:"color_theme"`  // "default", "blue", "orange", "green"
+	Transition  string `toml:"transition"`   // "none", "fade", "typing", "wave", "glitch", "rainbow", "blink"
+	Selection   string `toml:"selection"`    // "none", "wave", "blink", "glitch"
+	ListDensity string `toml:"list_density"` // "compact", "normal", "relaxed"
 }
 
 // DefaultConfig returns the default configuration.
@@ -54,7 +54,6 @@ func DefaultConfig() *Config {
 			ImageProtocol:     "auto",
 			ThreadWidth:       80,
 			ThreadHeight:      30,
-			ListPageSize:      25,
 			DescriptionWidth:  100,
 		},
 		Collection: CollectionConfig{
@@ -62,9 +61,10 @@ func DefaultConfig() *Config {
 			ShowOnlyOwned:   false,
 		},
 		Interface: InterfaceConfig{
-			ColorTheme: "default",
-			Transition: "fade",
-			Selection:  "wave",
+			ColorTheme:  "default",
+			Transition:  "fade",
+			Selection:   "wave",
+			ListDensity: "normal",
 		},
 	}
 }

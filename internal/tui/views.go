@@ -1,5 +1,29 @@
 package tui
 
+// ListDensityNames lists all available list density options for cycling in settings.
+var ListDensityNames = []string{"compact", "normal", "relaxed"}
+
+// listOverheadForDensity returns the list view overhead for the given density.
+func listOverheadForDensity(density string) int {
+	switch density {
+	case "compact":
+		return 8
+	case "relaxed":
+		return 16
+	default:
+		return 12
+	}
+}
+
+// calcListVisible returns the number of list items that fit in the given terminal height.
+func calcListVisible(height int, density string) int {
+	v := height - listOverheadForDensity(density)
+	if v < 1 {
+		v = 1
+	}
+	return v
+}
+
 // View represents the current view state of the application.
 type View int
 

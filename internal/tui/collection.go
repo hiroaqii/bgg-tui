@@ -323,7 +323,7 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 		} else {
 			// Show results with scrolling
 			start := 0
-			visible := m.config.Display.ListPageSize
+			visible := calcListVisible(height, m.config.Interface.ListDensity)
 			if m.cursor >= visible {
 				start = m.cursor - visible + 1
 			}

@@ -23,7 +23,6 @@ type settingsModel struct {
 	usernameInput     textinput.Model
 	widthInput        textinput.Model
 	heightInput       textinput.Model
-	pageSizeInput     textinput.Model
 	descWidthInput    textinput.Model
 	wantsBack         bool
 	wantsMenu         bool
@@ -52,11 +51,6 @@ func newSettingsModel(cfg *config.Config, styles Styles, keys KeyMap) settingsMo
 	hi.CharLimit = 3
 	hi.SetValue(fmt.Sprintf("%d", cfg.Display.ThreadHeight))
 
-	pi := textinput.New()
-	pi.Placeholder = "Enter page size (5-50)"
-	pi.CharLimit = 2
-	pi.SetValue(fmt.Sprintf("%d", cfg.Display.ListPageSize))
-
 	dwi := textinput.New()
 	dwi.Placeholder = "Enter width (20-200)"
 	dwi.CharLimit = 3
@@ -71,13 +65,12 @@ func newSettingsModel(cfg *config.Config, styles Styles, keys KeyMap) settingsMo
 		usernameInput:  ui,
 		widthInput:     wi,
 		heightInput:    hi,
-		pageSizeInput:  pi,
 		descWidthInput: dwi,
 	}
 }
 
 func (m settingsModel) itemCount() int {
-	return 11 // Token, Username, ColorTheme, Transition, Selection, ShowImages, ShowOnlyOwned, ThreadWidth, ThreadHeight, ListPageSize, DescriptionWidth
+	return 11 // Token, Username, ColorTheme, Transition, Selection, ListDensity, ShowImages, ShowOnlyOwned, ThreadWidth, ThreadHeight, DescriptionWidth
 }
 
 func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
@@ -106,10 +99,6 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 						m.config.Display.ThreadHeight = v
 					}
 				case 4:
-					if v, err := strconv.Atoi(strings.TrimSpace(m.pageSizeInput.Value())); err == nil && v >= 5 && v <= 50 {
-						m.config.Display.ListPageSize = v
-					}
-				case 5:
 					if v, err := strconv.Atoi(strings.TrimSpace(m.descWidthInput.Value())); err == nil && v >= 20 && v <= 200 {
 						m.config.Display.DescriptionWidth = v
 					}
@@ -119,7 +108,6 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 				m.usernameInput.Blur()
 				m.widthInput.Blur()
 				m.heightInput.Blur()
-				m.pageSizeInput.Blur()
 				m.descWidthInput.Blur()
 				m.config.Save()
 				return m, nil
@@ -129,7 +117,6 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 				m.usernameInput.Blur()
 				m.widthInput.Blur()
 				m.heightInput.Blur()
-				m.pageSizeInput.Blur()
 				m.descWidthInput.Blur()
 				return m, nil
 			}
@@ -145,8 +132,6 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 		case 3:
 			m.heightInput, cmd = m.heightInput.Update(msg)
 		case 4:
-			m.pageSizeInput, cmd = m.pageSizeInput.Update(msg)
-		case 5:
 			m.descWidthInput, cmd = m.descWidthInput.Update(msg)
 		}
 		return m, cmd
@@ -188,33 +173,30 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 				m.config.Interface.Selection = cycleValue(m.config.Interface.Selection, SelectionNames)
 				m.config.Save()
 				m.selectionChanged = true
-			case 5: // Show Images
+			case 5: // List Density
+				m.config.Interface.ListDensity = cycleValue(m.config.Interface.ListDensity, ListDensityNames)
+				m.config.Save()
+			case 6: // Show Images
 				m.config.Display.ShowImages = !m.config.Display.ShowImages
 				m.config.Save()
-			case 6: // Show Only Owned
+			case 7: // Show Only Owned
 				m.config.Collection.ShowOnlyOwned = !m.config.Collection.ShowOnlyOwned
 				m.config.Save()
-			case 7: // Thread Width
+			case 8: // Thread Width
 				m.editing = true
 				m.editingField = 2
 				m.widthInput.SetValue(fmt.Sprintf("%d", m.config.Display.ThreadWidth))
 				m.widthInput.Focus()
 				return m, textinput.Blink
-			case 8: // Thread Height
+			case 9: // Thread Height
 				m.editing = true
 				m.editingField = 3
 				m.heightInput.SetValue(fmt.Sprintf("%d", m.config.Display.ThreadHeight))
 				m.heightInput.Focus()
 				return m, textinput.Blink
-			case 9: // List Page Size
-				m.editing = true
-				m.editingField = 4
-				m.pageSizeInput.SetValue(fmt.Sprintf("%d", m.config.Display.ListPageSize))
-				m.pageSizeInput.Focus()
-				return m, textinput.Blink
 			case 10: // Description Width
 				m.editing = true
-				m.editingField = 5
+				m.editingField = 4
 				m.descWidthInput.SetValue(fmt.Sprintf("%d", m.config.Display.DescriptionWidth))
 				m.descWidthInput.Focus()
 				return m, textinput.Blink
@@ -324,6 +306,17 @@ func (m settingsModel) View(width, height int) string {
 	}
 	b.WriteString(fmt.Sprintf("%s%s: [%s]\n", cursor, style.Render("Selection"), m.config.Interface.Selection))
 
+	// List Density
+	cursor = "  "
+	if m.cursor == 5 {
+		cursor = "> "
+	}
+	style = m.styles.MenuItem
+	if m.cursor == 5 {
+		style = m.styles.MenuItemFocus
+	}
+	b.WriteString(fmt.Sprintf("%s%s: [%s]\n", cursor, style.Render("List Density"), m.config.Interface.ListDensity))
+
 	b.WriteString("\n")
 
 	// Display Section
@@ -332,11 +325,11 @@ func (m settingsModel) View(width, height int) string {
 
 	// Show Images
 	cursor = "  "
-	if m.cursor == 5 {
+	if m.cursor == 6 {
 		cursor = "> "
 	}
 	style = m.styles.MenuItem
-	if m.cursor == 5 {
+	if m.cursor == 6 {
 		style = m.styles.MenuItemFocus
 	}
 	imagesValue := "OFF"
@@ -347,11 +340,11 @@ func (m settingsModel) View(width, height int) string {
 
 	// Show Only Owned
 	cursor = "  "
-	if m.cursor == 6 {
+	if m.cursor == 7 {
 		cursor = "> "
 	}
 	style = m.styles.MenuItem
-	if m.cursor == 6 {
+	if m.cursor == 7 {
 		style = m.styles.MenuItemFocus
 	}
 	ownedValue := "OFF"
@@ -362,14 +355,14 @@ func (m settingsModel) View(width, height int) string {
 
 	// Thread Width
 	cursor = "  "
-	if m.cursor == 7 {
+	if m.cursor == 8 {
 		cursor = "> "
 	}
 	if m.editing && m.editingField == 2 {
 		b.WriteString(fmt.Sprintf("%sThread Width: %s\n", cursor, m.widthInput.View()))
 	} else {
 		style = m.styles.MenuItem
-		if m.cursor == 7 {
+		if m.cursor == 8 {
 			style = m.styles.MenuItemFocus
 		}
 		b.WriteString(fmt.Sprintf("%s%s: %d\n", cursor, style.Render("Thread Width"), m.config.Display.ThreadWidth))
@@ -377,32 +370,17 @@ func (m settingsModel) View(width, height int) string {
 
 	// Thread Height
 	cursor = "  "
-	if m.cursor == 8 {
+	if m.cursor == 9 {
 		cursor = "> "
 	}
 	if m.editing && m.editingField == 3 {
 		b.WriteString(fmt.Sprintf("%sThread Height: %s\n", cursor, m.heightInput.View()))
 	} else {
 		style = m.styles.MenuItem
-		if m.cursor == 8 {
-			style = m.styles.MenuItemFocus
-		}
-		b.WriteString(fmt.Sprintf("%s%s: %d\n", cursor, style.Render("Thread Height"), m.config.Display.ThreadHeight))
-	}
-
-	// List Page Size
-	cursor = "  "
-	if m.cursor == 9 {
-		cursor = "> "
-	}
-	if m.editing && m.editingField == 4 {
-		b.WriteString(fmt.Sprintf("%sList Page Size: %s\n", cursor, m.pageSizeInput.View()))
-	} else {
-		style = m.styles.MenuItem
 		if m.cursor == 9 {
 			style = m.styles.MenuItemFocus
 		}
-		b.WriteString(fmt.Sprintf("%s%s: %d\n", cursor, style.Render("List Page Size"), m.config.Display.ListPageSize))
+		b.WriteString(fmt.Sprintf("%s%s: %d\n", cursor, style.Render("Thread Height"), m.config.Display.ThreadHeight))
 	}
 
 	// Description Width
@@ -410,7 +388,7 @@ func (m settingsModel) View(width, height int) string {
 	if m.cursor == 10 {
 		cursor = "> "
 	}
-	if m.editing && m.editingField == 5 {
+	if m.editing && m.editingField == 4 {
 		b.WriteString(fmt.Sprintf("%sDescription Width: %s\n", cursor, m.descWidthInput.View()))
 	} else {
 		style = m.styles.MenuItem
