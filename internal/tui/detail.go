@@ -364,22 +364,35 @@ func wrapText(text string, width int) []string {
 			continue
 		}
 
-		words := strings.Fields(para)
+		// 引用プレフィックス（"│ " の繰り返し）を検出
+		prefix := ""
+		rest := para
+		for strings.HasPrefix(rest, "│ ") {
+			prefix += "│ "
+			rest = rest[len("│ "):]
+		}
+
+		effectiveWidth := width - len(prefix)
+		if effectiveWidth < 10 {
+			effectiveWidth = 10
+		}
+
+		words := strings.Fields(rest)
 		if len(words) == 0 {
-			lines = append(lines, "")
+			lines = append(lines, prefix)
 			continue
 		}
 
 		currentLine := words[0]
 		for _, word := range words[1:] {
-			if len(currentLine)+1+len(word) <= width {
+			if len(currentLine)+1+len(word) <= effectiveWidth {
 				currentLine += " " + word
 			} else {
-				lines = append(lines, currentLine)
+				lines = append(lines, prefix+currentLine)
 				currentLine = word
 			}
 		}
-		lines = append(lines, currentLine)
+		lines = append(lines, prefix+currentLine)
 	}
 
 	return lines

@@ -26,6 +26,55 @@ func TestDetailVisibleLines(t *testing.T) {
 	}
 }
 
+func TestWrapTextQuotePrefix(t *testing.T) {
+	tests := []struct {
+		name  string
+		text  string
+		width int
+		want  []string
+	}{
+		{
+			name:  "no prefix wraps normally",
+			text:  "The quick brown fox jumps over the lazy dog",
+			width: 20,
+			want:  []string{"The quick brown fox", "jumps over the lazy", "dog"},
+		},
+		{
+			name:  "single quote prefix preserved on wrap",
+			text:  "│ The quick brown fox jumps over the lazy dog",
+			width: 25,
+			want:  []string{"│ The quick brown fox", "│ jumps over the lazy", "│ dog"},
+		},
+		{
+			name:  "nested quote prefix preserved on wrap",
+			text:  "│ │ The quick brown fox jumps over the lazy dog",
+			width: 30,
+			want:  []string{"│ │ The quick brown fox", "│ │ jumps over the lazy", "│ │ dog"},
+		},
+		{
+			name:  "short quoted line no wrap needed",
+			text:  "│ short",
+			width: 80,
+			want:  []string{"│ short"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := wrapText(tt.text, tt.width)
+			if len(got) != len(tt.want) {
+				t.Errorf("line count mismatch:\n  got  (%d): %q\n  want (%d): %q", len(got), got, len(tt.want), tt.want)
+				return
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("line %d mismatch:\n  got:  %q\n  want: %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestDetailImageConstants(t *testing.T) {
 	if detailImageID != 1 {
 		t.Errorf("detailImageID = %d, want 1", detailImageID)
