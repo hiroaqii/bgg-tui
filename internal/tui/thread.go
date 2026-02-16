@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	bgg "github.com/hiroaqii/go-bgg"
 
@@ -221,6 +222,12 @@ func (m threadModel) renderArticles() []string {
 
 		// Body lines (wrap text)
 		bodyLines := htmlToText(article.Body, m.config.Display.ThreadWidth)
+		quoteStyle := lipgloss.NewStyle().Foreground(ColorMuted)
+		for i, line := range bodyLines {
+			if strings.HasPrefix(line, "│") {
+				bodyLines[i] = quoteStyle.Render(line)
+			}
+		}
 		lines = append(lines, bodyLines...)
 
 		// Add separator between articles
