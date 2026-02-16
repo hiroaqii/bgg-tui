@@ -67,7 +67,7 @@ func newForumModel(gameID int, gameName string, styles Styles, keys KeyMap) foru
 func (m forumModel) loadForums(client *bgg.Client) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
-			return forumsResultMsg{err: fmt.Errorf("API token not configured. Please set your token in Settings.")}
+			return forumsResultMsg{err: fmt.Errorf(errNoToken)}
 		}
 		forums, err := client.GetForums(m.gameID)
 		return forumsResultMsg{forums: forums, err: err}
@@ -77,7 +77,7 @@ func (m forumModel) loadForums(client *bgg.Client) tea.Cmd {
 func (m forumModel) loadThreads(client *bgg.Client) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
-			return threadsResultMsg{err: fmt.Errorf("API token not configured. Please set your token in Settings.")}
+			return threadsResultMsg{err: fmt.Errorf(errNoToken)}
 		}
 		threads, err := client.GetForumThreads(m.selectedForumID, m.page)
 		return threadsResultMsg{threads: threads, err: err}
@@ -210,9 +210,7 @@ func (m forumModel) View(width, height int, selType string, animFrame int) strin
 
 	switch m.state {
 	case forumStateLoadingForums:
-		b.WriteString(m.styles.Title.Render(fmt.Sprintf("%s - Forums", m.gameName)))
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Loading.Render("Loading forums..."))
+		writeLoadingView(&b, m.styles, fmt.Sprintf("%s - Forums", m.gameName), "Loading forums...")
 
 	case forumStateForumList:
 		b.WriteString(m.styles.Title.Render(fmt.Sprintf("%s - Forums", m.gameName)))
@@ -232,7 +230,7 @@ func (m forumModel) View(width, height int, selType string, animFrame int) strin
 				}
 
 				title := style.Render(titles[i])
-				if i == m.forumCursor && selType != "" && selType != "none" {
+				if i == m.forumCursor {
 					title = renderSelectionAnim(titles[i], selType, animFrame)
 				}
 				line := fmt.Sprintf("%s%s  %s", cursor, title, m.styles.Subtitle.Render(metas[i]))
@@ -245,9 +243,7 @@ func (m forumModel) View(width, height int, selType string, animFrame int) strin
 		b.WriteString(m.styles.Help.Render("j/k ↑↓: Navigate  Enter: Open  b: Back  Esc: Menu"))
 
 	case forumStateLoadingThreads:
-		b.WriteString(m.styles.Title.Render(m.selectedForumTitle))
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Loading.Render("Loading threads..."))
+		writeLoadingView(&b, m.styles, m.selectedForumTitle, "Loading threads...")
 
 	case forumStateThreadList:
 		b.WriteString(m.styles.Title.Render(m.selectedForumTitle))
@@ -261,16 +257,7 @@ func (m forumModel) View(width, height int, selType string, animFrame int) strin
 			b.WriteString(m.styles.Subtitle.Render("No threads found."))
 			b.WriteString("\n")
 		} else {
-			// Show up to 10 threads with scrolling
-			start := 0
-			visible := 10
-			if m.threadCursor >= visible {
-				start = m.threadCursor - visible + 1
-			}
-			end := start + visible
-			if end > len(m.threads.Threads) {
-				end = len(m.threads.Threads)
-			}
+			start, end := calcListRangeMultiLine(m.threadCursor, len(m.threads.Threads), height, "normal", 2)
 
 			for i := start; i < end; i++ {
 				thread := m.threads.Threads[i]
@@ -281,14 +268,10 @@ func (m forumModel) View(width, height int, selType string, animFrame int) strin
 					style = m.styles.ListItemFocus
 				}
 
-				// Truncate subject if too long
-				subject := thread.Subject
-				if len(subject) > 50 {
-					subject = subject[:47] + "..."
-				}
+				subject := truncateName(thread.Subject, 50)
 
 				renderedSubject := style.Render(subject)
-			if i == m.threadCursor && selType != "" && selType != "none" {
+			if i == m.threadCursor {
 				renderedSubject = renderSelectionAnim(subject, selType, animFrame)
 			}
 			line := fmt.Sprintf("%s%s", cursor, renderedSubject)
@@ -309,11 +292,7 @@ func (m forumModel) View(width, height int, selType string, animFrame int) strin
 		b.WriteString(m.styles.Help.Render("j/k: Navigate  Enter: Read  n/p: Page  b: Back  Esc: Menu"))
 
 	case forumStateError:
-		b.WriteString(m.styles.Title.Render("Forums"))
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Error.Render("Error: " + m.errMsg))
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Help.Render("b: Back  Esc: Menu"))
+		writeErrorView(&b, m.styles, "Forums", m.errMsg, "b: Back  Esc: Menu")
 	}
 
 	content := b.String()

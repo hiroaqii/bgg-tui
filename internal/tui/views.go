@@ -7,6 +7,41 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// errNoToken is the common error message when the API token is not configured.
+const errNoToken = "API token not configured. Please set your token in Settings."
+
+const maxNameLen = 45
+
+// truncateName truncates a string to maxWidth based on display width (not byte count).
+func truncateName(s string, maxWidth int) string {
+	if lipgloss.Width(s) <= maxWidth {
+		return s
+	}
+	runes := []rune(s)
+	for i := len(runes) - 1; i >= 0; i-- {
+		if lipgloss.Width(string(runes[:i])+"...") <= maxWidth {
+			return string(runes[:i]) + "..."
+		}
+	}
+	return "..."
+}
+
+// writeLoadingView writes a standard loading view with title and message.
+func writeLoadingView(b *strings.Builder, styles Styles, title, message string) {
+	b.WriteString(styles.Title.Render(title))
+	b.WriteString("\n\n")
+	b.WriteString(styles.Loading.Render(message))
+}
+
+// writeErrorView writes a standard error view with title, error message, and help text.
+func writeErrorView(b *strings.Builder, styles Styles, title, errMsg, helpText string) {
+	b.WriteString(styles.Title.Render(title))
+	b.WriteString("\n\n")
+	b.WriteString(styles.Error.Render("Error: " + errMsg))
+	b.WriteString("\n\n")
+	b.WriteString(styles.Help.Render(helpText))
+}
+
 // ListDensityNames lists all available list density options for cycling in settings.
 var ListDensityNames = []string{"compact", "normal", "relaxed"}
 
@@ -34,6 +69,23 @@ func calcListVisible(height int, density string) int {
 // calcListRange computes the start and end indices for a scrollable list view.
 func calcListRange(cursor, totalItems, height int, density string) (start, end int) {
 	visible := calcListVisible(height, density)
+	if cursor >= visible {
+		start = cursor - visible + 1
+	}
+	end = start + visible
+	if end > totalItems {
+		end = totalItems
+	}
+	return start, end
+}
+
+// calcListRangeMultiLine computes the start and end indices for a scrollable list
+// where each item occupies multiple lines (e.g., forum thread list with 2-line items).
+func calcListRangeMultiLine(cursor, totalItems, height int, density string, linesPerItem int) (start, end int) {
+	visible := calcListVisible(height, density) / linesPerItem
+	if visible < 1 {
+		visible = 1
+	}
 	if cursor >= visible {
 		start = cursor - visible + 1
 	}
