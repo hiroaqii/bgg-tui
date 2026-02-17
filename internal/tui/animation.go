@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 )
 
 // Animation tick interval (~15 fps).
@@ -35,7 +36,7 @@ var (
 )
 
 // TransitionNames lists all available transition types for cycling in settings.
-var TransitionNames = []string{"none", "fade", "typing", "glitch"}
+var TransitionNames = []string{"none", "fade", "glitch", "dissolve", "sweep", "lines", "lines-cross", "random"}
 
 // SelectionNames lists all available selection animation types for cycling in settings.
 var SelectionNames = []string{"none", "wave", "blink", "glitch"}
@@ -63,9 +64,20 @@ type transitionState struct {
 }
 
 // startTransition creates a new transitionState for the given transition type.
+// If name is "random", a random transition is chosen each time.
 func startTransition(name string, oldView string) transitionState {
 	if name == "" || name == "none" {
 		return transitionState{}
+	}
+	if name == "random" {
+		// Pick from all transitions except "none" and "random".
+		candidates := make([]string, 0, len(TransitionNames)-2)
+		for _, n := range TransitionNames {
+			if n != "none" && n != "random" {
+				candidates = append(candidates, n)
+			}
+		}
+		name = candidates[rand.Intn(len(candidates))]
 	}
 	return transitionState{
 		active:   true,
@@ -83,11 +95,21 @@ func renderTransition(content string, t transitionState) string {
 	case "fade":
 		progress := float64(t.frame) / float64(t.maxFrame)
 		return renderTransitionFade(content, progress)
-	case "typing":
-		return renderTransitionTyping(content, t.frame)
 	case "glitch":
 		progress := float64(t.frame) / float64(t.maxFrame)
 		return renderTransitionGlitch(content, progress)
+	case "dissolve":
+		progress := float64(t.frame) / float64(t.maxFrame)
+		return renderTransitionDissolve(content, progress)
+	case "sweep":
+		progress := float64(t.frame) / float64(t.maxFrame)
+		return renderTransitionSweep(content, progress)
+	case "lines":
+		progress := float64(t.frame) / float64(t.maxFrame)
+		return renderTransitionLines(content, progress, false)
+	case "lines-cross":
+		progress := float64(t.frame) / float64(t.maxFrame)
+		return renderTransitionLines(content, progress, true)
 	}
 	return content
 }
@@ -144,36 +166,182 @@ func renderTransitionGlitch(content string, progress float64) string {
 	return strings.Join(resultLines, "\n")
 }
 
-// renderTransitionTyping reveals lines top-to-bottom with a cursor on the last visible line.
-func renderTransitionTyping(content string, frame int) string {
+// easeOutQuad applies quadratic ease-out: fast start, slow finish.
+func easeOutQuad(t float64) float64 {
+	return 1 - (1-t)*(1-t)
+}
+
+// renderTransitionDissolve reveals characters from blank in a pseudo-random order.
+// Each character has a deterministic threshold based on its position; once progress
+// exceeds that threshold the real character appears, otherwise a space is shown.
+func renderTransitionDissolve(content string, progress float64) string {
+	lines := strings.Split(content, "\n")
+	var resultLines []string
+	for li, line := range lines {
+		if hasKittyImage(line) {
+			resultLines = append(resultLines, line)
+			continue
+		}
+		plain := stripAnsi(line)
+		var b strings.Builder
+		for ci, ch := range []rune(plain) {
+			threshold := float64((li*7919+ci*6271)%1000+1) / 1001.0
+			if progress >= threshold {
+				b.WriteRune(ch)
+			} else {
+				w := runewidth.RuneWidth(ch)
+				for range w {
+					b.WriteByte(' ')
+				}
+			}
+		}
+		resultLines = append(resultLines, b.String())
+	}
+	return strings.Join(resultLines, "\n")
+}
+
+// renderTransitionSweep reveals content column by column from left to right.
+func renderTransitionSweep(content string, progress float64) string {
+	lines := strings.Split(content, "\n")
+	// Find the maximum display width across all lines.
+	maxWidth := 0
+	plainLines := make([]string, len(lines))
+	for i, line := range lines {
+		if hasKittyImage(line) {
+			plainLines[i] = ""
+			continue
+		}
+		plainLines[i] = stripAnsi(line)
+		w := lipgloss.Width(plainLines[i])
+		if w > maxWidth {
+			maxWidth = w
+		}
+	}
+	if maxWidth == 0 {
+		return content
+	}
+
+	sweepCol := int(easeOutQuad(progress) * float64(maxWidth))
+	edgeStyle := lipgloss.NewStyle().Foreground(ColorAccent)
+
+	var resultLines []string
+	for i, line := range lines {
+		if hasKittyImage(line) {
+			resultLines = append(resultLines, line)
+			continue
+		}
+		plain := plainLines[i]
+		runes := []rune(plain)
+		var b strings.Builder
+		col := 0
+		for _, ch := range runes {
+			w := runewidth.RuneWidth(ch)
+			if col+w <= sweepCol {
+				b.WriteRune(ch)
+			} else if col == sweepCol && sweepCol > 0 {
+				b.WriteString(edgeStyle.Render("▌"))
+				for range w - 1 {
+					b.WriteByte(' ')
+				}
+			} else {
+				for range w {
+					b.WriteByte(' ')
+				}
+			}
+			col += w
+		}
+		// If sweepCol is beyond the line content, show the edge at the end.
+		if col <= sweepCol && col < maxWidth && sweepCol > 0 {
+			b.WriteString(edgeStyle.Render("▌"))
+		}
+		resultLines = append(resultLines, b.String())
+	}
+	return strings.Join(resultLines, "\n")
+}
+
+// renderTransitionLines reveals content line by line with staggered slide-in.
+// If cross is true, odd lines slide from the left and even lines from the right.
+func renderTransitionLines(content string, progress float64, cross bool) string {
 	lines := strings.Split(content, "\n")
 	totalLines := len(lines)
 	if totalLines == 0 {
 		return content
 	}
 
-	// Number of visible lines increases with each frame
-	visibleLines := frame * totalLines / 30
-	if visibleLines > totalLines {
-		visibleLines = totalLines
-	}
+	const stagger = 0.6
 
-	var result []string
-	for i := 0; i < totalLines; i++ {
-		if hasKittyImage(lines[i]) {
-			result = append(result, lines[i])
+	var resultLines []string
+	for i, line := range lines {
+		if hasKittyImage(line) {
+			resultLines = append(resultLines, line)
 			continue
 		}
-		if i < visibleLines {
-			result = append(result, lines[i])
-		} else if i == visibleLines {
-			// Current line: show cursor
-			result = append(result, "▌")
+		plain := stripAnsi(line)
+		lineWidth := lipgloss.Width(plain)
+
+		lineDelay := float64(i) / float64(totalLines) * stagger
+		lp := (progress - lineDelay) / (1.0 - stagger)
+		if lp < 0 {
+			lp = 0
+		} else if lp > 1 {
+			lp = 1
+		}
+		lp = easeOutQuad(lp)
+
+		if lp >= 1.0 {
+			resultLines = append(resultLines, plain)
+			continue
+		}
+		if lineWidth == 0 {
+			resultLines = append(resultLines, "")
+			continue
+		}
+
+		runes := []rune(plain)
+		slideFromLeft := cross && i%2 == 1
+
+		if slideFromLeft {
+			// Slide from left: show the rightmost portion.
+			visibleCols := int(float64(lineWidth) * lp)
+			var b strings.Builder
+			// Pad left with spaces.
+			padWidth := lineWidth - visibleCols
+			for range padWidth {
+				b.WriteByte(' ')
+			}
+			// Show runes from the right.
+			col := 0
+			startCol := lineWidth - visibleCols
+			for _, ch := range runes {
+				w := runewidth.RuneWidth(ch)
+				if col+w > startCol {
+					b.WriteRune(ch)
+				}
+				col += w
+			}
+			resultLines = append(resultLines, b.String())
 		} else {
-			result = append(result, "")
+			// Slide from right: show leftmost portion offset to the right.
+			offset := int(float64(lineWidth) * (1.0 - lp))
+			var b strings.Builder
+			for range offset {
+				b.WriteByte(' ')
+			}
+			// Show runes that fit within (lineWidth - offset) columns.
+			visibleCols := lineWidth - offset
+			col := 0
+			for _, ch := range runes {
+				w := runewidth.RuneWidth(ch)
+				if col+w > visibleCols {
+					break
+				}
+				b.WriteRune(ch)
+				col += w
+			}
+			resultLines = append(resultLines, b.String())
 		}
 	}
-	return strings.Join(result, "\n")
+	return strings.Join(resultLines, "\n")
 }
 
 // renderSelectionAnim dispatches to the appropriate selection animation renderer.
