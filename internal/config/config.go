@@ -37,7 +37,7 @@ type CollectionConfig struct {
 // InterfaceConfig contains interface-related configuration.
 type InterfaceConfig struct {
 	ColorTheme  string `toml:"color_theme"`  // "default", "blue", "orange", "green"
-	Transition  string `toml:"transition"`   // "none", "fade", "typing", "glitch", "dissolve", "sweep", "lines", "lines-cross"
+	Transition  string `toml:"transition"`   // "none", "fade", "glitch", "dissolve", "sweep", "lines", "lines-cross"
 	Selection   string `toml:"selection"`    // "none", "wave", "blink", "glitch"
 	ListDensity string `toml:"list_density"` // "compact", "normal", "relaxed"
 	DateFormat  string `toml:"date_format"`  // "YYYY-MM-DD", "MM/DD/YYYY", "DD/MM/YYYY"

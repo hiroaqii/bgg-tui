@@ -36,7 +36,7 @@ var (
 )
 
 // TransitionNames lists all available transition types for cycling in settings.
-var TransitionNames = []string{"none", "fade", "typing", "glitch", "dissolve", "sweep", "lines", "lines-cross"}
+var TransitionNames = []string{"none", "fade", "glitch", "dissolve", "sweep", "lines", "lines-cross"}
 
 // SelectionNames lists all available selection animation types for cycling in settings.
 var SelectionNames = []string{"none", "wave", "blink", "glitch"}
@@ -84,8 +84,6 @@ func renderTransition(content string, t transitionState) string {
 	case "fade":
 		progress := float64(t.frame) / float64(t.maxFrame)
 		return renderTransitionFade(content, progress)
-	case "typing":
-		return renderTransitionTyping(content, t.frame)
 	case "glitch":
 		progress := float64(t.frame) / float64(t.maxFrame)
 		return renderTransitionGlitch(content, progress)
@@ -155,38 +153,6 @@ func renderTransitionGlitch(content string, progress float64) string {
 		resultLines = append(resultLines, b.String())
 	}
 	return strings.Join(resultLines, "\n")
-}
-
-// renderTransitionTyping reveals lines top-to-bottom with a cursor on the last visible line.
-func renderTransitionTyping(content string, frame int) string {
-	lines := strings.Split(content, "\n")
-	totalLines := len(lines)
-	if totalLines == 0 {
-		return content
-	}
-
-	// Number of visible lines increases with each frame
-	visibleLines := frame * totalLines / 30
-	if visibleLines > totalLines {
-		visibleLines = totalLines
-	}
-
-	var result []string
-	for i := 0; i < totalLines; i++ {
-		if hasKittyImage(lines[i]) {
-			result = append(result, lines[i])
-			continue
-		}
-		if i < visibleLines {
-			result = append(result, lines[i])
-		} else if i == visibleLines {
-			// Current line: show cursor
-			result = append(result, "▌")
-		} else {
-			result = append(result, "")
-		}
-	}
-	return strings.Join(result, "\n")
 }
 
 // easeOutQuad applies quadratic ease-out: fast start, slow finish.
