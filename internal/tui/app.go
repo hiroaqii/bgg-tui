@@ -55,6 +55,7 @@ type Model struct {
 	transition     transitionState
 	transitionType string
 	selectionType  string
+	showBorder     bool
 }
 
 // New creates a new application model.
@@ -104,6 +105,7 @@ func New(cfg *config.Config) Model {
 		imageCache:     imgCache,
 		transitionType: cfg.Interface.Transition,
 		selectionType:  cfg.Interface.Selection,
+		showBorder:     cfg.Interface.ShowBorder,
 	}
 }
 
@@ -254,6 +256,11 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.settings.selectionChanged {
 		m.settings.selectionChanged = false
 		m.selectionType = m.config.Interface.Selection
+	}
+
+	if m.settings.borderChanged {
+		m.settings.borderChanged = false
+		m.showBorder = m.config.Interface.ShowBorder
 	}
 
 	// Only start a new anim tick when transitioning from not-needed to needed,
@@ -437,9 +444,9 @@ func (m Model) renderCurrentView() string {
 	case ViewSetupToken:
 		return m.setupToken.View(m.width, m.height)
 	case ViewMenu:
-		return m.menu.View(m.width, m.height, m.selectionType, m.animFrame)
+		return m.menu.View(m.width, m.height, m.selectionType, m.animFrame, m.showBorder)
 	case ViewSettings:
-		return m.settings.View(m.width, m.height)
+		return m.settings.View(m.width, m.height, m.showBorder)
 	case ViewSearchInput, ViewSearchResults:
 		return m.search.View(m.width, m.height, m.selectionType, m.animFrame)
 	case ViewHot:

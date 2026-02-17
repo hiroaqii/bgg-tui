@@ -57,6 +57,7 @@ type settingsModel struct {
 	themeChanged      bool
 	transitionChanged bool
 	selectionChanged  bool
+	borderChanged     bool
 	items             []settingItem
 }
 
@@ -161,6 +162,19 @@ func (m *settingsModel) buildItems() []settingItem {
 			getValue: func() string { return cfg.Interface.DateFormat },
 			onEnter: func() {
 				cfg.Interface.DateFormat = cycleValue(cfg.Interface.DateFormat, DateFormatNames)
+				cfg.Save()
+			},
+		},
+		{
+			label: "Show Border", kind: settingToggle,
+			getValue: func() string {
+				if cfg.Interface.ShowBorder {
+					return "ON"
+				}
+				return "OFF"
+			},
+			onEnter: func() {
+				cfg.Interface.ShowBorder = !cfg.Interface.ShowBorder
 				cfg.Save()
 			},
 		},
@@ -308,10 +322,12 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 				oldTheme := m.config.Interface.ColorTheme
 				oldTransition := m.config.Interface.Transition
 				oldSelection := m.config.Interface.Selection
+				oldBorder := m.config.Interface.ShowBorder
 				item.onEnter()
 				m.themeChanged = m.config.Interface.ColorTheme != oldTheme
 				m.transitionChanged = m.config.Interface.Transition != oldTransition
 				m.selectionChanged = m.config.Interface.Selection != oldSelection
+				m.borderChanged = m.config.Interface.ShowBorder != oldBorder
 			}
 		case key.Matches(msg, m.keys.Back):
 			m.wantsBack = true
@@ -323,7 +339,7 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 	return m, nil
 }
 
-func (m settingsModel) View(width, height int) string {
+func (m settingsModel) View(width, height int, showBorder bool) string {
 	var b strings.Builder
 
 	b.WriteString(m.styles.Title.Render("Settings"))
@@ -375,9 +391,10 @@ func (m settingsModel) View(width, height int) string {
 
 	content := b.String()
 
-	// Wrap content in a border frame.
-	bordered := m.styles.Border.BorderForeground(ColorMuted).Render(content)
-	return centerContent(bordered, width, height)
+	if showBorder {
+		content = m.styles.Border.BorderForeground(ColorMuted).Render(content)
+	}
+	return centerContent(content, width, height)
 }
 
 func maskToken(token string) string {

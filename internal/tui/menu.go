@@ -72,7 +72,7 @@ func (m menuModel) Update(msg tea.Msg) (menuModel, tea.Cmd) {
 	return m, nil
 }
 
-func (m menuModel) View(width, height int, selType string, animFrame int) string {
+func (m menuModel) View(width, height int, selType string, animFrame int, showBorder bool) string {
 	var b strings.Builder
 
 	// Title
@@ -119,7 +119,8 @@ func (m menuModel) View(width, height int, selType string, animFrame int) string
 
 	content := b.String()
 
-	// Wrap content in a border frame.
-	bordered := m.styles.Border.BorderForeground(ColorMuted).Render(content)
-	return centerContent(bordered, width, height)
+	if showBorder {
+		content = m.styles.Border.BorderForeground(ColorMuted).Render(content)
+	}
+	return centerContent(content, width, height)
 }
