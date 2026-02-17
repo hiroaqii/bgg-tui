@@ -95,7 +95,7 @@ func New(cfg *config.Config) Model {
 		styles:       styles,
 		currentView:  startView,
 		setupToken:   newSetupTokenModel(cfg, styles, keys),
-		menu:         newMenuModel(styles, keys, cfg.HasToken()),
+		menu:         newMenuModel(cfg, styles, keys, cfg.HasToken()),
 		settings:     newSettingsModel(cfg, styles, keys),
 		search:       newSearchModel(cfg, styles, keys, imgEnabled, imgCache),
 		hot:          newHotModel(cfg, styles, keys, imgEnabled, imgCache),
@@ -195,7 +195,7 @@ func (m Model) updateSetupToken(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.bggClient, _ = bgg.NewClient(bgg.Config{
 			Token: m.config.API.Token,
 		})
-		m.menu = newMenuModel(m.styles, m.keys, true)
+		m.menu = newMenuModel(m.config, m.styles, m.keys, true)
 		m.setView(ViewMenu)
 	}
 
@@ -255,6 +255,7 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.settings.selectionChanged = false
 		m.selectionType = m.config.Interface.Selection
 	}
+
 
 	// Only start a new anim tick when transitioning from not-needed to needed,
 	// to avoid accumulating duplicate tick streams on every key press.

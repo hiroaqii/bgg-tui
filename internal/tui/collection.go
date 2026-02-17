@@ -256,7 +256,11 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 			b.WriteString("\n")
 		} else {
 			// Show results with scrolling
-			start, end := calcListRange(m.filter.cursor, len(displayItems), height, m.config.Interface.ListDensity)
+			listHeight := height
+			if HasBorder(m.config.Interface.BorderStyle) {
+				listHeight -= BorderHeightOverhead
+			}
+			start, end := calcListRange(m.filter.cursor, len(displayItems), listHeight, m.config.Interface.ListDensity)
 
 			for i := start; i < end; i++ {
 				item := displayItems[i]
@@ -294,5 +298,6 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 	}
 
 	content := b.String()
-	return transmit + centerContent(content, width, height)
+	borderStyle := m.config.Interface.BorderStyle
+	return transmit + renderView(content, m.styles, width, height, borderStyle)
 }

@@ -165,6 +165,14 @@ func (m *settingsModel) buildItems() []settingItem {
 			},
 		},
 		{
+			label: "Border Style", kind: settingCycle,
+			getValue: func() string { return cfg.Interface.BorderStyle },
+			onEnter: func() {
+				cfg.Interface.BorderStyle = cycleValue(cfg.Interface.BorderStyle, BorderStyleNames)
+				cfg.Save()
+			},
+		},
+		{
 			label: "Show Images", section: "Display", kind: settingToggle,
 			getValue: func() string {
 				if cfg.Display.ShowImages {
@@ -374,7 +382,7 @@ func (m settingsModel) View(width, height int) string {
 	}
 
 	content := b.String()
-	return centerContent(content, width, height)
+	return renderView(content, m.styles, width, height, m.config.Interface.BorderStyle)
 }
 
 func maskToken(token string) string {

@@ -61,6 +61,9 @@ const threadExtraOverhead = 2
 // visibleLines returns the number of content lines that fit in the viewport.
 func (m threadModel) visibleLines() int {
 	v := m.viewHeight - overheadForDensity(m.config.Interface.ListDensity) - threadExtraOverhead
+	if HasBorder(m.config.Interface.BorderStyle) {
+		v -= BorderHeightOverhead
+	}
 	if v < 1 {
 		v = 1
 	}
@@ -209,7 +212,11 @@ func (m threadModel) View(width, height int) string {
 	}
 
 	content := b.String()
-	return centerContent(content, width, height)
+	borderStyle := m.config.Interface.BorderStyle
+	if m.state != threadStateResults {
+		borderStyle = "none"
+	}
+	return renderView(content, m.styles, width, height, borderStyle)
 }
 
 // renderArticles pre-renders all articles into lines for scrolling.
@@ -222,7 +229,11 @@ func (m threadModel) renderArticles() []string {
 		lines = append(lines, m.styles.Label.Width(0).Render(header))
 
 		// Body lines (wrap text)
-		bodyLines := htmlToText(article.Body, m.config.Display.ThreadWidth)
+		threadWidth := m.config.Display.ThreadWidth
+		if HasBorder(m.config.Interface.BorderStyle) {
+			threadWidth -= BorderWidthOverhead
+		}
+		bodyLines := htmlToText(article.Body, threadWidth)
 		quoteStyle := lipgloss.NewStyle().Foreground(ColorMuted)
 		for i, line := range bodyLines {
 			if strings.HasPrefix(line, "│") {

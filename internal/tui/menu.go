@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/hiroaqii/bgg-tui/internal/config"
 )
 
 type menuItem struct {
@@ -17,13 +18,14 @@ type menuItem struct {
 type menuModel struct {
 	cursor   int
 	items    []menuItem
+	config   *config.Config
 	styles   Styles
 	keys     KeyMap
 	selected *View
 	hasToken bool
 }
 
-func newMenuModel(styles Styles, keys KeyMap, hasToken bool) menuModel {
+func newMenuModel(cfg *config.Config, styles Styles, keys KeyMap, hasToken bool) menuModel {
 	return menuModel{
 		cursor: 0,
 		items: []menuItem{
@@ -32,6 +34,7 @@ func newMenuModel(styles Styles, keys KeyMap, hasToken bool) menuModel {
 			{label: "User Collection", key: "3", view: ViewCollectionInput},
 			{label: "Settings", key: "4", view: ViewSettings},
 		},
+		config:   cfg,
 		styles:   styles,
 		keys:     keys,
 		hasToken: hasToken,
@@ -118,5 +121,5 @@ func (m menuModel) View(width, height int, selType string, animFrame int) string
 	b.WriteString(help)
 
 	content := b.String()
-	return centerContent(content, width, height)
+	return renderView(content, m.styles, width, height, m.config.Interface.BorderStyle)
 }

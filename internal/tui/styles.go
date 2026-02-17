@@ -148,7 +148,7 @@ func NewStyles(theme string) Styles {
 		Border: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(ColorBorder).
-			Padding(1),
+			Padding(1, 3),
 
 		Rating: lipgloss.NewStyle().
 			Foreground(ColorAccent),
@@ -174,6 +174,47 @@ func newFilterInput() textinput.Model {
 	ti.CharLimit = 50
 	ti.Width = 30
 	return ti
+}
+
+// BorderStyleNames lists all available border styles for cycling in settings.
+var BorderStyleNames = []string{"none", "rounded", "thick", "double", "block"}
+
+// Border overhead constants (border line + padding on each side).
+const (
+	BorderHeightOverhead = 4 // top border(1) + top padding(1) + bottom padding(1) + bottom border(1)
+	BorderWidthOverhead  = 8 // left border(1) + left padding(3) + right padding(3) + right border(1)
+)
+
+// HasBorder returns true if the given border style is not "none" or empty.
+func HasBorder(style string) bool {
+	return style != "" && style != "none"
+}
+
+// renderView wraps content in a border (if borderStyle is not "none") and centers it.
+func renderView(content string, styles Styles, width, height int, borderStyle string) string {
+	if border, ok := borderForStyle(borderStyle); ok {
+		content = lipgloss.NewStyle().
+			Border(border).
+			BorderForeground(ColorMuted).
+			Padding(1, 3).
+			Render(content)
+	}
+	return centerContent(content, width, height)
+}
+
+// borderForStyle returns the lipgloss.Border for the given style name.
+func borderForStyle(name string) (lipgloss.Border, bool) {
+	switch name {
+	case "rounded":
+		return lipgloss.RoundedBorder(), true
+	case "thick":
+		return lipgloss.ThickBorder(), true
+	case "double":
+		return lipgloss.DoubleBorder(), true
+	case "block":
+		return lipgloss.BlockBorder(), true
+	}
+	return lipgloss.Border{}, false
 }
 
 // centerContent centers the content both horizontally and vertically within the given dimensions.
