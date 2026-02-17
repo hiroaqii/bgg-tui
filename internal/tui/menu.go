@@ -121,5 +121,5 @@ func (m menuModel) View(width, height int, selType string, animFrame int) string
 	b.WriteString(help)
 
 	content := b.String()
-	return renderView(content, m.styles, width, height, m.config.Interface.ShowBorder)
+	return renderView(content, m.styles, width, height, m.config.Interface.BorderStyle)
 }

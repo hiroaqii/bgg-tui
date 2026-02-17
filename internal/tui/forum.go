@@ -280,8 +280,11 @@ func (m forumModel) View(width, height int, selType string, animFrame int) strin
 	}
 
 	content := b.String()
-	showBorder := m.config.Interface.ShowBorder && (m.state == forumStateForumList || m.state == forumStateThreadList)
-	return renderView(content, m.styles, width, height, showBorder)
+	borderStyle := m.config.Interface.BorderStyle
+	if m.state != forumStateForumList && m.state != forumStateThreadList {
+		borderStyle = "none"
+	}
+	return renderView(content, m.styles, width, height, borderStyle)
 }
 
 // formatForumColumns formats forum titles and meta info with aligned columns.

@@ -165,15 +165,10 @@ func (m *settingsModel) buildItems() []settingItem {
 			},
 		},
 		{
-			label: "Show Border", kind: settingToggle,
-			getValue: func() string {
-				if cfg.Interface.ShowBorder {
-					return "ON"
-				}
-				return "OFF"
-			},
+			label: "Border Style", kind: settingCycle,
+			getValue: func() string { return cfg.Interface.BorderStyle },
 			onEnter: func() {
-				cfg.Interface.ShowBorder = !cfg.Interface.ShowBorder
+				cfg.Interface.BorderStyle = cycleValue(cfg.Interface.BorderStyle, BorderStyleNames)
 				cfg.Save()
 			},
 		},
@@ -387,7 +382,7 @@ func (m settingsModel) View(width, height int) string {
 	}
 
 	content := b.String()
-	return renderView(content, m.styles, width, height, m.config.Interface.ShowBorder)
+	return renderView(content, m.styles, width, height, m.config.Interface.BorderStyle)
 }
 
 func maskToken(token string) string {

@@ -366,6 +366,9 @@ func (m searchModel) View(width, height int, selType string, animFrame int) stri
 	}
 
 	content := b.String()
-	showBorder := m.config.Interface.ShowBorder && m.state == searchStateInput
-	return transmit + renderView(content, m.styles, width, height, showBorder)
+	borderStyle := m.config.Interface.BorderStyle
+	if m.state != searchStateInput {
+		borderStyle = "none"
+	}
+	return transmit + renderView(content, m.styles, width, height, borderStyle)
 }

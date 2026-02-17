@@ -176,12 +176,34 @@ func newFilterInput() textinput.Model {
 	return ti
 }
 
-// renderView wraps content in a border (if enabled) and centers it.
-func renderView(content string, styles Styles, width, height int, showBorder bool) string {
-	if showBorder {
-		content = styles.Border.BorderForeground(ColorMuted).Render(content)
+// BorderStyleNames lists all available border styles for cycling in settings.
+var BorderStyleNames = []string{"none", "rounded", "thick", "double", "block"}
+
+// renderView wraps content in a border (if borderStyle is not "none") and centers it.
+func renderView(content string, styles Styles, width, height int, borderStyle string) string {
+	if border, ok := borderForStyle(borderStyle); ok {
+		content = lipgloss.NewStyle().
+			Border(border).
+			BorderForeground(ColorMuted).
+			Padding(1, 3).
+			Render(content)
 	}
 	return centerContent(content, width, height)
+}
+
+// borderForStyle returns the lipgloss.Border for the given style name.
+func borderForStyle(name string) (lipgloss.Border, bool) {
+	switch name {
+	case "rounded":
+		return lipgloss.RoundedBorder(), true
+	case "thick":
+		return lipgloss.ThickBorder(), true
+	case "double":
+		return lipgloss.DoubleBorder(), true
+	case "block":
+		return lipgloss.BlockBorder(), true
+	}
+	return lipgloss.Border{}, false
 }
 
 // centerContent centers the content both horizontally and vertically within the given dimensions.

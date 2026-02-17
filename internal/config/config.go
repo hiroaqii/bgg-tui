@@ -40,8 +40,8 @@ type InterfaceConfig struct {
 	Transition  string `toml:"transition"`   // "none", "fade", "glitch", "dissolve", "sweep", "lines", "lines-cross", "random"
 	Selection   string `toml:"selection"`    // "none", "wave", "blink", "glitch"
 	ListDensity string `toml:"list_density"` // "compact", "normal", "relaxed"
-	DateFormat  string `toml:"date_format"`  // "YYYY-MM-DD", "MM/DD/YYYY", "DD/MM/YYYY"
-	ShowBorder  bool   `toml:"show_border"`
+	DateFormat   string `toml:"date_format"`   // "YYYY-MM-DD", "MM/DD/YYYY", "DD/MM/YYYY"
+	BorderStyle  string `toml:"border_style"`  // "none", "rounded", "thick", "double", "block"
 }
 
 // DefaultConfig returns the default configuration.
@@ -66,7 +66,7 @@ func DefaultConfig() *Config {
 			Selection:   "wave",
 			ListDensity: "normal",
 			DateFormat:  "YYYY-MM-DD",
-			ShowBorder:  true,
+			BorderStyle: "rounded",
 		},
 	}
 }
