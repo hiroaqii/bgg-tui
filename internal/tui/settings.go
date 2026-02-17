@@ -374,7 +374,10 @@ func (m settingsModel) View(width, height int) string {
 	}
 
 	content := b.String()
-	return centerContent(content, width, height)
+
+	// Wrap content in a border frame.
+	bordered := m.styles.Border.BorderForeground(ColorMuted).Render(content)
+	return centerContent(bordered, width, height)
 }
 
 func maskToken(token string) string {
