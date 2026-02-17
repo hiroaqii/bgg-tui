@@ -258,7 +258,11 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 			b.WriteString("\n")
 		} else {
 			// Show results with scrolling
-			start, end := calcListRange(m.filter.cursor, len(displayItems), height, m.config.Interface.ListDensity)
+			listHeight := height
+			if HasBorder(m.config.Interface.BorderStyle) {
+				listHeight -= BorderHeightOverhead
+			}
+			start, end := calcListRange(m.filter.cursor, len(displayItems), listHeight, m.config.Interface.ListDensity)
 
 			// First pass: find max name+year width for stats alignment
 			maxNameYearLen := 0
@@ -328,5 +332,5 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 	}
 
 	content := b.String()
-	return transmit + centerContent(content, width, height)
+	return transmit + renderView(content, m.styles, width, height, m.config.Interface.BorderStyle)
 }

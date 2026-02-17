@@ -329,7 +329,11 @@ func (m searchModel) View(width, height int, selType string, animFrame int) stri
 			b.WriteString("\n")
 		} else {
 			// Show results with scrolling
-			start, end := calcListRange(m.filter.cursor, len(displayItems), height, m.config.Interface.ListDensity)
+			listHeight := height
+			if HasBorder(m.config.Interface.BorderStyle) {
+				listHeight -= BorderHeightOverhead
+			}
+			start, end := calcListRange(m.filter.cursor, len(displayItems), listHeight, m.config.Interface.ListDensity)
 
 			for i := start; i < end; i++ {
 				result := displayItems[i]
@@ -367,8 +371,5 @@ func (m searchModel) View(width, height int, selType string, animFrame int) stri
 
 	content := b.String()
 	borderStyle := m.config.Interface.BorderStyle
-	if m.state != searchStateInput {
-		borderStyle = "none"
-	}
 	return transmit + renderView(content, m.styles, width, height, borderStyle)
 }
