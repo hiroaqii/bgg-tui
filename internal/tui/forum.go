@@ -280,7 +280,7 @@ func (m forumModel) View(width, height int, selType string, animFrame int) strin
 	}
 
 	content := b.String()
-	showBorder := m.config.Interface.ShowBorder && m.state == forumStateForumList
+	showBorder := m.config.Interface.ShowBorder && (m.state == forumStateForumList || m.state == forumStateThreadList)
 	return renderView(content, m.styles, width, height, showBorder)
 }
 
