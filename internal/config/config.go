@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/BurntSushi/toml"
 )
@@ -98,10 +99,29 @@ func LoadFromPath(path string) (*Config, error) {
 	}
 
 	if _, err := toml.DecodeFile(path, cfg); err != nil {
-		return nil, err
+		// パース失敗: バックアップを作成してデフォルトで返す
+		raw, readErr := os.ReadFile(path)
+		if readErr == nil {
+			_ = os.Rename(path, path+".bak")
+			// 壊れたファイルから token をベストエフォート抽出
+			if token := extractToken(raw); token != "" {
+				cfg.API.Token = token
+			}
+		}
+		return cfg, nil
 	}
 
 	return cfg, nil
+}
+
+// extractToken attempts to extract the API token from raw config bytes
+// using regex when TOML parsing has failed.
+func extractToken(raw []byte) string {
+	re := regexp.MustCompile(`(?m)^\s*token\s*=\s*"([^"]*)"`)
+	if m := re.FindSubmatch(raw); len(m) > 1 {
+		return string(m[1])
+	}
+	return ""
 }
 
 // Save saves the configuration to the default path.

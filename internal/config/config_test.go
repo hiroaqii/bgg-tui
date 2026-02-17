@@ -111,6 +111,110 @@ func TestHasToken(t *testing.T) {
 	}
 }
 
+func TestLoadFromPath_BrokenConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "config.toml")
+
+	// 壊れた TOML を書き込む
+	brokenTOML := []byte("[api\ntoken = broken\n")
+	if err := os.WriteFile(path, brokenTOML, 0644); err != nil {
+		t.Fatalf("failed to write broken config: %v", err)
+	}
+
+	cfg, err := LoadFromPath(path)
+	if err != nil {
+		t.Fatalf("expected no error for broken config, got: %v", err)
+	}
+
+	// デフォルト設定が返ること
+	if cfg.Display.ImageProtocol != "auto" {
+		t.Errorf("expected default ImageProtocol 'auto', got '%s'", cfg.Display.ImageProtocol)
+	}
+	if cfg.Interface.ColorTheme != "default" {
+		t.Errorf("expected default ColorTheme 'default', got '%s'", cfg.Interface.ColorTheme)
+	}
+
+	// .bak ファイルが作成されること
+	bakPath := path + ".bak"
+	if _, err := os.Stat(bakPath); os.IsNotExist(err) {
+		t.Error("expected .bak file to be created")
+	}
+
+	// 元のファイルがリネームされていること
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("expected original config file to be renamed")
+	}
+}
+
+func TestLoadFromPath_BrokenConfigWithToken(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "config.toml")
+
+	// token を含む壊れた TOML
+	brokenTOML := []byte("[api]\ntoken = \"my-secret-token\"\n\n[display\ninvalid line\n")
+	if err := os.WriteFile(path, brokenTOML, 0644); err != nil {
+		t.Fatalf("failed to write broken config: %v", err)
+	}
+
+	cfg, err := LoadFromPath(path)
+	if err != nil {
+		t.Fatalf("expected no error for broken config, got: %v", err)
+	}
+
+	// token が復旧されること
+	if cfg.API.Token != "my-secret-token" {
+		t.Errorf("expected token 'my-secret-token', got '%s'", cfg.API.Token)
+	}
+
+	// その他はデフォルト
+	if cfg.Display.ImageProtocol != "auto" {
+		t.Errorf("expected default ImageProtocol 'auto', got '%s'", cfg.Display.ImageProtocol)
+	}
+}
+
+func TestExtractToken(t *testing.T) {
+	tests := []struct {
+		name     string
+		raw      string
+		expected string
+	}{
+		{
+			name:     "valid token line",
+			raw:      "[api]\ntoken = \"abc123\"\n",
+			expected: "abc123",
+		},
+		{
+			name:     "token with spaces",
+			raw:      "  token = \"spaced-token\"  \n",
+			expected: "spaced-token",
+		},
+		{
+			name:     "no token",
+			raw:      "[api]\nother = \"value\"\n",
+			expected: "",
+		},
+		{
+			name:     "completely broken",
+			raw:      "!!!garbage data!!!",
+			expected: "",
+		},
+		{
+			name:     "empty input",
+			raw:      "",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractToken([]byte(tt.raw))
+			if got != tt.expected {
+				t.Errorf("extractToken() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestSaveCreatesDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "nested", "dir", "config.toml")
