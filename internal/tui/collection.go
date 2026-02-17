@@ -294,5 +294,5 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 	}
 
 	content := b.String()
-	return transmit + centerContent(content, width, height)
+	return transmit + renderView(content, m.styles, width, height, m.config.Interface.ShowBorder)
 }

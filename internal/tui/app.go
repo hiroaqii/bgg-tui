@@ -55,7 +55,6 @@ type Model struct {
 	transition     transitionState
 	transitionType string
 	selectionType  string
-	showBorder     bool
 }
 
 // New creates a new application model.
@@ -96,7 +95,7 @@ func New(cfg *config.Config) Model {
 		styles:       styles,
 		currentView:  startView,
 		setupToken:   newSetupTokenModel(cfg, styles, keys),
-		menu:         newMenuModel(styles, keys, cfg.HasToken()),
+		menu:         newMenuModel(cfg, styles, keys, cfg.HasToken()),
 		settings:     newSettingsModel(cfg, styles, keys),
 		search:       newSearchModel(cfg, styles, keys, imgEnabled, imgCache),
 		hot:          newHotModel(cfg, styles, keys, imgEnabled, imgCache),
@@ -105,7 +104,6 @@ func New(cfg *config.Config) Model {
 		imageCache:     imgCache,
 		transitionType: cfg.Interface.Transition,
 		selectionType:  cfg.Interface.Selection,
-		showBorder:     cfg.Interface.ShowBorder,
 	}
 }
 
@@ -197,7 +195,7 @@ func (m Model) updateSetupToken(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.bggClient, _ = bgg.NewClient(bgg.Config{
 			Token: m.config.API.Token,
 		})
-		m.menu = newMenuModel(m.styles, m.keys, true)
+		m.menu = newMenuModel(m.config, m.styles, m.keys, true)
 		m.setView(ViewMenu)
 	}
 
@@ -258,10 +256,6 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.selectionType = m.config.Interface.Selection
 	}
 
-	if m.settings.borderChanged {
-		m.settings.borderChanged = false
-		m.showBorder = m.config.Interface.ShowBorder
-	}
 
 	// Only start a new anim tick when transitioning from not-needed to needed,
 	// to avoid accumulating duplicate tick streams on every key press.
@@ -444,9 +438,9 @@ func (m Model) renderCurrentView() string {
 	case ViewSetupToken:
 		return m.setupToken.View(m.width, m.height)
 	case ViewMenu:
-		return m.menu.View(m.width, m.height, m.selectionType, m.animFrame, m.showBorder)
+		return m.menu.View(m.width, m.height, m.selectionType, m.animFrame)
 	case ViewSettings:
-		return m.settings.View(m.width, m.height, m.showBorder)
+		return m.settings.View(m.width, m.height)
 	case ViewSearchInput, ViewSearchResults:
 		return m.search.View(m.width, m.height, m.selectionType, m.animFrame)
 	case ViewHot:

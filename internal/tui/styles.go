@@ -148,7 +148,7 @@ func NewStyles(theme string) Styles {
 		Border: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(ColorBorder).
-			Padding(1),
+			Padding(1, 3),
 
 		Rating: lipgloss.NewStyle().
 			Foreground(ColorAccent),
@@ -174,6 +174,14 @@ func newFilterInput() textinput.Model {
 	ti.CharLimit = 50
 	ti.Width = 30
 	return ti
+}
+
+// renderView wraps content in a border (if enabled) and centers it.
+func renderView(content string, styles Styles, width, height int, showBorder bool) string {
+	if showBorder {
+		content = styles.Border.BorderForeground(ColorMuted).Render(content)
+	}
+	return centerContent(content, width, height)
 }
 
 // centerContent centers the content both horizontally and vertically within the given dimensions.

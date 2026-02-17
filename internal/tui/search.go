@@ -366,5 +366,5 @@ func (m searchModel) View(width, height int, selType string, animFrame int) stri
 	}
 
 	content := b.String()
-	return transmit + centerContent(content, width, height)
+	return transmit + renderView(content, m.styles, width, height, m.config.Interface.ShowBorder)
 }
