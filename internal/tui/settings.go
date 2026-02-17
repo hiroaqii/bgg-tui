@@ -104,26 +104,7 @@ func newSettingsModel(cfg *config.Config, styles Styles, keys KeyMap) settingsMo
 func (m *settingsModel) buildItems() []settingItem {
 	cfg := m.config
 	return []settingItem{
-		{
-			label: "Token", section: "API", kind: settingText,
-			editField: editFieldToken,
-			getValue: func() string {
-				if cfg.API.Token != "" {
-					return maskToken(cfg.API.Token)
-				}
-				return "(not set)"
-			},
-		},
-		{
-			label: "Default Username", section: "Collection", kind: settingText,
-			editField: editFieldUsername,
-			getValue: func() string {
-				if cfg.Collection.DefaultUsername != "" {
-					return cfg.Collection.DefaultUsername
-				}
-				return "(not set)"
-			},
-		},
+		// Interface
 		{
 			label: "Color Theme", section: "Interface", kind: settingCycle,
 			getValue: func() string { return cfg.Interface.ColorTheme },
@@ -172,6 +153,7 @@ func (m *settingsModel) buildItems() []settingItem {
 				cfg.Save()
 			},
 		},
+		// Display
 		{
 			label: "Show Images", section: "Display", kind: settingToggle,
 			getValue: func() string {
@@ -183,6 +165,27 @@ func (m *settingsModel) buildItems() []settingItem {
 			onEnter: func() {
 				cfg.Display.ShowImages = !cfg.Display.ShowImages
 				cfg.Save()
+			},
+		},
+		{
+			label: "Thread Width", kind: settingText,
+			editField: editFieldThreadWidth,
+			getValue:  func() string { return fmt.Sprintf("%d", cfg.Display.ThreadWidth) },
+		},
+		{
+			label: "Description Width", kind: settingText,
+			editField: editFieldDescWidth,
+			getValue:  func() string { return fmt.Sprintf("%d", cfg.Display.DescriptionWidth) },
+		},
+		// Collection
+		{
+			label: "Default Username", section: "Collection", kind: settingText,
+			editField: editFieldUsername,
+			getValue: func() string {
+				if cfg.Collection.DefaultUsername != "" {
+					return cfg.Collection.DefaultUsername
+				}
+				return "(not set)"
 			},
 		},
 		{
@@ -198,15 +201,16 @@ func (m *settingsModel) buildItems() []settingItem {
 				cfg.Save()
 			},
 		},
+		// API
 		{
-			label: "Thread Width", kind: settingText,
-			editField: editFieldThreadWidth,
-			getValue:  func() string { return fmt.Sprintf("%d", cfg.Display.ThreadWidth) },
-		},
-		{
-			label: "Description Width", kind: settingText,
-			editField: editFieldDescWidth,
-			getValue:  func() string { return fmt.Sprintf("%d", cfg.Display.DescriptionWidth) },
+			label: "Token", section: "API", kind: settingText,
+			editField: editFieldToken,
+			getValue: func() string {
+				if cfg.API.Token != "" {
+					return maskToken(cfg.API.Token)
+				}
+				return "(not set)"
+			},
 		},
 	}
 }
