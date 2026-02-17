@@ -321,7 +321,7 @@ func (m searchModel) View(width, height int, selType string, animFrame int) stri
 
 		displayItems := m.filter.displayItems()
 
-		b.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("%d/%d games found", len(displayItems), len(m.filter.items))))
+		b.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("%d/%d games found", min(m.filter.cursor+1, len(displayItems)), len(displayItems))))
 		b.WriteString("\n\n")
 
 		if len(displayItems) == 0 {
