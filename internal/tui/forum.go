@@ -280,7 +280,8 @@ func (m forumModel) View(width, height int, selType string, animFrame int) strin
 	}
 
 	content := b.String()
-	return centerContent(content, width, height)
+	showBorder := m.config.Interface.ShowBorder && m.state == forumStateForumList
+	return renderView(content, m.styles, width, height, showBorder)
 }
 
 // formatForumColumns formats forum titles and meta info with aligned columns.
