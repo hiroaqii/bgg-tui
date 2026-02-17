@@ -118,5 +118,8 @@ func (m menuModel) View(width, height int, selType string, animFrame int) string
 	b.WriteString(help)
 
 	content := b.String()
-	return centerContent(content, width, height)
+
+	// Wrap content in a border frame.
+	bordered := m.styles.Border.BorderForeground(ColorMuted).Render(content)
+	return centerContent(bordered, width, height)
 }
