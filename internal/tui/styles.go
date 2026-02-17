@@ -179,6 +179,17 @@ func newFilterInput() textinput.Model {
 // BorderStyleNames lists all available border styles for cycling in settings.
 var BorderStyleNames = []string{"none", "rounded", "thick", "double", "block"}
 
+// Border overhead constants (border line + padding on each side).
+const (
+	BorderHeightOverhead = 4 // top border(1) + top padding(1) + bottom padding(1) + bottom border(1)
+	BorderWidthOverhead  = 8 // left border(1) + left padding(3) + right padding(3) + right border(1)
+)
+
+// HasBorder returns true if the given border style is not "none" or empty.
+func HasBorder(style string) bool {
+	return style != "" && style != "none"
+}
+
 // renderView wraps content in a border (if borderStyle is not "none") and centers it.
 func renderView(content string, styles Styles, width, height int, borderStyle string) string {
 	if border, ok := borderForStyle(borderStyle); ok {
