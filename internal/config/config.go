@@ -40,6 +40,7 @@ type InterfaceConfig struct {
 	Transition  string `toml:"transition"`   // "none", "fade", "typing", "wave", "glitch", "rainbow", "blink"
 	Selection   string `toml:"selection"`    // "none", "wave", "blink", "glitch"
 	ListDensity string `toml:"list_density"` // "compact", "normal", "relaxed"
+	DateFormat  string `toml:"date_format"`  // "YYYY-MM-DD", "MM/DD/YYYY", "DD/MM/YYYY"
 }
 
 // DefaultConfig returns the default configuration.
@@ -63,6 +64,7 @@ func DefaultConfig() *Config {
 			Transition:  "fade",
 			Selection:   "wave",
 			ListDensity: "normal",
+			DateFormat:  "YYYY-MM-DD",
 		},
 	}
 }

@@ -36,8 +36,8 @@ func TestSettingsItemCount(t *testing.T) {
 	if m.itemCount() != len(m.items) {
 		t.Errorf("itemCount() = %d, len(items) = %d", m.itemCount(), len(m.items))
 	}
-	if m.itemCount() != 10 {
-		t.Errorf("itemCount() = %d, want 10", m.itemCount())
+	if m.itemCount() != 11 {
+		t.Errorf("itemCount() = %d, want 11", m.itemCount())
 	}
 }
 
@@ -86,8 +86,8 @@ func TestSettingsNavigation(t *testing.T) {
 
 	// Can't go below itemCount-1
 	m.cursor = m.itemCount() - 1
-	if m.cursor != 9 {
-		t.Errorf("cursor at last item = %d, want 9", m.cursor)
+	if m.cursor != 10 {
+		t.Errorf("cursor at last item = %d, want 10", m.cursor)
 	}
 }
 

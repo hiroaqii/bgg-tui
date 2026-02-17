@@ -218,7 +218,7 @@ func (m threadModel) renderArticles() []string {
 
 	for i, article := range m.thread.Articles {
 		// Header line
-		header := fmt.Sprintf("--- %s · %s ---", article.Username, formatDate(article.PostDate))
+		header := fmt.Sprintf("--- %s · %s ---", article.Username, formatDate(article.PostDate, m.config.Interface.DateFormat))
 		lines = append(lines, m.styles.Label.Width(0).Render(header))
 
 		// Body lines (wrap text)

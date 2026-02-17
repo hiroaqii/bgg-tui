@@ -354,7 +354,7 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.detail.game != nil {
 			gameName = m.detail.game.Name
 		}
-		m.forum = newForumModel(m.detail.gameID, gameName, m.styles, m.keys)
+		m.forum = newForumModel(m.detail.gameID, gameName, m.styles, m.keys, m.config)
 		m.setView(ViewForumList)
 		return m, m.forum.loadForums(m.bggClient)
 	}

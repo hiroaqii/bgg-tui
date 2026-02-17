@@ -157,6 +157,14 @@ func (m *settingsModel) buildItems() []settingItem {
 			},
 		},
 		{
+			label: "Date Format", kind: settingCycle,
+			getValue: func() string { return cfg.Interface.DateFormat },
+			onEnter: func() {
+				cfg.Interface.DateFormat = cycleValue(cfg.Interface.DateFormat, DateFormatNames)
+				cfg.Save()
+			},
+		},
+		{
 			label: "Show Images", section: "Display", kind: settingToggle,
 			getValue: func() string {
 				if cfg.Display.ShowImages {

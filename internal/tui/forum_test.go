@@ -52,23 +52,26 @@ func TestParseDate(t *testing.T) {
 
 func TestFormatDate(t *testing.T) {
 	tests := []struct {
-		name  string
-		input string
-		want  string
+		name   string
+		input  string
+		format string
+		want   string
 	}{
-		{"RFC 2822 format", "Tue, 10 Feb 2025 14:30:00 +0000", "2025-02-10 14:30"},
-		{"RFC 2822 with offset", "Fri, 20 Dec 2024 08:32:00 -0600", "2024-12-20 08:32"},
-		{"RFC 3339 format", "2024-12-20T08:32:00-06:00", "2024-12-20 08:32"},
-		{"RFC 3339 UTC", "2025-01-15T00:00:00Z", "2025-01-15 00:00"},
-		{"empty string", "", ""},
-		{"unparseable fallback", "unknown", "unknown"},
+		{"YYYY-MM-DD default", "Tue, 10 Feb 2025 14:30:00 +0000", "YYYY-MM-DD", "2025-02-10 14:30"},
+		{"YYYY-MM-DD with offset", "Fri, 20 Dec 2024 08:32:00 -0600", "YYYY-MM-DD", "2024-12-20 08:32"},
+		{"YYYY-MM-DD RFC 3339", "2024-12-20T08:32:00-06:00", "YYYY-MM-DD", "2024-12-20 08:32"},
+		{"YYYY-MM-DD RFC 3339 UTC", "2025-01-15T00:00:00Z", "YYYY-MM-DD", "2025-01-15 00:00"},
+		{"MM/DD/YYYY format", "Tue, 10 Feb 2025 14:30:00 +0000", "MM/DD/YYYY", "02/10/2025 14:30"},
+		{"DD/MM/YYYY format", "Tue, 10 Feb 2025 14:30:00 +0000", "DD/MM/YYYY", "10/02/2025 14:30"},
+		{"empty string", "", "YYYY-MM-DD", ""},
+		{"unparseable fallback", "unknown", "YYYY-MM-DD", "unknown"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := formatDate(tt.input)
+			got := formatDate(tt.input, tt.format)
 			if got != tt.want {
-				t.Errorf("formatDate(%q) = %q, want %q", tt.input, got, tt.want)
+				t.Errorf("formatDate(%q, %q) = %q, want %q", tt.input, tt.format, got, tt.want)
 			}
 		})
 	}
@@ -82,7 +85,7 @@ func TestFormatForumColumns(t *testing.T) {
 			{Title: "Find Players", NumThreads: 6, LastPostDate: "2025-01-15T00:00:00Z"},
 		}
 
-		titles, metas := formatForumColumns(forums)
+		titles, metas := formatForumColumns(forums, "YYYY-MM-DD")
 
 		// All titles should have the same width (padded to "Play By Forum" = 13 chars)
 		for i, title := range titles {
@@ -105,7 +108,7 @@ func TestFormatForumColumns(t *testing.T) {
 			{Title: "General", NumThreads: 5, LastPostDate: "2025-01-15T00:00:00Z"},
 		}
 
-		titles, metas := formatForumColumns(forums)
+		titles, metas := formatForumColumns(forums, "YYYY-MM-DD")
 
 		if len(titles) != 1 || titles[0] != "General" {
 			t.Errorf("titles = %v, want [\"General\"]", titles)
@@ -116,7 +119,7 @@ func TestFormatForumColumns(t *testing.T) {
 	})
 
 	t.Run("empty slice", func(t *testing.T) {
-		titles, metas := formatForumColumns(nil)
+		titles, metas := formatForumColumns(nil, "YYYY-MM-DD")
 
 		if titles != nil || metas != nil {
 			t.Errorf("expected nil slices, got titles=%v, metas=%v", titles, metas)

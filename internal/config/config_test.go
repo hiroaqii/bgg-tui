@@ -44,6 +44,10 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Interface.ListDensity != "normal" {
 		t.Errorf("expected ListDensity 'normal', got '%s'", cfg.Interface.ListDensity)
 	}
+
+	if cfg.Interface.DateFormat != "YYYY-MM-DD" {
+		t.Errorf("expected DateFormat 'YYYY-MM-DD', got '%s'", cfg.Interface.DateFormat)
+	}
 }
 
 func TestLoadFromPath_NonExistent(t *testing.T) {

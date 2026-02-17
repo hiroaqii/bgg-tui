@@ -10,6 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	bgg "github.com/hiroaqii/go-bgg"
+
+	"github.com/hiroaqii/bgg-tui/internal/config"
 )
 
 type forumState int
@@ -26,6 +28,7 @@ type forumModel struct {
 	state              forumState
 	styles             Styles
 	keys               KeyMap
+	config             *config.Config
 	gameID             int
 	gameName           string
 	forums             []bgg.Forum
@@ -53,11 +56,12 @@ type threadsResultMsg struct {
 	err     error
 }
 
-func newForumModel(gameID int, gameName string, styles Styles, keys KeyMap) forumModel {
+func newForumModel(gameID int, gameName string, styles Styles, keys KeyMap, cfg *config.Config) forumModel {
 	return forumModel{
 		state:    forumStateLoadingForums,
 		styles:   styles,
 		keys:     keys,
+		config:   cfg,
 		gameID:   gameID,
 		gameName: gameName,
 		page:     1,
@@ -220,7 +224,7 @@ func (m forumModel) View(width, height int, selType string, animFrame int) strin
 			b.WriteString(m.styles.Subtitle.Render("No forums found."))
 			b.WriteString("\n")
 		} else {
-			titles, metas := formatForumColumns(m.forums)
+			titles, metas := formatForumColumns(m.forums, m.config.Interface.DateFormat)
 			for i := range m.forums {
 				prefix, title := renderListItem(i, m.forumCursor, titles[i], m.styles, selType, animFrame)
 				line := fmt.Sprintf("%s%s  %s", prefix, title, m.styles.Subtitle.Render(metas[i]))
@@ -260,7 +264,7 @@ func (m forumModel) View(width, height int, selType string, animFrame int) strin
 
 				// Second line: author, date, replies
 				meta := fmt.Sprintf("    %s · %s · %d replies",
-					formatDate(thread.LastPostDate),
+					formatDate(thread.LastPostDate, m.config.Interface.DateFormat),
 					thread.Author,
 					thread.NumArticles-1)
 				b.WriteString(m.styles.Subtitle.Render(meta))
@@ -280,7 +284,7 @@ func (m forumModel) View(width, height int, selType string, animFrame int) strin
 }
 
 // formatForumColumns formats forum titles and meta info with aligned columns.
-func formatForumColumns(forums []bgg.Forum) (titles []string, metas []string) {
+func formatForumColumns(forums []bgg.Forum, dateFormat string) (titles []string, metas []string) {
 	maxTitleWidth := 0
 	maxThreads := 0
 	for _, f := range forums {
@@ -298,7 +302,7 @@ func formatForumColumns(forums []bgg.Forum) (titles []string, metas []string) {
 
 	for _, f := range forums {
 		titles = append(titles, fmt.Sprintf("%-*s", maxTitleWidth, f.Title))
-		metas = append(metas, fmt.Sprintf("%*d threads · %s", maxDigits, f.NumThreads, formatDate(f.LastPostDate)))
+		metas = append(metas, fmt.Sprintf("%*d threads · %s", maxDigits, f.NumThreads, formatDate(f.LastPostDate, dateFormat)))
 	}
 	return
 }
@@ -319,9 +323,23 @@ func parseDate(dateStr string) time.Time {
 	return time.Time{}
 }
 
-// formatDate formats a date string for display.
-// Output format: "2006-01-02 15:04"
-func formatDate(dateStr string) string {
+// DateFormatNames lists the available date format options.
+var DateFormatNames = []string{"YYYY-MM-DD", "MM/DD/YYYY", "DD/MM/YYYY"}
+
+// dateLayout returns the Go time layout string for the given format name.
+func dateLayout(format string) string {
+	switch format {
+	case "MM/DD/YYYY":
+		return "01/02/2006 15:04"
+	case "DD/MM/YYYY":
+		return "02/01/2006 15:04"
+	default:
+		return "2006-01-02 15:04"
+	}
+}
+
+// formatDate formats a date string for display using the given format.
+func formatDate(dateStr, format string) string {
 	if dateStr == "" {
 		return ""
 	}
@@ -329,5 +347,5 @@ func formatDate(dateStr string) string {
 	if t.IsZero() {
 		return dateStr
 	}
-	return t.Format("2006-01-02 15:04")
+	return t.Format(dateLayout(format))
 }
