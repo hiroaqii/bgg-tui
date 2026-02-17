@@ -351,9 +351,23 @@ func (m settingsModel) View(width, height int) string {
 	b.WriteString(m.styles.Title.Render("Settings"))
 	b.WriteString("\n\n")
 
+	// セクションごとの最大ラベル幅を計算
+	sectionMaxWidth := make(map[string]int)
+	currentSection := ""
+	for _, item := range m.items {
+		if item.section != "" {
+			currentSection = item.section
+		}
+		if len(item.label) > sectionMaxWidth[currentSection] {
+			sectionMaxWidth[currentSection] = len(item.label)
+		}
+	}
+
+	currentSection = ""
 	for i, item := range m.items {
 		// Section header
 		if item.section != "" {
+			currentSection = item.section
 			if i > 0 {
 				b.WriteString("\n")
 			}
@@ -366,10 +380,13 @@ func (m settingsModel) View(width, height int) string {
 			cursor = "> "
 		}
 
+		maxWidth := sectionMaxWidth[currentSection]
+		paddedLabel := fmt.Sprintf("%-*s", maxWidth, item.label)
+
 		// Text input items can be in editing mode
 		if item.kind == settingText && m.editing && m.editingField == item.editField {
 			input := m.textInputForField(item.editField)
-			b.WriteString(fmt.Sprintf("%s%s: %s\n", cursor, item.label, input.View()))
+			b.WriteString(fmt.Sprintf("%s%s: %s\n", cursor, paddedLabel, input.View()))
 			continue
 		}
 
@@ -381,12 +398,12 @@ func (m settingsModel) View(width, height int) string {
 		value := item.getValue()
 		switch item.kind {
 		case settingCycle, settingToggle:
-			b.WriteString(fmt.Sprintf("%s%s: [%s]\n", cursor, style.Render(item.label), value))
+			b.WriteString(fmt.Sprintf("%s%s: [%s]\n", cursor, style.Render(paddedLabel), value))
 		default:
 			if item.label == "" {
 				b.WriteString(fmt.Sprintf("%s%s\n", cursor, style.Render(value)))
 			} else {
-				b.WriteString(fmt.Sprintf("%s%s: %s\n", cursor, style.Render(item.label), value))
+				b.WriteString(fmt.Sprintf("%s%s: %s\n", cursor, style.Render(paddedLabel), value))
 			}
 		}
 	}
