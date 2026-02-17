@@ -29,6 +29,7 @@ const (
 	settingText   settingItemKind = iota // Enter opens text input
 	settingCycle                         // Enter cycles to next value
 	settingToggle                        // Enter toggles boolean
+	settingInfo                          // read-only display item
 )
 
 // settingItem describes a single settings menu entry.
@@ -212,6 +213,15 @@ func (m *settingsModel) buildItems() []settingItem {
 				return "(not set)"
 			},
 		},
+		{
+			section: "Config File", kind: settingInfo,
+			getValue: func() string {
+				if p, err := config.ConfigPath(); err == nil {
+					return p
+				}
+				return "(unknown)"
+			},
+		},
 	}
 }
 
@@ -373,7 +383,11 @@ func (m settingsModel) View(width, height int) string {
 		case settingCycle, settingToggle:
 			b.WriteString(fmt.Sprintf("%s%s: [%s]\n", cursor, style.Render(item.label), value))
 		default:
-			b.WriteString(fmt.Sprintf("%s%s: %s\n", cursor, style.Render(item.label), value))
+			if item.label == "" {
+				b.WriteString(fmt.Sprintf("%s%s\n", cursor, style.Render(value)))
+			} else {
+				b.WriteString(fmt.Sprintf("%s%s: %s\n", cursor, style.Render(item.label), value))
+			}
 		}
 	}
 
