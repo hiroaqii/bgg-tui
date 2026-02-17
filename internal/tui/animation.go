@@ -208,7 +208,7 @@ func renderTransitionDissolve(content string, progress float64) string {
 		plain := stripAnsi(line)
 		var b strings.Builder
 		for ci, ch := range []rune(plain) {
-			threshold := float64((li*7919+ci*6271)%1000) / 1000.0
+			threshold := float64((li*7919+ci*6271)%1000+1) / 1001.0
 			if progress >= threshold {
 				b.WriteRune(ch)
 			} else {
@@ -261,7 +261,7 @@ func renderTransitionSweep(content string, progress float64) string {
 			w := runewidth.RuneWidth(ch)
 			if col+w <= sweepCol {
 				b.WriteRune(ch)
-			} else if col == sweepCol {
+			} else if col == sweepCol && sweepCol > 0 {
 				b.WriteString(edgeStyle.Render("▌"))
 				for range w - 1 {
 					b.WriteByte(' ')
@@ -274,7 +274,7 @@ func renderTransitionSweep(content string, progress float64) string {
 			col += w
 		}
 		// If sweepCol is beyond the line content, show the edge at the end.
-		if col <= sweepCol && col < maxWidth {
+		if col <= sweepCol && col < maxWidth && sweepCol > 0 {
 			b.WriteString(edgeStyle.Render("▌"))
 		}
 		resultLines = append(resultLines, b.String())
