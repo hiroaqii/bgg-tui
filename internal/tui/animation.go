@@ -36,7 +36,7 @@ var (
 )
 
 // TransitionNames lists all available transition types for cycling in settings.
-var TransitionNames = []string{"none", "fade", "glitch", "dissolve", "sweep", "lines", "lines-cross"}
+var TransitionNames = []string{"none", "fade", "glitch", "dissolve", "sweep", "lines", "lines-cross", "random"}
 
 // SelectionNames lists all available selection animation types for cycling in settings.
 var SelectionNames = []string{"none", "wave", "blink", "glitch"}
@@ -64,9 +64,20 @@ type transitionState struct {
 }
 
 // startTransition creates a new transitionState for the given transition type.
+// If name is "random", a random transition is chosen each time.
 func startTransition(name string, oldView string) transitionState {
 	if name == "" || name == "none" {
 		return transitionState{}
+	}
+	if name == "random" {
+		// Pick from all transitions except "none" and "random".
+		candidates := make([]string, 0, len(TransitionNames)-2)
+		for _, n := range TransitionNames {
+			if n != "none" && n != "random" {
+				candidates = append(candidates, n)
+			}
+		}
+		name = candidates[rand.Intn(len(candidates))]
 	}
 	return transitionState{
 		active:   true,
