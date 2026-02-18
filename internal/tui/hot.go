@@ -250,7 +250,7 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 
 		displayItems := m.filter.displayItems()
 
-		b.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("%d/%d trending games", min(m.filter.cursor+1, len(displayItems)), len(displayItems))))
+		b.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("%d/%d trending games  ★Rating ⚖Weight #Rank", min(m.filter.cursor+1, len(displayItems)), len(displayItems))))
 		b.WriteString("\n\n")
 
 		if len(displayItems) == 0 {
@@ -295,20 +295,18 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 				if s, ok := m.stats[game.ID]; ok {
 					var parts []string
 					if s.Rating > 0 {
-						parts = append(parts, fmt.Sprintf("★%.2f", s.Rating))
+						parts = append(parts, m.styles.Rank.Render(fmt.Sprintf("★%.2f", s.Rating)))
 					}
 					if s.Weight > 0 {
-						parts = append(parts, fmt.Sprintf("W%.2f", s.Weight))
+						parts = append(parts, m.styles.Players.Render(fmt.Sprintf("⚖%.2f", s.Weight)))
 					}
 					if s.Rank > 0 {
-						parts = append(parts, fmt.Sprintf("#%d", s.Rank))
-					} else {
-						parts = append(parts, "-")
+						parts = append(parts, m.styles.Subtitle.Render(fmt.Sprintf("#%d", s.Rank)))
 					}
 					if len(parts) > 0 {
 						nameYearLen := lipgloss.Width(displayName) + len(year) + 3
 						padding := maxNameYearLen - nameYearLen + 2
-						line += strings.Repeat(" ", padding) + m.styles.Subtitle.Render(strings.Join(parts, " "))
+						line += strings.Repeat(" ", padding) + strings.Join(parts, " ")
 					}
 				}
 
