@@ -235,7 +235,7 @@ func (m threadModel) renderArticles() []string {
 		if HasBorder(m.config.Interface.BorderStyle) {
 			threadWidth -= BorderWidthOverhead
 		}
-		bodyLines := htmlToText(article.Body, threadWidth)
+		bodyLines := linkifyLines(htmlToText(article.Body, threadWidth))
 		quoteStyle := lipgloss.NewStyle().Foreground(ColorMuted)
 		for i, line := range bodyLines {
 			if strings.HasPrefix(line, "│") {

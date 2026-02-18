@@ -128,6 +128,24 @@ func TestHtmlToText(t *testing.T) {
 			want:  []string{""},
 		},
 		{
+			name:  "a href where link text equals URL (no duplicate)",
+			html:  `<a href="https://example.com">https://example.com</a>`,
+			width: 80,
+			want:  []string{"https://example.com"},
+		},
+		{
+			name:  "a href where link text is truncated URL (no duplicate)",
+			html:  `<a href="https://example.com/very/long/path">https://example.com/very/lon...</a>`,
+			width: 80,
+			want:  []string{"https://example.com/very/long/path"},
+		},
+		{
+			name:  "a href where link text is truncated URL in blockquote (no duplicate)",
+			html:  `<blockquote><a href="https://example.com/very/long/path">https://example.com/very/lon...</a></blockquote>`,
+			width: 80,
+			want:  []string{"│ https://example.com/very/long/path"},
+		},
+		{
 			name:  "complex html",
 			html:  `<p>Welcome to <b>BoardGameGeek</b>!</p><p>Check out:</p><ul><li>Strategy games</li><li>Party games</li></ul><p>Visit <a href="https://bgg.cc">BGG</a> for more.</p>`,
 			width: 80,
@@ -160,6 +178,58 @@ func TestHtmlToText(t *testing.T) {
 			for i := range want {
 				if got[i] != want[i] {
 					t.Errorf("line %d mismatch:\n  got:  %q\n  want: %q", i, got[i], want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestLinkifyLines(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []string
+	}{
+		{
+			name:  "URL gets OSC 8 hyperlink",
+			input: []string{"Visit https://example.com for info"},
+		},
+		{
+			name:  "trailing punctuation excluded from link",
+			input: []string{"See https://example.com."},
+		},
+		{
+			name:  "no URL unchanged",
+			input: []string{"No links here"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := linkifyLines(tt.input)
+			switch tt.name {
+			case "URL gets OSC 8 hyperlink":
+				if !strings.Contains(got[0], "\x1b]8;") {
+					t.Errorf("expected OSC 8 sequence, got: %q", got[0])
+				}
+				if !strings.Contains(got[0], "https://example.com") {
+					t.Errorf("expected URL in output, got: %q", got[0])
+				}
+			case "trailing punctuation excluded from link":
+				// The period should not be inside the OSC 8 link
+				if !strings.HasSuffix(got[0], ".") {
+					t.Errorf("expected trailing period, got: %q", got[0])
+				}
+				// OSC 8 closing sequence should come before the period
+				osc8Close := "\x1b]8;;\x1b\\"
+				idx := strings.LastIndex(got[0], osc8Close)
+				if idx == -1 {
+					t.Errorf("expected OSC 8 close sequence, got: %q", got[0])
+				} else if got[0][idx+len(osc8Close):] != "." {
+					t.Errorf("period should be after OSC 8 close, got suffix: %q", got[0][idx:])
+				}
+			case "no URL unchanged":
+				if got[0] != tt.input[0] {
+					t.Errorf("expected unchanged line, got: %q", got[0])
 				}
 			}
 		})
