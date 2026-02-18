@@ -15,7 +15,7 @@ func TestEditFieldConstants(t *testing.T) {
 		{"Token", editFieldToken, 0},
 		{"Username", editFieldUsername, 1},
 		{"ThreadWidth", editFieldThreadWidth, 2},
-		{"DescWidth", editFieldDescWidth, 3},
+		{"DetailWidth", editFieldDetailWidth, 3},
 	}
 
 	for _, tt := range tests {
@@ -51,7 +51,7 @@ func TestBlurAllInputs(t *testing.T) {
 	m.tokenInput.Focus()
 	m.usernameInput.Focus()
 	m.widthInput.Focus()
-	m.descWidthInput.Focus()
+	m.detailWidthInput.Focus()
 
 	m.blurAllInputs()
 
@@ -64,8 +64,8 @@ func TestBlurAllInputs(t *testing.T) {
 	if m.widthInput.Focused() {
 		t.Error("widthInput should not be focused after blurAllInputs")
 	}
-	if m.descWidthInput.Focused() {
-		t.Error("descWidthInput should not be focused after blurAllInputs")
+	if m.detailWidthInput.Focused() {
+		t.Error("detailWidthInput should not be focused after blurAllInputs")
 	}
 }
 

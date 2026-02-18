@@ -26,7 +26,7 @@ type DisplayConfig struct {
 	ShowImages        bool   `toml:"show_images"`
 	ImageProtocol     string `toml:"image_protocol"` // "auto", "kitty", "off"
 	ThreadWidth      int `toml:"thread_width"`
-	DescriptionWidth int `toml:"description_width"`
+	DetailWidth int `toml:"detail_width"`
 }
 
 // CollectionConfig contains collection-related configuration.
@@ -55,7 +55,7 @@ func DefaultConfig() *Config {
 			ShowImages:        true,
 			ImageProtocol:     "auto",
 			ThreadWidth:      80,
-			DescriptionWidth: 100,
+			DetailWidth: 100,
 		},
 		Collection: CollectionConfig{
 			DefaultUsername: "",

@@ -19,7 +19,7 @@ const (
 	editFieldToken editField = iota
 	editFieldUsername
 	editFieldThreadWidth
-	editFieldDescWidth
+	editFieldDetailWidth
 )
 
 // settingItemKind describes the interaction type for a settings item.
@@ -52,7 +52,7 @@ type settingsModel struct {
 	tokenInput        textinput.Model
 	usernameInput     textinput.Model
 	widthInput        textinput.Model
-	descWidthInput    textinput.Model
+	detailWidthInput    textinput.Model
 	wantsBack         bool
 	wantsMenu         bool
 	themeChanged      bool
@@ -65,7 +65,7 @@ func (m *settingsModel) blurAllInputs() {
 	m.tokenInput.Blur()
 	m.usernameInput.Blur()
 	m.widthInput.Blur()
-	m.descWidthInput.Blur()
+	m.detailWidthInput.Blur()
 }
 
 func newSettingsModel(cfg *config.Config, styles Styles, keys KeyMap) settingsModel {
@@ -86,7 +86,7 @@ func newSettingsModel(cfg *config.Config, styles Styles, keys KeyMap) settingsMo
 	dwi := textinput.New()
 	dwi.Placeholder = "Enter width (20-200)"
 	dwi.CharLimit = 3
-	dwi.SetValue(fmt.Sprintf("%d", cfg.Display.DescriptionWidth))
+	dwi.SetValue(fmt.Sprintf("%d", cfg.Display.DetailWidth))
 
 	m := settingsModel{
 		cursor:         0,
@@ -96,7 +96,7 @@ func newSettingsModel(cfg *config.Config, styles Styles, keys KeyMap) settingsMo
 		tokenInput:     ti,
 		usernameInput:  ui,
 		widthInput:     wi,
-		descWidthInput: dwi,
+		detailWidthInput: dwi,
 	}
 	m.items = m.buildItems()
 	return m
@@ -174,9 +174,9 @@ func (m *settingsModel) buildItems() []settingItem {
 			getValue:  func() string { return fmt.Sprintf("%d", cfg.Display.ThreadWidth) },
 		},
 		{
-			label: "Description Width", kind: settingText,
-			editField: editFieldDescWidth,
-			getValue:  func() string { return fmt.Sprintf("%d", cfg.Display.DescriptionWidth) },
+			label: "Detail Width", kind: settingText,
+			editField: editFieldDetailWidth,
+			getValue:  func() string { return fmt.Sprintf("%d", cfg.Display.DetailWidth) },
 		},
 		// Collection
 		{
@@ -238,8 +238,8 @@ func (m *settingsModel) textInputForField(field editField) *textinput.Model {
 		return &m.usernameInput
 	case editFieldThreadWidth:
 		return &m.widthInput
-	case editFieldDescWidth:
-		return &m.descWidthInput
+	case editFieldDetailWidth:
+		return &m.detailWidthInput
 	}
 	return nil
 }
@@ -258,9 +258,9 @@ func (m *settingsModel) saveEditField() {
 		if v, err := strconv.Atoi(strings.TrimSpace(m.widthInput.Value())); err == nil && v >= 20 && v <= 200 {
 			m.config.Display.ThreadWidth = v
 		}
-	case editFieldDescWidth:
-		if v, err := strconv.Atoi(strings.TrimSpace(m.descWidthInput.Value())); err == nil && v >= 20 && v <= 200 {
-			m.config.Display.DescriptionWidth = v
+	case editFieldDetailWidth:
+		if v, err := strconv.Atoi(strings.TrimSpace(m.detailWidthInput.Value())); err == nil && v >= 20 && v <= 200 {
+			m.config.Display.DetailWidth = v
 		}
 	}
 	m.config.Save()
