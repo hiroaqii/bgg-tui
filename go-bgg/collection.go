@@ -72,6 +72,7 @@ func convertXMLToCollectionItem(item xmlCollectionItem) CollectionItem {
 
 	// BGG average rating
 	ci.BGGRating = item.Stats.Rating.Average.Value
+	ci.BayesAverage = item.Stats.Rating.BayesAverage.Value
 
 	return ci
 }

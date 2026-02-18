@@ -56,8 +56,9 @@ type CollectionItem struct {
 	Thumbnail  string  `json:"thumbnail"`
 	Image      string  `json:"image"`
 	NumPlays   int     `json:"num_plays"`
-	Rating     float64 `json:"rating"`     // User's rating
-	BGGRating  float64 `json:"bgg_rating"` // BGG average rating
+	Rating       float64 `json:"rating"`        // User's rating
+	BGGRating    float64 `json:"bgg_rating"`    // BGG average rating
+	BayesAverage float64 `json:"bayes_average"` // BGG Geek rating (Bayes average)
 	Owned      bool    `json:"owned"`
 	WantToPlay bool    `json:"want_to_play"`
 	Wishlist   bool    `json:"wishlist"`

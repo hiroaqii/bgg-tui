@@ -248,7 +248,7 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 
 		displayItems := m.filter.displayItems()
 
-		b.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("%d/%d games", min(m.filter.cursor+1, len(displayItems)), len(displayItems))))
+		b.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("%d/%d games  ♥User Rating ★Rating ☆Geek Rating (Bayes)", min(m.filter.cursor+1, len(displayItems)), len(displayItems))))
 		b.WriteString("\n\n")
 
 		if len(displayItems) == 0 {
@@ -273,11 +273,19 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 				// Show rating if available
 				ratingStr := ""
 				if item.Rating > 0 {
-					ratingStr = fmt.Sprintf(" %.1f", item.Rating)
+					ratingStr = fmt.Sprintf(" ♥%.2f", item.Rating)
+				}
+				avgRatingStr := ""
+				if item.BGGRating > 0 {
+					avgRatingStr = fmt.Sprintf(" ★%.2f", item.BGGRating)
+				}
+				bayesStr := ""
+				if item.BayesAverage > 0 {
+					bayesStr = fmt.Sprintf(" ☆%.2f", item.BayesAverage)
 				}
 
 				prefix, name := renderListItem(i, m.filter.cursor, item.Name, m.styles, selType, animFrame)
-				line := fmt.Sprintf("%s%s (%s)%s", prefix, name, year, m.styles.Rating.Render(ratingStr))
+				line := fmt.Sprintf("%s%s (%s) %s%s%s", prefix, name, year, m.styles.Rating.Render(ratingStr), m.styles.Rank.Render(avgRatingStr), m.styles.Players.Render(bayesStr))
 				b.WriteString(line)
 				b.WriteString("\n")
 			}
