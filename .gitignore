@@ -1,0 +1,10 @@
+bgg-tui
+TODO-*.md
+
+# OS
+.DS_Store
+
+# Go test/coverage
+*.test
+*.out
+cover.html
