@@ -95,6 +95,10 @@ func (m *detailModel) buildContentLines() {
 	var lines []string
 	game := m.game
 
+	labelLine := func(name, value string) string {
+		return fmt.Sprintf("%s %s", m.styles.Label.Render(name), value)
+	}
+
 	// Title + blank
 	lines = append(lines, m.styles.Title.Render(game.Name), "")
 
@@ -116,7 +120,7 @@ func (m *detailModel) buildContentLines() {
 	if year == "" {
 		year = "N/A"
 	}
-	lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Year"), year))
+	lines = append(lines, labelLine("Year", year))
 
 	// Rating (with StdDev)
 	ratingStr := "N/A"
@@ -130,12 +134,12 @@ func (m *detailModel) buildContentLines() {
 			ratingStr += fmt.Sprintf(" median %.2f", game.Median)
 		}
 	}
-	lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Rating"), m.styles.Rating.Render(ratingStr)))
+	lines = append(lines, labelLine("Rating", m.styles.Rating.Render(ratingStr)))
 
 	// Geek Rating (Bayes Average)
 	if game.BayesAverage > 0 {
 		geekStr := fmt.Sprintf("%.2f", game.BayesAverage)
-		lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Geek Rating"), geekStr))
+		lines = append(lines, labelLine("Geek Rating", geekStr))
 	}
 
 	// Rank
@@ -143,7 +147,7 @@ func (m *detailModel) buildContentLines() {
 	if game.Rank > 0 {
 		rankStr = fmt.Sprintf("#%d", game.Rank)
 	}
-	lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Rank"), m.styles.Rank.Render(rankStr)))
+	lines = append(lines, labelLine("Rank", m.styles.Rank.Render(rankStr)))
 
 	// Players
 	playersStr := fmt.Sprintf("%d-%d", game.MinPlayers, game.MaxPlayers)
@@ -153,7 +157,7 @@ func (m *detailModel) buildContentLines() {
 	if game.PlayerCountPoll != nil && game.PlayerCountPoll.RecWith != "" {
 		playersStr += fmt.Sprintf("  (%s)", game.PlayerCountPoll.RecWith)
 	}
-	lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Players"), m.styles.Players.Render(playersStr)))
+	lines = append(lines, labelLine("Players", m.styles.Players.Render(playersStr)))
 
 	// Player count poll bar chart
 	if game.PlayerCountPoll != nil && len(game.PlayerCountPoll.Results) > 0 {
@@ -165,7 +169,7 @@ func (m *detailModel) buildContentLines() {
 	if game.MinPlayTime != game.MaxPlayTime {
 		timeStr = fmt.Sprintf("%d-%d min", game.MinPlayTime, game.MaxPlayTime)
 	}
-	lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Time"), m.styles.Time.Render(timeStr)))
+	lines = append(lines, labelLine("Time", m.styles.Time.Render(timeStr)))
 
 	// Weight (with complexity label)
 	weightStr := "N/A"
@@ -176,44 +180,41 @@ func (m *detailModel) buildContentLines() {
 			weightStr += fmt.Sprintf(" (%s votes)", formatNumber(game.NumWeights))
 		}
 	}
-	lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Weight"), weightStr))
+	lines = append(lines, labelLine("Weight", weightStr))
 
 	// Age
 	if game.MinAge > 0 {
-		lines = append(lines, fmt.Sprintf("%s %d+", m.styles.Label.Render("Age"), game.MinAge))
+		lines = append(lines, labelLine("Age", fmt.Sprintf("%d+", game.MinAge)))
 	}
 
 	// Owned
 	if game.Owned > 0 {
-		lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Owned"), formatNumber(game.Owned)))
+		lines = append(lines, labelLine("Owned", formatNumber(game.Owned)))
 	}
 
 	// Comments
 	if game.NumComments > 0 {
-		lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Comments"), formatNumber(game.NumComments)))
+		lines = append(lines, labelLine("Comments", formatNumber(game.NumComments)))
 	}
 
 	// Designers
 	if len(game.Designers) > 0 {
-		lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Designer"), strings.Join(game.Designers, ", ")))
+		lines = append(lines, wrapLabeledText(m.styles.Label.Render("Designer"), strings.Join(game.Designers, ", "), m.config.Display.DetailWidth)...)
 	}
 
 	// Artists
 	if len(game.Artists) > 0 {
-		lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Artist"), strings.Join(game.Artists, ", ")))
+		lines = append(lines, wrapLabeledText(m.styles.Label.Render("Artist"), strings.Join(game.Artists, ", "), m.config.Display.DetailWidth)...)
 	}
 
 	// Categories
 	if len(game.Categories) > 0 {
-		lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Categories"), strings.Join(game.Categories, ", ")))
+		lines = append(lines, wrapLabeledText(m.styles.Label.Render("Categories"), strings.Join(game.Categories, ", "), m.config.Display.DetailWidth)...)
 	}
 
 	// Mechanics
 	if len(game.Mechanics) > 0 {
-		lines = append(lines, m.styles.Label.Render("Mechanics"))
-		for _, mech := range game.Mechanics {
-			lines = append(lines, "  "+mech)
-		}
+		lines = append(lines, wrapLabeledText(m.styles.Label.Render("Mechanics"), strings.Join(game.Mechanics, ", "), m.config.Display.DetailWidth)...)
 	}
 
 	// Description
@@ -282,7 +283,7 @@ func (m detailModel) Update(msg tea.Msg) (detailModel, tea.Cmd) {
 			if desc == "" {
 				desc = "No description available."
 			}
-			m.descLines = wrapText(desc, m.config.Display.DescriptionWidth)
+			m.descLines = wrapText(desc, m.config.Display.DetailWidth)
 			m.buildContentLines()
 
 			// Start image loading if enabled
@@ -438,6 +439,29 @@ func wrapText(text string, width int) []string {
 		lines = append(lines, prefix+currentLine)
 	}
 
+	return lines
+}
+
+// wrapLabeledText wraps text for a labeled line (e.g. "Designer  Foo, Bar, ...").
+// The first line includes the label; continuation lines are indented to align with the text.
+func wrapLabeledText(label, text string, totalWidth int) []string {
+	labelWidth := lipgloss.Width(label)
+	indent := strings.Repeat(" ", labelWidth+1)
+	textWidth := totalWidth - labelWidth - 1
+	if textWidth < 20 {
+		textWidth = 20
+	}
+
+	wrapped := wrapText(text, textWidth)
+	if len(wrapped) == 0 {
+		return []string{fmt.Sprintf("%s %s", label, text)}
+	}
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("%s %s", label, wrapped[0]))
+	for _, w := range wrapped[1:] {
+		lines = append(lines, indent+w)
+	}
 	return lines
 }
 

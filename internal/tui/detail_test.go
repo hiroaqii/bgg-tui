@@ -84,6 +84,59 @@ func TestWrapTextQuotePrefix(t *testing.T) {
 	}
 }
 
+func TestWrapLabeledText(t *testing.T) {
+	tests := []struct {
+		name       string
+		label      string
+		text       string
+		totalWidth int
+		want       []string
+	}{
+		{
+			name:       "short text no wrap",
+			label:      "Label",
+			text:       "short value",
+			totalWidth: 80,
+			want:       []string{"Label short value"},
+		},
+		{
+			name:       "long text wraps with indent",
+			label:      "Designer",
+			text:       "Alice, Bob, Charlie, Diana, Edward, Fiona, George",
+			totalWidth: 40,
+			want: []string{
+				"Designer Alice, Bob, Charlie, Diana,",
+				"         Edward, Fiona, George",
+			},
+		},
+		{
+			name:       "minimum text width guard",
+			label:      "VeryLongLabelName",
+			text:       "Alpha, Beta, Gamma, Delta, Epsilon",
+			totalWidth: 25,
+			want: []string{
+				"VeryLongLabelName Alpha, Beta, Gamma,",
+				"                  Delta, Epsilon",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := wrapLabeledText(tt.label, tt.text, tt.totalWidth)
+			if len(got) != len(tt.want) {
+				t.Errorf("line count mismatch:\n  got  (%d): %q\n  want (%d): %q", len(got), got, len(tt.want), tt.want)
+				return
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("line %d mismatch:\n  got:  %q\n  want: %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestDetailImageConstants(t *testing.T) {
 	if detailImageID != 1 {
 		t.Errorf("detailImageID = %d, want 1", detailImageID)
