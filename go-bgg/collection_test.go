@@ -74,6 +74,9 @@ func TestGetCollection(t *testing.T) {
 	if items[0].BGGRating < 7.13 || items[0].BGGRating > 7.15 {
 		t.Errorf("expected BGGRating ~7.14, got %f", items[0].BGGRating)
 	}
+	if items[0].Rank != 42 {
+		t.Errorf("expected Rank 42, got %d", items[0].Rank)
+	}
 
 	// Verify wishlist item
 	if !items[2].Wishlist {

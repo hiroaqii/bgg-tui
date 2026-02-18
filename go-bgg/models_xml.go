@@ -211,6 +211,7 @@ type xmlCollectionRating struct {
 	UsersRated   xmlIntValue   `xml:"usersrated"`
 	Average      xmlFloatValue `xml:"average"`
 	BayesAverage xmlFloatValue `xml:"bayesaverage"`
+	Ranks        xmlRanks      `xml:"ranks"`
 }
 
 // xmlForumList is the root element for forum list responses.

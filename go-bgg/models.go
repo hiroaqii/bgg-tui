@@ -82,6 +82,7 @@ type CollectionItem struct {
 	Rating       float64 `json:"rating"`        // User's rating
 	BGGRating    float64 `json:"bgg_rating"`    // BGG average rating
 	BayesAverage float64 `json:"bayes_average"` // BGG Geek rating (Bayes average)
+	Rank         int     `json:"rank"`          // BGG board game rank (0 = Not Ranked)
 	Owned      bool    `json:"owned"`
 	WantToPlay bool    `json:"want_to_play"`
 	Wishlist   bool    `json:"wishlist"`

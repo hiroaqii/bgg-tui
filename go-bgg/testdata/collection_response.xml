@@ -12,6 +12,9 @@
                 <usersrated value="98765"/>
                 <average value="7.14"/>
                 <bayesaverage value="7.01"/>
+                <ranks>
+                    <rank type="subtype" id="1" name="boardgame" friendlyname="Board Game Rank" value="42"/>
+                </ranks>
             </rating>
         </stats>
     </item>
@@ -27,6 +30,9 @@
                 <usersrated value="87654"/>
                 <average value="8.42"/>
                 <bayesaverage value="8.25"/>
+                <ranks>
+                    <rank type="subtype" id="1" name="boardgame" friendlyname="Board Game Rank" value="15"/>
+                </ranks>
             </rating>
         </stats>
     </item>
@@ -42,6 +48,9 @@
                 <usersrated value="65432"/>
                 <average value="8.65"/>
                 <bayesaverage value="8.45"/>
+                <ranks>
+                    <rank type="subtype" id="1" name="boardgame" friendlyname="Board Game Rank" value="Not Ranked"/>
+                </ranks>
             </rating>
         </stats>
     </item>
