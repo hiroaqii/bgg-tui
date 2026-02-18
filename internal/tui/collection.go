@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	bgg "github.com/hiroaqii/go-bgg"
 
@@ -248,7 +249,7 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 
 		displayItems := m.filter.displayItems()
 
-		b.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("%d/%d games  ♥User Rating ★Rating ☆Geek Rating (Bayes)", min(m.filter.cursor+1, len(displayItems)), len(displayItems))))
+		b.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("%d/%d games  ♥User Rating ★Rating #Rank", min(m.filter.cursor+1, len(displayItems)), len(displayItems))))
 		b.WriteString("\n\n")
 
 		if len(displayItems) == 0 {
@@ -262,30 +263,54 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 			}
 			start, end := calcListRange(m.filter.cursor, len(displayItems), listHeight, m.config.Interface.ListDensity)
 
+			// First pass: find max name+year width for stats alignment
+			maxNameYearLen := 0
 			for i := start; i < end; i++ {
 				item := displayItems[i]
+				year := item.Year
+				if year == "" {
+					year = "N/A"
+				}
+				w := lipgloss.Width(truncateName(item.Name, maxNameLen)) + len(year) + 3
+				if w > maxNameYearLen {
+					maxNameYearLen = w
+				}
+			}
 
+			for i := start; i < end; i++ {
+				item := displayItems[i]
 				year := item.Year
 				if year == "" {
 					year = "N/A"
 				}
 
-				// Show rating if available
-				ratingStr := ""
-				if item.Rating > 0 {
-					ratingStr = fmt.Sprintf(" ♥%.2f", item.Rating)
-				}
-				avgRatingStr := ""
-				if item.BGGRating > 0 {
-					avgRatingStr = fmt.Sprintf(" ★%.2f", item.BGGRating)
-				}
-				bayesStr := ""
-				if item.BayesAverage > 0 {
-					bayesStr = fmt.Sprintf(" ☆%.2f", item.BayesAverage)
+				displayName := truncateName(item.Name, maxNameLen)
+				prefix, name := renderListItem(i, m.filter.cursor, displayName, m.styles, selType, animFrame)
+				line := fmt.Sprintf("%s%s (%s)", prefix, name, year)
+
+				hasStats := item.Rating > 0 || item.BGGRating > 0 || item.Rank > 0
+				if hasStats {
+					nameYearLen := lipgloss.Width(displayName) + len(year) + 3
+					padding := maxNameYearLen - nameYearLen + 2
+					line += strings.Repeat(" ", padding)
+
+					const statCol = 6 // "♥ 7.30" = symbol(1) + %5.2f(5) = 6 chars
+					if item.Rating > 0 {
+						line += m.styles.Rating.Render(fmt.Sprintf("♥%5.2f", item.Rating))
+					} else {
+						line += strings.Repeat(" ", statCol)
+					}
+					line += " "
+					if item.BGGRating > 0 {
+						line += m.styles.Rank.Render(fmt.Sprintf("★%5.2f", item.BGGRating))
+					} else {
+						line += strings.Repeat(" ", statCol)
+					}
+					if item.Rank > 0 {
+						line += " " + m.styles.Players.Render(fmt.Sprintf("#%d", item.Rank))
+					}
 				}
 
-				prefix, name := renderListItem(i, m.filter.cursor, item.Name, m.styles, selType, animFrame)
-				line := fmt.Sprintf("%s%s (%s) %s%s%s", prefix, name, year, m.styles.Rating.Render(ratingStr), m.styles.Rank.Render(avgRatingStr), m.styles.Players.Render(bayesStr))
 				b.WriteString(line)
 				b.WriteString("\n")
 			}
