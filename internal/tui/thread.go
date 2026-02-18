@@ -225,15 +225,17 @@ func (m threadModel) renderArticles() []string {
 
 	for i, article := range m.thread.Articles {
 		// Header line
-		header := fmt.Sprintf("--- %s · %s ---", article.Username, formatDate(article.PostDate, m.config.Interface.DateFormat))
-		lines = append(lines, m.styles.Label.Width(0).Render(header))
+		nameStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
+		dateStyle := lipgloss.NewStyle().Foreground(ColorMuted)
+		header := fmt.Sprintf("%s  %s", nameStyle.Render("■ "+article.Username), dateStyle.Render(formatDate(article.PostDate, m.config.Interface.DateFormat)))
+		lines = append(lines, header)
 
 		// Body lines (wrap text)
 		threadWidth := m.config.Display.ThreadWidth
 		if HasBorder(m.config.Interface.BorderStyle) {
 			threadWidth -= BorderWidthOverhead
 		}
-		bodyLines := htmlToText(article.Body, threadWidth)
+		bodyLines := linkifyLines(htmlToText(article.Body, threadWidth))
 		quoteStyle := lipgloss.NewStyle().Foreground(ColorMuted)
 		for i, line := range bodyLines {
 			if strings.HasPrefix(line, "│") {
@@ -244,6 +246,10 @@ func (m threadModel) renderArticles() []string {
 
 		// Add separator between articles
 		if i < len(m.thread.Articles)-1 {
+			separator := strings.Repeat("─", threadWidth)
+			sepStyle := lipgloss.NewStyle().Foreground(ColorBorder)
+			lines = append(lines, "")
+			lines = append(lines, sepStyle.Render(separator))
 			lines = append(lines, "")
 		}
 	}
