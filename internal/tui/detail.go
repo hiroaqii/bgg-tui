@@ -118,12 +118,25 @@ func (m *detailModel) buildContentLines() {
 	}
 	lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Year"), year))
 
-	// Rating
+	// Rating (with StdDev)
 	ratingStr := "N/A"
 	if game.Rating > 0 {
-		ratingStr = fmt.Sprintf("%.2f (%d votes)", game.Rating, game.UsersRated)
+		ratingStr = fmt.Sprintf("%.2f (%s votes", game.Rating, formatNumber(game.UsersRated))
+		if game.StdDev > 0 {
+			ratingStr += fmt.Sprintf(", σ %.2f", game.StdDev)
+		}
+		ratingStr += ")"
+		if game.Median > 0 {
+			ratingStr += fmt.Sprintf(" median %.2f", game.Median)
+		}
 	}
 	lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Rating"), m.styles.Rating.Render(ratingStr)))
+
+	// Geek Rating (Bayes Average)
+	if game.BayesAverage > 0 {
+		geekStr := fmt.Sprintf("%.2f", game.BayesAverage)
+		lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Geek Rating"), geekStr))
+	}
 
 	// Rank
 	rankStr := "Not Ranked"
@@ -137,7 +150,15 @@ func (m *detailModel) buildContentLines() {
 	if game.MinPlayers == game.MaxPlayers {
 		playersStr = fmt.Sprintf("%d", game.MinPlayers)
 	}
+	if game.PlayerCountPoll != nil && game.PlayerCountPoll.RecWith != "" {
+		playersStr += fmt.Sprintf("  (%s)", game.PlayerCountPoll.RecWith)
+	}
 	lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Players"), m.styles.Players.Render(playersStr)))
+
+	// Player count poll bar chart
+	if game.PlayerCountPoll != nil && len(game.PlayerCountPoll.Results) > 0 {
+		lines = append(lines, renderPlayerCountPoll(game.PlayerCountPoll)...)
+	}
 
 	// Playing time
 	timeStr := fmt.Sprintf("%d min", game.PlayingTime)
@@ -146,16 +167,40 @@ func (m *detailModel) buildContentLines() {
 	}
 	lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Time"), m.styles.Time.Render(timeStr)))
 
-	// Weight
+	// Weight (with complexity label)
 	weightStr := "N/A"
 	if game.Weight > 0 {
-		weightStr = fmt.Sprintf("%.2f / 5", game.Weight)
+		label := complexityLabel(game.Weight)
+		weightStr = fmt.Sprintf("%.2f / 5 - %s", game.Weight, label)
+		if game.NumWeights > 0 {
+			weightStr += fmt.Sprintf(" (%s votes)", formatNumber(game.NumWeights))
+		}
 	}
 	lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Weight"), weightStr))
+
+	// Age
+	if game.MinAge > 0 {
+		lines = append(lines, fmt.Sprintf("%s %d+", m.styles.Label.Render("Age"), game.MinAge))
+	}
+
+	// Owned
+	if game.Owned > 0 {
+		lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Owned"), formatNumber(game.Owned)))
+	}
+
+	// Comments
+	if game.NumComments > 0 {
+		lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Comments"), formatNumber(game.NumComments)))
+	}
 
 	// Designers
 	if len(game.Designers) > 0 {
 		lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Designer"), strings.Join(game.Designers, ", ")))
+	}
+
+	// Artists
+	if len(game.Artists) > 0 {
+		lines = append(lines, fmt.Sprintf("%s %s", m.styles.Label.Render("Artist"), strings.Join(game.Artists, ", ")))
 	}
 
 	// Categories
@@ -392,6 +437,141 @@ func wrapText(text string, width int) []string {
 		}
 		lines = append(lines, prefix+currentLine)
 	}
+
+	return lines
+}
+
+// complexityLabel returns a human-readable complexity label for the given weight.
+func complexityLabel(weight float64) string {
+	switch {
+	case weight < 1.0:
+		return "Light"
+	case weight < 2.0:
+		return "Medium Light"
+	case weight < 3.0:
+		return "Medium"
+	case weight < 4.0:
+		return "Medium Heavy"
+	default:
+		return "Heavy"
+	}
+}
+
+// formatNumber formats an integer with comma separators (e.g. 123456 -> "123,456").
+func formatNumber(n int) string {
+	s := fmt.Sprintf("%d", n)
+	if len(s) <= 3 {
+		return s
+	}
+	var result []byte
+	for i, c := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			result = append(result, ',')
+		}
+		result = append(result, byte(c))
+	}
+	return string(result)
+}
+
+// renderPlayerCountPoll renders a table showing votes for suggested number of players.
+func renderPlayerCountPoll(poll *bgg.PlayerCountPoll) []string {
+	if poll.TotalVotes == 0 {
+		return nil
+	}
+
+	// Pre-compute formatted strings per row to determine column widths
+	type rowData struct {
+		numPlayers string
+		bestStr    string
+		recStr     string
+		notRecStr  string
+		icon       string
+	}
+
+	var rows []rowData
+	for _, r := range poll.Results {
+		total := r.Best + r.Recommended + r.NotRecommended
+		if total == 0 {
+			continue
+		}
+
+		bestPct := r.Best * 100 / total
+		recPct := r.Recommended * 100 / total
+		notRecPct := r.NotRecommended * 100 / total
+
+		bestStr := fmt.Sprintf("%s (%d%%)", formatNumber(r.Best), bestPct)
+		recStr := fmt.Sprintf("%s (%d%%)", formatNumber(r.Recommended), recPct)
+		notRecStr := fmt.Sprintf("%s (%d%%)", formatNumber(r.NotRecommended), notRecPct)
+
+		icon := "✗"
+		if r.Best >= r.Recommended && r.Best >= r.NotRecommended && r.Best > 0 {
+			icon = "★ Best"
+		} else if r.Recommended >= r.NotRecommended && r.Recommended > 0 {
+			icon = "★"
+		}
+
+		rows = append(rows, rowData{
+			numPlayers: r.NumPlayers,
+			bestStr:    bestStr,
+			recStr:     recStr,
+			notRecStr:  notRecStr,
+			icon:       icon,
+		})
+	}
+
+	if len(rows) == 0 {
+		return nil
+	}
+
+	// Determine column widths (minimum = header length)
+	npW, bW, rW, nrW := 2, 4, 3, 7 // "  ", "Best", "Rec", "Not Rec"
+	for _, rd := range rows {
+		if len(rd.numPlayers) > npW {
+			npW = len(rd.numPlayers)
+		}
+		if len(rd.bestStr) > bW {
+			bW = len(rd.bestStr)
+		}
+		if len(rd.recStr) > rW {
+			rW = len(rd.recStr)
+		}
+		if len(rd.notRecStr) > nrW {
+			nrW = len(rd.notRecStr)
+		}
+	}
+
+	// Build table lines
+	var lines []string
+
+	// Top border
+	top := fmt.Sprintf("  ┌%s┬%s┬%s┬%s┐",
+		strings.Repeat("─", npW+2), strings.Repeat("─", bW+2),
+		strings.Repeat("─", rW+2), strings.Repeat("─", nrW+2))
+	lines = append(lines, top)
+
+	// Header
+	header := fmt.Sprintf("  │ %*s │ %*s │ %*s │ %*s │",
+		npW, "", bW, "Best", rW, "Rec", nrW, "Not Rec")
+	lines = append(lines, header)
+
+	// Separator
+	sep := fmt.Sprintf("  ├%s┼%s┼%s┼%s┤",
+		strings.Repeat("─", npW+2), strings.Repeat("─", bW+2),
+		strings.Repeat("─", rW+2), strings.Repeat("─", nrW+2))
+	lines = append(lines, sep)
+
+	// Data rows
+	for _, rd := range rows {
+		line := fmt.Sprintf("  │ %*s │ %*s │ %*s │ %*s │ %s",
+			npW, rd.numPlayers, bW, rd.bestStr, rW, rd.recStr, nrW, rd.notRecStr, rd.icon)
+		lines = append(lines, line)
+	}
+
+	// Bottom border
+	bottom := fmt.Sprintf("  └%s┴%s┴%s┴%s┘",
+		strings.Repeat("─", npW+2), strings.Repeat("─", bW+2),
+		strings.Repeat("─", rW+2), strings.Repeat("─", nrW+2))
+	lines = append(lines, bottom)
 
 	return lines
 }

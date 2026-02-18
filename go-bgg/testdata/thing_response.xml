@@ -24,6 +24,37 @@
         <link type="boardgameartist" id="11883" value="Tanja Donner"/>
         <link type="boardgamepublisher" id="267" value="999 Games"/>
         <link type="boardgamepublisher" id="4304" value="Albi"/>
+        <poll name="suggested_numplayers" title="User Suggested Number of Players" totalvotes="2551">
+            <results numplayers="1">
+                <result value="Best" numvotes="4"/>
+                <result value="Recommended" numvotes="14"/>
+                <result value="Not Recommended" numvotes="1695"/>
+            </results>
+            <results numplayers="2">
+                <result value="Best" numvotes="11"/>
+                <result value="Recommended" numvotes="141"/>
+                <result value="Not Recommended" numvotes="1567"/>
+            </results>
+            <results numplayers="3">
+                <result value="Best" numvotes="749"/>
+                <result value="Recommended" numvotes="1324"/>
+                <result value="Not Recommended" numvotes="151"/>
+            </results>
+            <results numplayers="4">
+                <result value="Best" numvotes="1838"/>
+                <result value="Recommended" numvotes="525"/>
+                <result value="Not Recommended" numvotes="52"/>
+            </results>
+            <results numplayers="4+">
+                <result value="Best" numvotes="21"/>
+                <result value="Recommended" numvotes="93"/>
+                <result value="Not Recommended" numvotes="1109"/>
+            </results>
+        </poll>
+        <poll-summary name="suggested_numplayers">
+            <result name="bestwith" value="Best with 4 players"/>
+            <result name="recommmendedwith" value="Recommended with 3-4 players"/>
+        </poll-summary>
         <statistics page="1">
             <ratings>
                 <usersrated value="98765"/>

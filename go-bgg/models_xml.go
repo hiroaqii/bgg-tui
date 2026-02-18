@@ -56,8 +56,10 @@ type xmlThingItem struct {
 	MinPlayTime xmlIntValue      `xml:"minplaytime"`
 	MaxPlayTime xmlIntValue      `xml:"maxplaytime"`
 	MinAge      xmlIntValue      `xml:"minage"`
-	Links       []xmlLink        `xml:"link"`
-	Statistics  xmlStatistics    `xml:"statistics"`
+	Links         []xmlLink        `xml:"link"`
+	Polls         []xmlPoll        `xml:"poll"`
+	PollSummaries []xmlPollSummary `xml:"poll-summary"`
+	Statistics    xmlStatistics    `xml:"statistics"`
 }
 
 // xmlLink represents a link element (designer, category, mechanic, etc.).
@@ -74,10 +76,15 @@ type xmlStatistics struct {
 
 // xmlRatings contains rating information.
 type xmlRatings struct {
-	UsersRated   xmlIntValue   `xml:"usersrated"`
-	Average      xmlFloatValue `xml:"average"`
-	BayesAverage xmlFloatValue `xml:"bayesaverage"`
-	Ranks        xmlRanks      `xml:"ranks"`
+	UsersRated    xmlIntValue   `xml:"usersrated"`
+	Average       xmlFloatValue `xml:"average"`
+	BayesAverage  xmlFloatValue `xml:"bayesaverage"`
+	Ranks         xmlRanks      `xml:"ranks"`
+	StdDev        xmlFloatValue `xml:"stddev"`
+	Median        xmlFloatValue `xml:"median"`
+	Owned         xmlIntValue   `xml:"owned"`
+	NumComments   xmlIntValue   `xml:"numcomments"`
+	NumWeights    xmlIntValue   `xml:"numweights"`
 	AverageWeight xmlFloatValue `xml:"averageweight"`
 }
 
@@ -98,6 +105,38 @@ type xmlRank struct {
 	Name       string `xml:"name,attr"`
 	FriendlyName string `xml:"friendlyname,attr"`
 	Value      string `xml:"value,attr"`
+}
+
+// xmlPoll represents a poll element.
+type xmlPoll struct {
+	Name       string           `xml:"name,attr"`
+	Title      string           `xml:"title,attr"`
+	TotalVotes int              `xml:"totalvotes,attr"`
+	Results    []xmlPollResults `xml:"results"`
+}
+
+// xmlPollResults represents results for a specific option (e.g. player count).
+type xmlPollResults struct {
+	NumPlayers string          `xml:"numplayers,attr"`
+	Results    []xmlPollResult `xml:"result"`
+}
+
+// xmlPollResult represents a single result entry in a poll.
+type xmlPollResult struct {
+	Value    string `xml:"value,attr"`
+	NumVotes int    `xml:"numvotes,attr"`
+}
+
+// xmlPollSummary represents a poll-summary element.
+type xmlPollSummary struct {
+	Name    string                 `xml:"name,attr"`
+	Results []xmlPollSummaryResult `xml:"result"`
+}
+
+// xmlPollSummaryResult represents a result in a poll summary.
+type xmlPollSummaryResult struct {
+	Name  string `xml:"name,attr"`
+	Value string `xml:"value,attr"`
 }
 
 // xmlHot is the root element for hot list responses.

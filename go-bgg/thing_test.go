@@ -92,10 +92,40 @@ func TestGetGame(t *testing.T) {
 	if game.Weight < 2.31 || game.Weight > 2.33 {
 		t.Errorf("expected Weight ~2.32, got %f", game.Weight)
 	}
+	if game.BayesAverage < 7.01 || game.BayesAverage > 7.02 {
+		t.Errorf("expected BayesAverage ~7.01234, got %f", game.BayesAverage)
+	}
+	if game.StdDev < 1.54 || game.StdDev > 1.55 {
+		t.Errorf("expected StdDev ~1.54321, got %f", game.StdDev)
+	}
+	if game.Median != 0 {
+		t.Errorf("expected Median 0, got %f", game.Median)
+	}
+	if game.Owned != 123456 {
+		t.Errorf("expected Owned 123456, got %d", game.Owned)
+	}
+	if game.NumComments != 23456 {
+		t.Errorf("expected NumComments 23456, got %d", game.NumComments)
+	}
+	if game.NumWeights != 7890 {
+		t.Errorf("expected NumWeights 7890, got %d", game.NumWeights)
+	}
 
 	// Verify designers
 	if len(game.Designers) != 1 || game.Designers[0] != "Klaus Teuber" {
 		t.Errorf("expected designer 'Klaus Teuber', got %v", game.Designers)
+	}
+
+	// Verify artists
+	if len(game.Artists) != 2 {
+		t.Errorf("expected 2 artists, got %d", len(game.Artists))
+	} else {
+		if game.Artists[0] != "Volkan Baga" {
+			t.Errorf("expected first artist 'Volkan Baga', got '%s'", game.Artists[0])
+		}
+		if game.Artists[1] != "Tanja Donner" {
+			t.Errorf("expected second artist 'Tanja Donner', got '%s'", game.Artists[1])
+		}
 	}
 
 	// Verify categories
@@ -114,6 +144,39 @@ func TestGetGame(t *testing.T) {
 	}
 	if game.Image == "" {
 		t.Error("expected non-empty Image")
+	}
+
+	// Verify PlayerCountPoll
+	if game.PlayerCountPoll == nil {
+		t.Fatal("expected PlayerCountPoll to be non-nil")
+	}
+	pcp := game.PlayerCountPoll
+	if pcp.TotalVotes != 2551 {
+		t.Errorf("expected TotalVotes 2551, got %d", pcp.TotalVotes)
+	}
+	if len(pcp.Results) != 5 {
+		t.Fatalf("expected 5 player count results, got %d", len(pcp.Results))
+	}
+	// Check 4-player votes
+	r4 := pcp.Results[3]
+	if r4.NumPlayers != "4" {
+		t.Errorf("expected NumPlayers '4', got '%s'", r4.NumPlayers)
+	}
+	if r4.Best != 1838 {
+		t.Errorf("expected Best 1838, got %d", r4.Best)
+	}
+	if r4.Recommended != 525 {
+		t.Errorf("expected Recommended 525, got %d", r4.Recommended)
+	}
+	if r4.NotRecommended != 52 {
+		t.Errorf("expected NotRecommended 52, got %d", r4.NotRecommended)
+	}
+	// Check poll-summary
+	if pcp.BestWith != "Best with 4 players" {
+		t.Errorf("expected BestWith 'Best with 4 players', got '%s'", pcp.BestWith)
+	}
+	if pcp.RecWith != "Recommended with 3-4 players" {
+		t.Errorf("expected RecWith 'Recommended with 3-4 players', got '%s'", pcp.RecWith)
 	}
 }
 

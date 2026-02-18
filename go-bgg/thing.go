@@ -121,7 +121,13 @@ func convertXMLToGame(item xmlThingItem) Game {
 	// Extract statistics
 	game.Rating = item.Statistics.Ratings.Average.Value
 	game.UsersRated = item.Statistics.Ratings.UsersRated.Value
+	game.BayesAverage = item.Statistics.Ratings.BayesAverage.Value
 	game.Weight = item.Statistics.Ratings.AverageWeight.Value
+	game.StdDev = item.Statistics.Ratings.StdDev.Value
+	game.Median = item.Statistics.Ratings.Median.Value
+	game.Owned = item.Statistics.Ratings.Owned.Value
+	game.NumComments = item.Statistics.Ratings.NumComments.Value
+	game.NumWeights = item.Statistics.Ratings.NumWeights.Value
 
 	// Extract rank (board game rank)
 	for _, rank := range item.Statistics.Ratings.Ranks.Ranks {
@@ -133,6 +139,45 @@ func convertXMLToGame(item xmlThingItem) Game {
 			}
 			break
 		}
+	}
+
+	// Extract suggested_numplayers poll
+	for _, poll := range item.Polls {
+		if poll.Name != "suggested_numplayers" {
+			continue
+		}
+		pcp := &PlayerCountPoll{TotalVotes: poll.TotalVotes}
+		for _, pr := range poll.Results {
+			var v PlayerCountVotes
+			v.NumPlayers = pr.NumPlayers
+			for _, r := range pr.Results {
+				switch r.Value {
+				case "Best":
+					v.Best = r.NumVotes
+				case "Recommended":
+					v.Recommended = r.NumVotes
+				case "Not Recommended":
+					v.NotRecommended = r.NumVotes
+				}
+			}
+			pcp.Results = append(pcp.Results, v)
+		}
+		// Extract poll-summary data
+		for _, ps := range item.PollSummaries {
+			if ps.Name != "suggested_numplayers" {
+				continue
+			}
+			for _, r := range ps.Results {
+				switch r.Name {
+				case "bestwith":
+					pcp.BestWith = r.Value
+				case "recommmendedwith":
+					pcp.RecWith = r.Value
+				}
+			}
+		}
+		game.PlayerCountPoll = pcp
+		break
 	}
 
 	return game
