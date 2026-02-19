@@ -32,11 +32,20 @@ A terminal user interface for [BoardGameGeek](https://boardgamegeek.com/).
 
 ## Installation
 
+### Homebrew (macOS)
+
+```bash
+brew tap hiroaqii/bgg-tui
+brew install bgg-tui
+```
+
+### go install
+
 ```bash
 go install github.com/hiroaqii/bgg-tui/cmd/bgg-tui@latest
 ```
 
-Build from source:
+### Build from source
 
 ```bash
 git clone https://github.com/hiroaqii/bgg-tui.git
