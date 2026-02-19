@@ -29,8 +29,8 @@ func newMenuModel(cfg *config.Config, styles Styles, keys KeyMap, hasToken bool)
 	return menuModel{
 		cursor: 0,
 		items: []menuItem{
-			{label: "Hot Games", key: "1", view: ViewHot},
-			{label: "Search Games", key: "2", view: ViewSearchInput},
+			{label: "Search Games", key: "1", view: ViewSearchInput},
+			{label: "Hot Games", key: "2", view: ViewHot},
 			{label: "User Collection", key: "3", view: ViewCollectionInput},
 			{label: "Settings", key: "4", view: ViewSettings},
 		},

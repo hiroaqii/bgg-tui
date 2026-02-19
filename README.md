@@ -13,7 +13,7 @@ A terminal user interface for [BoardGameGeek](https://boardgamegeek.com/).
 - 🔍 Search games by name
 - 🔥 Browse trending (Hot) games with ratings, weight, and rank
 - 📚 View user collections with ratings
-- 📋 Game details: year, rating, rank, players, play time, weight, designers, categories, mechanics, description
+- 📋 Game details: year, rating, geek rating, rank, players, play time, weight, age, owned, comments, designers, artists, categories, mechanics, description
 - 💬 Browse game forums and read threads
 - 🖼️ Thumbnail images via Kitty graphics protocol (Kitty, Ghostty, WezTerm)
 - 🔎 Filter-as-you-type on any list
@@ -41,6 +41,12 @@ Build from source:
 ```bash
 git clone https://github.com/hiroaqii/bgg-tui.git
 cd bgg-tui
+make build
+```
+
+If `make` is not available (e.g., Windows), you can build directly with Go:
+
+```bash
 go build -o bgg-tui ./cmd/bgg-tui
 ```
 
@@ -64,13 +70,13 @@ Configuration file is created on first launch in your OS's default config direct
 | `interface` | `color_theme` | Color theme |
 | `interface` | `transition` | Screen transition effect |
 | `interface` | `selection` | List selection animation |
+| `interface` | `border_style` | Border style for panels |
 | `interface` | `list_density` | List item spacing |
 | `interface` | `date_format` | Date display format |
-| `interface` | `border_style` | Border style for panels |
 | `display` | `show_images` | Show board game thumbnail images |
 | `display` | `image_protocol` | Image protocol: `auto` detects terminal support, `kitty` forces Kitty protocol, `off` disables |
 | `display` | `thread_width` | Forum thread display width |
-| `display` | `description_width` | Game description display width |
+| `display` | `detail_width` | Game detail display width |
 | `collection` | `default_username` | Default BGG username for collection lookup |
 | `collection` | `show_only_owned` | Show only owned games in collection |
 | `api` | `token` | BGG API bearer token |
