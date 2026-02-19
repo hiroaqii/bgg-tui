@@ -21,7 +21,7 @@ A terminal user interface for [BoardGameGeek](https://boardgamegeek.com/).
 - ✨ Screen transition effects
 - 🎯 Selection animations
 - 🔲 Multiple border styles
-- ⚙️ Configurable list density, date format, description/thread width
+- ⚙️ Configurable list density, date format, list/thread/detail width
 - 🌐 Open any game in browser
 
 ## Requirements
@@ -89,6 +89,7 @@ Configuration file is created on first launch in your OS's default config direct
 | `interface` | `date_format` | Date display format |
 | `display` | `show_images` | Show board game thumbnail images |
 | `display` | `image_protocol` | Image protocol: `auto` detects terminal support, `kitty` forces Kitty protocol, `off` disables |
+| `display` | `list_width` | List screen content width |
 | `display` | `thread_width` | Forum thread display width |
 | `display` | `detail_width` | Game detail display width |
 | `collection` | `default_username` | Default BGG username for collection lookup |
