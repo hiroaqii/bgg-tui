@@ -131,6 +131,14 @@ func (m *settingsModel) buildItems() []settingItem {
 			},
 		},
 		{
+			label: "Border Style", kind: settingCycle,
+			getValue: func() string { return cfg.Interface.BorderStyle },
+			onEnter: func() {
+				cfg.Interface.BorderStyle = cycleValue(cfg.Interface.BorderStyle, BorderStyleNames)
+				cfg.Save()
+			},
+		},
+		{
 			label: "List Density", kind: settingCycle,
 			getValue: func() string { return cfg.Interface.ListDensity },
 			onEnter: func() {
@@ -143,14 +151,6 @@ func (m *settingsModel) buildItems() []settingItem {
 			getValue: func() string { return cfg.Interface.DateFormat },
 			onEnter: func() {
 				cfg.Interface.DateFormat = cycleValue(cfg.Interface.DateFormat, DateFormatNames)
-				cfg.Save()
-			},
-		},
-		{
-			label: "Border Style", kind: settingCycle,
-			getValue: func() string { return cfg.Interface.BorderStyle },
-			onEnter: func() {
-				cfg.Interface.BorderStyle = cycleValue(cfg.Interface.BorderStyle, BorderStyleNames)
 				cfg.Save()
 			},
 		},
