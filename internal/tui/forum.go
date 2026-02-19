@@ -253,10 +253,19 @@ func (m forumModel) View(width, height int, selType string, animFrame int) strin
 		} else {
 			start, end := calcListRangeMultiLine(m.threadCursor, len(m.threads.Threads), height, "normal", 2)
 
+			// Calculate dynamic subject width from ListWidth
+			hasBorder := HasBorder(m.config.Interface.BorderStyle)
+			contentWidth := listContentWidth(m.config.Display.ListWidth, width, hasBorder)
+			// overhead: prefix(2)
+			maxSubjectW := contentWidth - 2
+			if maxSubjectW < 10 {
+				maxSubjectW = 10
+			}
+
 			for i := start; i < end; i++ {
 				thread := m.threads.Threads[i]
 
-				subject := truncateName(thread.Subject, 50)
+				subject := truncateName(thread.Subject, maxSubjectW)
 				prefix, renderedSubject := renderListItem(i, m.threadCursor, subject, m.styles, selType, animFrame)
 				line := fmt.Sprintf("%s%s", prefix, renderedSubject)
 				b.WriteString(line)

@@ -263,6 +263,15 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 			}
 			start, end := calcListRange(m.filter.cursor, len(displayItems), listHeight, m.config.Interface.ListDensity)
 
+			// Calculate dynamic name width from ListWidth
+			hasBorder := HasBorder(m.config.Interface.BorderStyle)
+			contentWidth := listContentWidth(m.config.Display.ListWidth, width, hasBorder)
+			// overhead: prefix(2) + " (" + year(4) + ")" = 9
+			maxNameW := contentWidth - 9
+			if maxNameW < 10 {
+				maxNameW = 10
+			}
+
 			// First pass: find max name+year width for stats alignment
 			maxNameYearLen := 0
 			for i := start; i < end; i++ {
@@ -271,7 +280,7 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 				if year == "" {
 					year = "N/A"
 				}
-				w := lipgloss.Width(truncateName(item.Name, maxNameLen)) + len(year) + 3
+				w := lipgloss.Width(truncateName(item.Name, maxNameW)) + len(year) + 3
 				if w > maxNameYearLen {
 					maxNameYearLen = w
 				}
@@ -284,7 +293,7 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 					year = "N/A"
 				}
 
-				displayName := truncateName(item.Name, maxNameLen)
+				displayName := truncateName(item.Name, maxNameW)
 				prefix, name := renderListItem(i, m.filter.cursor, displayName, m.styles, selType, animFrame)
 				line := fmt.Sprintf("%s%s (%s)", prefix, name, year)
 

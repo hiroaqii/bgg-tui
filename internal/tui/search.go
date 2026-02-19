@@ -337,6 +337,15 @@ func (m searchModel) View(width, height int, selType string, animFrame int) stri
 			}
 			start, end := calcListRange(m.filter.cursor, len(displayItems), listHeight, m.config.Interface.ListDensity)
 
+			// Calculate dynamic name width from ListWidth
+			hasBorder := HasBorder(m.config.Interface.BorderStyle)
+			contentWidth := listContentWidth(m.config.Display.ListWidth, width, hasBorder)
+			// overhead: prefix(2) + " (" + year(4) + ")" + " [Expansion]"(12) = 21
+			maxNameW := contentWidth - 21
+			if maxNameW < 10 {
+				maxNameW = 10
+			}
+
 			for i := start; i < end; i++ {
 				result := displayItems[i]
 
@@ -350,7 +359,8 @@ func (m searchModel) View(width, height int, selType string, animFrame int) stri
 					typeIndicator = " [Expansion]"
 				}
 
-				prefix, name := renderListItem(i, m.filter.cursor, result.Name, m.styles, selType, animFrame)
+				displayName := truncateName(result.Name, maxNameW)
+				prefix, name := renderListItem(i, m.filter.cursor, displayName, m.styles, selType, animFrame)
 				line := fmt.Sprintf("%s%s (%s)%s", prefix, name, year, typeIndicator)
 				b.WriteString(line)
 				b.WriteString("\n")

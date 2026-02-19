@@ -177,7 +177,12 @@ func (m threadModel) View(width, height int) string {
 
 	case threadStateResults:
 		// Title
-		subject := truncateName(m.thread.Subject, 60)
+		hasBorder := HasBorder(m.config.Interface.BorderStyle)
+		contentWidth := listContentWidth(m.config.Display.ListWidth, width, hasBorder)
+		if contentWidth < 10 {
+			contentWidth = 10
+		}
+		subject := truncateName(m.thread.Subject, contentWidth)
 		b.WriteString(m.styles.Title.Render(subject))
 		b.WriteString("\n")
 		sortLabel := "↑Old"

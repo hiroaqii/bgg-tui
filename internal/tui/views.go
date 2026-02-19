@@ -10,9 +10,19 @@ import (
 // errNoToken is the common error message when the API token is not configured.
 const errNoToken = "API token not configured. Please set your token in Settings."
 
-const maxNameLen = 45
-
 const helpFilterActive = "↑/↓: Navigate  Enter: Detail  Esc: Clear filter"
+
+// listContentWidth returns the usable content width inside the border.
+func listContentWidth(listWidth, termWidth int, hasBorder bool) int {
+	w := listWidth
+	if termWidth > 0 && termWidth < w {
+		w = termWidth
+	}
+	if hasBorder {
+		w -= BorderWidthOverhead
+	}
+	return w
+}
 
 // truncateName truncates a string to maxWidth based on display width (not byte count).
 func truncateName(s string, maxWidth int) string {

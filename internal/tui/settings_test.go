@@ -14,8 +14,9 @@ func TestEditFieldConstants(t *testing.T) {
 	}{
 		{"Token", editFieldToken, 0},
 		{"Username", editFieldUsername, 1},
-		{"ThreadWidth", editFieldThreadWidth, 2},
-		{"DetailWidth", editFieldDetailWidth, 3},
+		{"ListWidth", editFieldListWidth, 2},
+		{"ThreadWidth", editFieldThreadWidth, 3},
+		{"DetailWidth", editFieldDetailWidth, 4},
 	}
 
 	for _, tt := range tests {
@@ -36,8 +37,8 @@ func TestSettingsItemCount(t *testing.T) {
 	if m.itemCount() != len(m.items) {
 		t.Errorf("itemCount() = %d, len(items) = %d", m.itemCount(), len(m.items))
 	}
-	if m.itemCount() != 13 {
-		t.Errorf("itemCount() = %d, want 13", m.itemCount())
+	if m.itemCount() != 14 {
+		t.Errorf("itemCount() = %d, want 14", m.itemCount())
 	}
 }
 
@@ -50,6 +51,7 @@ func TestBlurAllInputs(t *testing.T) {
 	// Focus all inputs
 	m.tokenInput.Focus()
 	m.usernameInput.Focus()
+	m.listWidthInput.Focus()
 	m.widthInput.Focus()
 	m.detailWidthInput.Focus()
 
@@ -60,6 +62,9 @@ func TestBlurAllInputs(t *testing.T) {
 	}
 	if m.usernameInput.Focused() {
 		t.Error("usernameInput should not be focused after blurAllInputs")
+	}
+	if m.listWidthInput.Focused() {
+		t.Error("listWidthInput should not be focused after blurAllInputs")
 	}
 	if m.widthInput.Focused() {
 		t.Error("widthInput should not be focused after blurAllInputs")
@@ -86,8 +91,8 @@ func TestSettingsNavigation(t *testing.T) {
 
 	// Can't go below itemCount-1
 	m.cursor = m.itemCount() - 1
-	if m.cursor != 12 {
-		t.Errorf("cursor at last item = %d, want 12", m.cursor)
+	if m.cursor != 13 {
+		t.Errorf("cursor at last item = %d, want 13", m.cursor)
 	}
 }
 

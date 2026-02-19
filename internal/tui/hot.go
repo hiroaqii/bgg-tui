@@ -264,6 +264,15 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 			}
 			start, end := calcListRange(m.filter.cursor, len(displayItems), listHeight, m.config.Interface.ListDensity)
 
+			// Calculate dynamic name width from ListWidth
+			hasBorder := HasBorder(m.config.Interface.BorderStyle)
+			contentWidth := listContentWidth(m.config.Display.ListWidth, width, hasBorder)
+			// overhead: prefix(2) + rank("#NNN "=5) + " (" + year(4) + ")" = 14
+			maxNameW := contentWidth - 14
+			if maxNameW < 10 {
+				maxNameW = 10
+			}
+
 			// First pass: find max name+year width for stats alignment
 			maxNameYearLen := 0
 			for i := start; i < end; i++ {
@@ -272,7 +281,7 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 				if year == "" {
 					year = "N/A"
 				}
-				w := lipgloss.Width(truncateName(game.Name, maxNameLen)) + len(year) + 3 // " (" + year + ")"
+				w := lipgloss.Width(truncateName(game.Name, maxNameW)) + len(year) + 3 // " (" + year + ")"
 				if w > maxNameYearLen {
 					maxNameYearLen = w
 				}
@@ -287,7 +296,7 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 				}
 
 				rankStr := fmt.Sprintf("#%-3d", game.Rank)
-				displayName := truncateName(game.Name, maxNameLen)
+				displayName := truncateName(game.Name, maxNameW)
 				prefix, name := renderListItem(i, m.filter.cursor, displayName, m.styles, selType, animFrame)
 				line := fmt.Sprintf("%s%s %s (%s)", prefix, m.styles.Rank.Render(rankStr), name, year)
 

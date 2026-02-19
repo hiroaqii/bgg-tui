@@ -25,6 +25,7 @@ type APIConfig struct {
 type DisplayConfig struct {
 	ShowImages        bool   `toml:"show_images"`
 	ImageProtocol     string `toml:"image_protocol"` // "auto", "kitty", "off"
+	ListWidth   int `toml:"list_width"`
 	ThreadWidth      int `toml:"thread_width"`
 	DetailWidth int `toml:"detail_width"`
 }
@@ -54,6 +55,7 @@ func DefaultConfig() *Config {
 		Display: DisplayConfig{
 			ShowImages:        true,
 			ImageProtocol:     "auto",
+			ListWidth:   90,
 			ThreadWidth:      80,
 			DetailWidth: 100,
 		},
