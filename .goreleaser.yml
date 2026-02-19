@@ -13,8 +13,20 @@ builds:
       - arm64
 
 archives:
-  - format: tar.gz
+  - formats:
+      - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+homebrew_casks:
+  - name: bgg-tui
+    binaries:
+      - bgg-tui
+    repository:
+      owner: hiroaqii
+      name: homebrew-bgg-tui
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://github.com/hiroaqii/bgg-tui"
+    description: "TUI application for BoardGameGeek"
 
 changelog:
   sort: asc
