@@ -488,7 +488,11 @@ func (m Model) renderHelpOverlay() string {
 	var b strings.Builder
 
 	// Header: App info
-	b.WriteString(lipgloss.PlaceHorizontal(overlayWidth, lipgloss.Center, titleStyle.Render("BGG TUI v"+Version)))
+	versionLabel := Version
+	if len(Version) > 0 && Version[0] >= '0' && Version[0] <= '9' {
+		versionLabel = "v" + Version
+	}
+	b.WriteString(lipgloss.PlaceHorizontal(overlayWidth, lipgloss.Center, titleStyle.Render("BGG TUI "+versionLabel)))
 	b.WriteString("\n")
 	b.WriteString(lipgloss.PlaceHorizontal(overlayWidth, lipgloss.Center, mutedStyle.Render("BoardGameGeek Terminal Client")))
 	b.WriteString("\n")

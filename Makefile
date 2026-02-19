@@ -1,4 +1,4 @@
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo "dev")
 LDFLAGS := -s -w -X github.com/hiroaqii/bgg-tui/internal/tui.Version=$(VERSION)
 
 .PHONY: build clean
