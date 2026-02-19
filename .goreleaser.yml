@@ -1,0 +1,27 @@
+version: 2
+
+builds:
+  - main: ./cmd/bgg-tui
+    binary: bgg-tui
+    ldflags:
+      - -s -w -X github.com/hiroaqii/bgg-tui/internal/tui.Version={{.Version}}
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "^style:"
