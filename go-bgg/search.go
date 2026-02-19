@@ -8,8 +8,8 @@ import (
 // SearchGames searches for board games by name.
 // Returns a list of matching games.
 func (c *Client) SearchGames(query string) ([]GameSearchResult, error) {
-	if query == "" {
-		return nil, newParseError("search query cannot be empty", nil)
+	if len(query) < 3 {
+		return nil, newParseError("search query must be at least 3 characters", nil)
 	}
 
 	endpoint := fmt.Sprintf("/search?query=%s&type=boardgame,boardgameexpansion", url.QueryEscape(query))

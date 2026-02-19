@@ -15,6 +15,8 @@ import (
 
 type searchState int
 
+const minSearchLen = 3
+
 const (
 	searchStateInput searchState = iota
 	searchStateLoading
@@ -161,7 +163,7 @@ func (m searchModel) Update(msg tea.Msg, client *bgg.Client) (searchModel, tea.C
 			switch {
 			case key.Matches(msg, m.keys.Enter):
 				query := strings.TrimSpace(m.input.Value())
-				if query != "" {
+				if len(query) >= minSearchLen {
 					m.state = searchStateLoading
 					return m, m.doSearch(client, query)
 				}
@@ -306,7 +308,7 @@ func (m searchModel) View(width, height int, selType string, animFrame int) stri
 		b.WriteString("Enter game name:\n")
 		b.WriteString(m.input.View())
 		b.WriteString("\n\n")
-		b.WriteString(m.styles.Help.Render("Enter: Search  Esc: Menu"))
+		b.WriteString(m.styles.Help.Render("Enter: Search (3+ chars)  Esc: Menu"))
 
 	case searchStateLoading:
 		writeLoadingView(&b, m.styles, "Search Games", "Searching...")
