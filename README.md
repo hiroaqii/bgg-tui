@@ -39,6 +39,11 @@ brew tap hiroaqii/bgg-tui
 brew install bgg-tui
 ```
 
+> **Note:** macOS may block the first launch because the binary is not notarized by Apple. To allow it, run:
+> ```bash
+> xattr -d com.apple.quarantine $(which bgg-tui)
+> ```
+
 ### go install
 
 ```bash
