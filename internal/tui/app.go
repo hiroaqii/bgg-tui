@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	bgg "github.com/hiroaqii/go-bgg"
 
@@ -476,52 +477,68 @@ func (m Model) View() string {
 	return prefix + content
 }
 
-// renderHelpOverlay renders a centered keybindings overlay.
+// renderHelpOverlay renders a centered help overlay with app info, status, pages, and keybindings.
 func (m Model) renderHelpOverlay() string {
-	groups := m.keys.FullHelp()
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorPrimary)
+	mutedStyle := lipgloss.NewStyle().Foreground(ColorMuted)
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorPrimary)
 
-	// Build two-column rows: groups[0]+groups[1], groups[2]+groups[3]
-	var rows []string
-	for i := 0; i < len(groups); i += 2 {
-		left := groups[i]
-		var right []key.Binding
-		if i+1 < len(groups) {
-			right = groups[i+1]
-		}
-
-		maxLen := len(left)
-		if len(right) > maxLen {
-			maxLen = len(right)
-		}
-
-		for j := 0; j < maxLen; j++ {
-			var lKey, lDesc, rKey, rDesc string
-			if j < len(left) {
-				lKey = left[j].Help().Key
-				lDesc = left[j].Help().Desc
-			}
-			if j < len(right) {
-				rKey = right[j].Help().Key
-				rDesc = right[j].Help().Desc
-			}
-			row := fmt.Sprintf("  %-10s %-14s %-10s %s", lKey, lDesc, rKey, rDesc)
-			rows = append(rows, row)
-		}
-		rows = append(rows, "")
-	}
-
-	title := lipgloss.NewStyle().Bold(true).Foreground(ColorPrimary).Render("Keybindings")
-	footer := lipgloss.NewStyle().Foreground(ColorMuted).Render("Press any key to close")
+	const overlayWidth = 48
 
 	var b strings.Builder
-	b.WriteString(lipgloss.PlaceHorizontal(40, lipgloss.Center, title))
+
+	// Header: App info
+	b.WriteString(lipgloss.PlaceHorizontal(overlayWidth, lipgloss.Center, titleStyle.Render("BGG TUI v"+Version)))
 	b.WriteString("\n")
-	for _, row := range rows {
-		b.WriteString(row)
+	b.WriteString(lipgloss.PlaceHorizontal(overlayWidth, lipgloss.Center, mutedStyle.Render("BoardGameGeek Terminal Client")))
+	b.WriteString("\n")
+	repoURL := "https://github.com/hiroaqii/bgg-tui"
+	repoLabel := mutedStyle.Underline(true).Render("github.com/hiroaqii/bgg-tui")
+	b.WriteString(lipgloss.PlaceHorizontal(overlayWidth, lipgloss.Center, termenv.Hyperlink(repoURL, repoLabel)))
+	b.WriteString("\n\n")
+
+	// Status: User / Token
+	username := m.config.Collection.DefaultUsername
+	if username == "" {
+		username = "-"
+	}
+	tokenStatus := "\u2717" // ✗
+	if m.config.HasToken() {
+		tokenStatus = "\u2713" // ✓
+	}
+	b.WriteString(fmt.Sprintf("  User: %-20s Token: %s", username, tokenStatus))
+	b.WriteString("\n\n")
+
+	// Pages section
+	b.WriteString("  " + sectionStyle.Render("Pages"))
+	b.WriteString("\n")
+	pages := []struct{ key, desc string }{
+		{"1/s", "Search board games by name"},
+		{"2", "Trending games on BGG"},
+		{"3", "Browse a user's game collection"},
+		{"4", "Configure app preferences"},
+	}
+	pageNames := []string{"Search", "Hot", "Collection", "Settings"}
+	for i, p := range pages {
+		b.WriteString(fmt.Sprintf("  %-14s %s", fmt.Sprintf("%s (%s)", pageNames[i], p.key), p.desc))
 		b.WriteString("\n")
 	}
-	b.WriteString(lipgloss.PlaceHorizontal(40, lipgloss.Center, footer))
+	b.WriteString("\n")
 
-	content := m.styles.Border.Render(b.String())
+	// Footer
+	b.WriteString(lipgloss.PlaceHorizontal(overlayWidth, lipgloss.Center, mutedStyle.Render("Press any key to close")))
+
+	var content string
+	if border, ok := borderForStyle(m.config.Interface.BorderStyle); ok {
+		content = lipgloss.NewStyle().
+			Border(border).
+			BorderForeground(ColorMuted).
+			Padding(1, 3).
+			Render(b.String())
+	} else {
+		content = lipgloss.NewStyle().
+			Padding(1, 3).
+			Render(b.String())
+	}
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
