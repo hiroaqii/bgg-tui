@@ -544,5 +544,5 @@ func (m Model) renderHelpOverlay() string {
 			Padding(1, 3).
 			Render(b.String())
 	}
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	return centerContent(content, m.width, m.height)
 }
