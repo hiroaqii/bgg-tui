@@ -24,6 +24,19 @@ func listContentWidth(listWidth, termWidth int, hasBorder bool) int {
 	return w
 }
 
+// minNameWidth is the minimum truncation width for list item names.
+const minNameWidth = 10
+
+// calcMaxNameWidth calculates the maximum name/title width for truncation
+// by subtracting per-item overhead from the content width.
+func calcMaxNameWidth(contentWidth, overhead int) int {
+	w := contentWidth - overhead
+	if w < minNameWidth {
+		w = minNameWidth
+	}
+	return w
+}
+
 // truncateName truncates a string to maxWidth based on display width (not byte count).
 func truncateName(s string, maxWidth int) string {
 	if lipgloss.Width(s) <= maxWidth {

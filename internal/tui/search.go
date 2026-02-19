@@ -338,13 +338,10 @@ func (m searchModel) View(width, height int, selType string, animFrame int) stri
 			start, end := calcListRange(m.filter.cursor, len(displayItems), listHeight, m.config.Interface.ListDensity)
 
 			// Calculate dynamic name width from ListWidth
+			// overhead: prefix(2) + " (" + year(4) + ")" + " [Expansion]"(12) = 21
 			hasBorder := HasBorder(m.config.Interface.BorderStyle)
 			contentWidth := listContentWidth(m.config.Display.ListWidth, width, hasBorder)
-			// overhead: prefix(2) + " (" + year(4) + ")" + " [Expansion]"(12) = 21
-			maxNameW := contentWidth - 21
-			if maxNameW < 10 {
-				maxNameW = 10
-			}
+			maxNameW := calcMaxNameWidth(contentWidth, 21)
 
 			for i := start; i < end; i++ {
 				result := displayItems[i]

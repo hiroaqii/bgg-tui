@@ -52,7 +52,7 @@ func TestBlurAllInputs(t *testing.T) {
 	m.tokenInput.Focus()
 	m.usernameInput.Focus()
 	m.listWidthInput.Focus()
-	m.widthInput.Focus()
+	m.threadWidthInput.Focus()
 	m.detailWidthInput.Focus()
 
 	m.blurAllInputs()
@@ -66,7 +66,7 @@ func TestBlurAllInputs(t *testing.T) {
 	if m.listWidthInput.Focused() {
 		t.Error("listWidthInput should not be focused after blurAllInputs")
 	}
-	if m.widthInput.Focused() {
+	if m.threadWidthInput.Focused() {
 		t.Error("widthInput should not be focused after blurAllInputs")
 	}
 	if m.detailWidthInput.Focused() {

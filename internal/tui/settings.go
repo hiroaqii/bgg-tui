@@ -53,7 +53,7 @@ type settingsModel struct {
 	tokenInput        textinput.Model
 	usernameInput     textinput.Model
 	listWidthInput    textinput.Model
-	widthInput        textinput.Model
+	threadWidthInput  textinput.Model
 	detailWidthInput    textinput.Model
 	wantsBack         bool
 	wantsMenu         bool
@@ -67,7 +67,7 @@ func (m *settingsModel) blurAllInputs() {
 	m.tokenInput.Blur()
 	m.usernameInput.Blur()
 	m.listWidthInput.Blur()
-	m.widthInput.Blur()
+	m.threadWidthInput.Blur()
 	m.detailWidthInput.Blur()
 }
 
@@ -104,7 +104,7 @@ func newSettingsModel(cfg *config.Config, styles Styles, keys KeyMap) settingsMo
 		tokenInput:     ti,
 		usernameInput:  ui,
 		listWidthInput: lwi,
-		widthInput:     wi,
+		threadWidthInput: wi,
 		detailWidthInput: dwi,
 	}
 	m.items = m.buildItems()
@@ -253,7 +253,7 @@ func (m *settingsModel) textInputForField(field editField) *textinput.Model {
 	case editFieldListWidth:
 		return &m.listWidthInput
 	case editFieldThreadWidth:
-		return &m.widthInput
+		return &m.threadWidthInput
 	case editFieldDetailWidth:
 		return &m.detailWidthInput
 	}
@@ -275,7 +275,7 @@ func (m *settingsModel) saveEditField() {
 			m.config.Display.ListWidth = v
 		}
 	case editFieldThreadWidth:
-		if v, err := strconv.Atoi(strings.TrimSpace(m.widthInput.Value())); err == nil && v >= 20 && v <= 200 {
+		if v, err := strconv.Atoi(strings.TrimSpace(m.threadWidthInput.Value())); err == nil && v >= 20 && v <= 200 {
 			m.config.Display.ThreadWidth = v
 		}
 	case editFieldDetailWidth:

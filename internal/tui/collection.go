@@ -264,13 +264,10 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 			start, end := calcListRange(m.filter.cursor, len(displayItems), listHeight, m.config.Interface.ListDensity)
 
 			// Calculate dynamic name width from ListWidth
+			// overhead: prefix(2) + " (" + year(4) + ")" = 9
 			hasBorder := HasBorder(m.config.Interface.BorderStyle)
 			contentWidth := listContentWidth(m.config.Display.ListWidth, width, hasBorder)
-			// overhead: prefix(2) + " (" + year(4) + ")" = 9
-			maxNameW := contentWidth - 9
-			if maxNameW < 10 {
-				maxNameW = 10
-			}
+			maxNameW := calcMaxNameWidth(contentWidth, 9)
 
 			// First pass: find max name+year width for stats alignment
 			maxNameYearLen := 0
