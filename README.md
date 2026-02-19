@@ -10,8 +10,8 @@ A terminal user interface for [BoardGameGeek](https://boardgamegeek.com/).
 
 ## Features
 
-- 🔍 Search games by name
 - 🔥 Browse trending (Hot) games with ratings, weight, and rank
+- 🔍 Search games by name
 - 📚 View user collections with ratings
 - 📋 Game details: year, rating, geek rating, rank, players, play time, weight, age, owned, comments, designers, artists, categories, mechanics, description
 - 💬 Browse game forums and read threads

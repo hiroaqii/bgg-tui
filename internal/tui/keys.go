@@ -57,12 +57,12 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("?", "help"),
 		),
 		Search: key.NewBinding(
-			key.WithKeys("1", "s"),
-			key.WithHelp("1/s", "search"),
+			key.WithKeys("2", "s"),
+			key.WithHelp("2/s", "search"),
 		),
 		Hot: key.NewBinding(
-			key.WithKeys("2"),
-			key.WithHelp("2", "hot"),
+			key.WithKeys("1"),
+			key.WithHelp("1", "hot"),
 		),
 		Collect: key.NewBinding(
 			key.WithKeys("3"),

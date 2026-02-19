@@ -513,12 +513,12 @@ func (m Model) renderHelpOverlay() string {
 	b.WriteString("  " + sectionStyle.Render("Pages"))
 	b.WriteString("\n")
 	pages := []struct{ key, desc string }{
-		{"1/s", "Search board games by name"},
-		{"2", "Trending games on BGG"},
+		{"1", "Trending games on BGG"},
+		{"2/s", "Search board games by name"},
 		{"3", "Browse a user's game collection"},
 		{"4", "Configure app preferences"},
 	}
-	pageNames := []string{"Search", "Hot", "Collection", "Settings"}
+	pageNames := []string{"Hot", "Search", "Collection", "Settings"}
 	for i, p := range pages {
 		b.WriteString(fmt.Sprintf("  %-14s %s", fmt.Sprintf("%s (%s)", pageNames[i], p.key), p.desc))
 		b.WriteString("\n")
