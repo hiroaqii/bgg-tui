@@ -307,30 +307,3 @@ func TestGetGames_TooMany(t *testing.T) {
 		t.Errorf("expected ParseError, got %T", err)
 	}
 }
-
-func TestDecodeDescription(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{
-			input:    "Hello &amp; World",
-			expected: "Hello & World",
-		},
-		{
-			input:    "Line1&#10;Line2",
-			expected: "Line1\nLine2",
-		},
-		{
-			input:    "&lt;tag&gt;",
-			expected: "<tag>",
-		},
-	}
-
-	for _, tt := range tests {
-		result := decodeDescription(tt.input)
-		if result != tt.expected {
-			t.Errorf("decodeDescription(%q) = %q, want %q", tt.input, result, tt.expected)
-		}
-	}
-}

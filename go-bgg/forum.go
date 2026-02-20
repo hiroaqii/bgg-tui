@@ -2,7 +2,6 @@ package bgg
 
 import (
 	"fmt"
-	"html"
 )
 
 // GetForums retrieves the list of forums for a game.
@@ -125,7 +124,7 @@ func (c *Client) GetThread(threadID int) (*Thread, error) {
 			ID:       a.ID,
 			Username: a.Username,
 			PostDate: a.PostDate,
-			Body:     html.UnescapeString(a.Body),
+			Body:     decodeHTML(a.Body),
 		})
 	}
 

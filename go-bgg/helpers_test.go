@@ -47,6 +47,44 @@ func TestExtractBoardGameRank(t *testing.T) {
 	}
 }
 
+func TestDecodeHTML(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "HTML entities",
+			input: "Hello &amp; World",
+			want:  "Hello & World",
+		},
+		{
+			name:  "numeric entity &#10; to newline",
+			input: "Line1&#10;Line2",
+			want:  "Line1\nLine2",
+		},
+		{
+			name:  "angle bracket entities",
+			input: "&lt;tag&gt;",
+			want:  "<tag>",
+		},
+		{
+			name:  "no entities",
+			input: "plain text",
+			want:  "plain text",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := decodeHTML(tt.input)
+			if got != tt.want {
+				t.Errorf("decodeHTML(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseXML(t *testing.T) {
 	type simple struct {
 		Name string `xml:"name"`

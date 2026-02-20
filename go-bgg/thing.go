@@ -2,7 +2,6 @@ package bgg
 
 import (
 	"fmt"
-	"html"
 	"strconv"
 	"strings"
 )
@@ -83,7 +82,7 @@ func convertXMLToGame(item xmlThingItem) Game {
 	game := Game{
 		ID:          item.ID,
 		Year:        item.YearValue.Value,
-		Description: decodeDescription(item.Description),
+		Description: decodeHTML(item.Description),
 		Thumbnail:   item.Thumbnail,
 		Image:       item.Image,
 		MinPlayers:  item.MinPlayers.Value,
@@ -172,13 +171,4 @@ func convertXMLToGame(item xmlThingItem) Game {
 	}
 
 	return game
-}
-
-// decodeDescription decodes HTML entities and cleans up the description.
-func decodeDescription(desc string) string {
-	// Decode HTML entities
-	decoded := html.UnescapeString(desc)
-	// Replace &#10; with newlines
-	decoded = strings.ReplaceAll(decoded, "&#10;", "\n")
-	return decoded
 }
