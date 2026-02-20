@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	bgg "github.com/hiroaqii/go-bgg"
 
@@ -273,7 +274,7 @@ func (m forumModel) View(width, height int, selType string, animFrame int) strin
 					formatDate(thread.LastPostDate, m.config.Interface.DateFormat),
 					thread.Author,
 					thread.NumArticles-1)
-				b.WriteString(m.styles.Subtitle.Render(meta))
+				b.WriteString(lipgloss.NewStyle().Foreground(ColorDim).Render(meta))
 				b.WriteString("\n")
 			}
 		}
