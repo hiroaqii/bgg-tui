@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -143,6 +144,40 @@ func renderImagePanel(b *strings.Builder, imageEnabled bool, placeholder, transm
 	b.Reset()
 	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listContent, "  ", imgPanel))
 	return tx
+}
+
+// statEntry describes a single numeric stat to render (e.g. "★7.14").
+type statEntry struct {
+	symbol string         // "★", "♥", "⚖"
+	value  float64        // 0 = not available
+	format string         // "%.2f" or "%5.2f"
+	style  lipgloss.Style //
+	width  int            // 0 = variable width (skip when 0), >0 = fixed width (pad when 0)
+}
+
+// renderStats formats a slice of stat entries into a space-separated string.
+// Entries with value > 0 are rendered with their symbol and format.
+// Entries with value == 0 and width > 0 are rendered as blank padding.
+// Entries with value == 0 and width == 0 are skipped entirely.
+func renderStats(entries []statEntry) string {
+	var parts []string
+	for _, e := range entries {
+		if e.value > 0 {
+			parts = append(parts, e.style.Render(fmt.Sprintf(e.symbol+e.format, e.value)))
+		} else if e.width > 0 {
+			parts = append(parts, strings.Repeat(" ", e.width))
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// renderIntStat formats an integer stat with the given format and style.
+// Returns an empty string if value is 0.
+func renderIntStat(value int, format string, style lipgloss.Style) string {
+	if value > 0 {
+		return style.Render(fmt.Sprintf(format, value))
+	}
+	return ""
 }
 
 // renderListItem returns the cursor prefix and styled text for a list item.

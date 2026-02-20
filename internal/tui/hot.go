@@ -292,20 +292,20 @@ func (m hotModel) View(width, height int, selType string, animFrame int) string 
 
 				// Append stats if available, aligned to a fixed column
 				if s, ok := m.stats[game.ID]; ok {
-					var parts []string
-					if s.Rating > 0 {
-						parts = append(parts, m.styles.Rank.Render(fmt.Sprintf("★%.2f", s.Rating)))
+					stats := renderStats([]statEntry{
+						{"★", s.Rating, "%.2f", m.styles.Rank, 0},
+						{"⚖", s.Weight, "%.2f", m.styles.Players, 0},
+					})
+					if rs := renderIntStat(s.Rank, "#%d", m.styles.Subtitle); rs != "" {
+						if stats != "" {
+							stats += " "
+						}
+						stats += rs
 					}
-					if s.Weight > 0 {
-						parts = append(parts, m.styles.Players.Render(fmt.Sprintf("⚖%.2f", s.Weight)))
-					}
-					if s.Rank > 0 {
-						parts = append(parts, m.styles.Subtitle.Render(fmt.Sprintf("#%d", s.Rank)))
-					}
-					if len(parts) > 0 {
+					if stats != "" {
 						nameYearLen := lipgloss.Width(displayName) + len(year) + 3
 						padding := maxNameYearLen - nameYearLen + 2
-						line += strings.Repeat(" ", padding) + strings.Join(parts, " ")
+						line += strings.Repeat(" ", padding) + stats
 					}
 				}
 

@@ -292,21 +292,12 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 					nameYearLen := lipgloss.Width(displayName) + len(year) + 3
 					padding := maxNameYearLen - nameYearLen + 2
 					line += strings.Repeat(" ", padding)
-
-					const statCol = 6 // "♥ 7.30" = symbol(1) + %5.2f(5) = 6 chars
-					if item.Rating > 0 {
-						line += m.styles.Rating.Render(fmt.Sprintf("♥%5.2f", item.Rating))
-					} else {
-						line += strings.Repeat(" ", statCol)
-					}
-					line += " "
-					if item.BGGRating > 0 {
-						line += m.styles.Rank.Render(fmt.Sprintf("★%5.2f", item.BGGRating))
-					} else {
-						line += strings.Repeat(" ", statCol)
-					}
-					if item.Rank > 0 {
-						line += " " + m.styles.Players.Render(fmt.Sprintf("#%d", item.Rank))
+					line += renderStats([]statEntry{
+						{"♥", item.Rating, "%5.2f", m.styles.Rating, 6},
+						{"★", item.BGGRating, "%5.2f", m.styles.Rank, 6},
+					})
+					if rs := renderIntStat(item.Rank, " #%d", m.styles.Players); rs != "" {
+						line += rs
 					}
 				}
 
