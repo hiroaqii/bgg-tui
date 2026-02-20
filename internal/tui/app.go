@@ -536,7 +536,7 @@ func (m Model) renderHelpOverlay() string {
 	if border, ok := borderForStyle(m.config.Interface.BorderStyle); ok {
 		content = lipgloss.NewStyle().
 			Border(border).
-			BorderForeground(ColorMuted).
+			BorderForeground(ColorDim).
 			Padding(1, 3).
 			Render(b.String())
 	} else {

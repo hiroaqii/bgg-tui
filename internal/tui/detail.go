@@ -134,7 +134,7 @@ func (m *detailModel) buildContentLines() {
 			ratingStr += fmt.Sprintf(" median %.2f", game.Median)
 		}
 	}
-	lines = append(lines, labelLine("Rating", m.styles.Rating.Render(ratingStr)))
+	lines = append(lines, labelLine("Rating", ratingStr))
 
 	// Geek Rating (Bayes Average)
 	if game.BayesAverage > 0 {
@@ -147,7 +147,7 @@ func (m *detailModel) buildContentLines() {
 	if game.Rank > 0 {
 		rankStr = fmt.Sprintf("#%d", game.Rank)
 	}
-	lines = append(lines, labelLine("Rank", m.styles.Rank.Render(rankStr)))
+	lines = append(lines, labelLine("Rank", rankStr))
 
 	// Players
 	playersStr := fmt.Sprintf("%d-%d", game.MinPlayers, game.MaxPlayers)
@@ -157,7 +157,7 @@ func (m *detailModel) buildContentLines() {
 	if game.PlayerCountPoll != nil && game.PlayerCountPoll.RecWith != "" {
 		playersStr += fmt.Sprintf("  (%s)", game.PlayerCountPoll.RecWith)
 	}
-	lines = append(lines, labelLine("Players", m.styles.Players.Render(playersStr)))
+	lines = append(lines, labelLine("Players", playersStr))
 
 	// Player count poll bar chart
 	if game.PlayerCountPoll != nil && len(game.PlayerCountPoll.Results) > 0 {
@@ -169,7 +169,7 @@ func (m *detailModel) buildContentLines() {
 	if game.MinPlayTime != game.MaxPlayTime {
 		timeStr = fmt.Sprintf("%d-%d min", game.MinPlayTime, game.MaxPlayTime)
 	}
-	lines = append(lines, labelLine("Time", m.styles.Time.Render(timeStr)))
+	lines = append(lines, labelLine("Time", timeStr))
 
 	// Weight (with complexity label)
 	weightStr := "N/A"
@@ -565,29 +565,42 @@ func renderPlayerCountPoll(poll *bgg.PlayerCountPoll) []string {
 	}
 
 	// Build table lines
+	tableStyle := lipgloss.NewStyle().Foreground(ColorSecondary)
 	var lines []string
 
 	// Top border
 	top := fmt.Sprintf("  ┌%s┬%s┬%s┬%s┐",
 		strings.Repeat("─", npW+2), strings.Repeat("─", bW+2),
 		strings.Repeat("─", rW+2), strings.Repeat("─", nrW+2))
-	lines = append(lines, top)
+	lines = append(lines, tableStyle.Render(top))
 
 	// Header
 	header := fmt.Sprintf("  │ %*s │ %*s │ %*s │ %*s │",
 		npW, "", bW, "Best", rW, "Rec", nrW, "Not Rec")
-	lines = append(lines, header)
+	lines = append(lines, tableStyle.Render(header))
 
 	// Separator
 	sep := fmt.Sprintf("  ├%s┼%s┼%s┼%s┤",
 		strings.Repeat("─", npW+2), strings.Repeat("─", bW+2),
 		strings.Repeat("─", rW+2), strings.Repeat("─", nrW+2))
-	lines = append(lines, sep)
+	lines = append(lines, tableStyle.Render(sep))
 
 	// Data rows
+	bestIconStyle := lipgloss.NewStyle().Foreground(ColorPrimary)
+	notRecIconStyle := lipgloss.NewStyle().Foreground(ColorMuted)
 	for _, rd := range rows {
-		line := fmt.Sprintf("  │ %*s │ %*s │ %*s │ %*s │ %s",
-			npW, rd.numPlayers, bW, rd.bestStr, rW, rd.recStr, nrW, rd.notRecStr, rd.icon)
+		var styledIcon string
+		switch rd.icon {
+		case "★ Best":
+			styledIcon = bestIconStyle.Render("★ Best")
+		case "★":
+			styledIcon = tableStyle.Render("★")
+		default:
+			styledIcon = notRecIconStyle.Render("✗")
+		}
+		row := fmt.Sprintf("  │ %*s │ %*s │ %*s │ %*s │",
+			npW, rd.numPlayers, bW, rd.bestStr, rW, rd.recStr, nrW, rd.notRecStr)
+		line := tableStyle.Render(row) + " " + styledIcon
 		lines = append(lines, line)
 	}
 
@@ -595,7 +608,7 @@ func renderPlayerCountPoll(poll *bgg.PlayerCountPoll) []string {
 	bottom := fmt.Sprintf("  └%s┴%s┴%s┴%s┘",
 		strings.Repeat("─", npW+2), strings.Repeat("─", bW+2),
 		strings.Repeat("─", rW+2), strings.Repeat("─", nrW+2))
-	lines = append(lines, bottom)
+	lines = append(lines, tableStyle.Render(bottom))
 
 	return lines
 }

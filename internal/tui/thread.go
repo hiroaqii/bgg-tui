@@ -249,7 +249,7 @@ func (m threadModel) renderArticles() []string {
 		// Add separator between articles
 		if i < len(m.thread.Articles)-1 {
 			separator := strings.Repeat("─", threadWidth)
-			sepStyle := lipgloss.NewStyle().Foreground(ColorMuted)
+			sepStyle := lipgloss.NewStyle().Foreground(ColorDim)
 			lines = append(lines, "")
 			lines = append(lines, sepStyle.Render(separator))
 			lines = append(lines, "")

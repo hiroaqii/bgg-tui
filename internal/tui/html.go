@@ -280,7 +280,7 @@ func (c *htmlConverter) handleText(tokenizer *xhtml.Tokenizer) {
 var urlRegex = regexp.MustCompile(`https?://[^\s)]+`)
 
 func linkifyLines(lines []string) []string {
-	linkStyle := lipgloss.NewStyle().Foreground(ColorAccent).Underline(true)
+	linkStyle := lipgloss.NewStyle().Foreground(ColorLink).Underline(true)
 	result := make([]string, len(lines))
 	for i, line := range lines {
 		result[i] = urlRegex.ReplaceAllStringFunc(line, func(rawURL string) string {

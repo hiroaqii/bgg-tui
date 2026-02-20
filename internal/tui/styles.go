@@ -9,51 +9,61 @@ import (
 
 // ThemePalette defines the color palette for a theme.
 type ThemePalette struct {
-	Primary    lipgloss.Color
-	Secondary  lipgloss.Color
-	Accent     lipgloss.Color
-	Error      lipgloss.Color
-	Muted      lipgloss.Color
-	Border     lipgloss.Color
-	Foreground lipgloss.Color
+	Primary   lipgloss.Color
+	Secondary lipgloss.Color
+	Accent    lipgloss.Color
+	Error     lipgloss.Color
+	Muted     lipgloss.Color
+	Dim       lipgloss.Color
+	Border    lipgloss.Color
+	Link      lipgloss.Color
+	Success   lipgloss.Color
 }
 
 var themes = map[string]ThemePalette{
 	"default": {
-		Primary:    lipgloss.Color("#CBA6F7"),
-		Secondary:  lipgloss.Color("#89B4FA"),
-		Accent:     lipgloss.Color("#FAB387"),
-		Error:      lipgloss.Color("#F38BA8"),
-		Muted:      lipgloss.Color("#6C7086"),
-		Border:     lipgloss.Color("#313244"),
-		Foreground: lipgloss.Color("#CDD6F4"),
+		Primary:   lipgloss.Color("#CBA6F7"),
+		Secondary: lipgloss.Color("#89B4FA"),
+		Accent:    lipgloss.Color("#FAB387"),
+		Error:     lipgloss.Color("#F38BA8"),
+		Muted:     lipgloss.Color("#6C7086"),
+		Dim:       lipgloss.Color("#585B70"),
+		Border:    lipgloss.Color("#313244"),
+		Link:      lipgloss.Color("#74C7EC"),
+		Success:   lipgloss.Color("#A6E3A1"),
 	},
 	"blue": {
-		Primary:    lipgloss.Color("#88C0D0"),
-		Secondary:  lipgloss.Color("#8FBCBB"),
-		Accent:     lipgloss.Color("#81A1C1"),
-		Error:      lipgloss.Color("#BF616A"),
-		Muted:      lipgloss.Color("#5E81AC"),
-		Border:     lipgloss.Color("#3B4252"),
-		Foreground: lipgloss.Color("#D8DEE9"),
+		Primary:   lipgloss.Color("#88C0D0"),
+		Secondary: lipgloss.Color("#8FBCBB"),
+		Accent:    lipgloss.Color("#81A1C1"),
+		Error:     lipgloss.Color("#BF616A"),
+		Muted:     lipgloss.Color("#5E81AC"),
+		Dim:       lipgloss.Color("#4C566A"),
+		Border:    lipgloss.Color("#3B4252"),
+		Link:      lipgloss.Color("#88C0D0"),
+		Success:   lipgloss.Color("#A3BE8C"),
 	},
 	"orange": {
-		Primary:    lipgloss.Color("#E0944A"),
-		Secondary:  lipgloss.Color("#D4A84B"),
-		Accent:     lipgloss.Color("#CC8B5E"),
-		Error:      lipgloss.Color("#C96B6B"),
-		Muted:      lipgloss.Color("#8C7A65"),
-		Border:     lipgloss.Color("#4A3D32"),
-		Foreground: lipgloss.Color("#E8DDD0"),
+		Primary:   lipgloss.Color("#E0944A"),
+		Secondary: lipgloss.Color("#D4A84B"),
+		Accent:    lipgloss.Color("#CC8B5E"),
+		Error:     lipgloss.Color("#C96B6B"),
+		Muted:     lipgloss.Color("#8C7A65"),
+		Dim:       lipgloss.Color("#6B5A48"),
+		Border:    lipgloss.Color("#4A3D32"),
+		Link:      lipgloss.Color("#7EB8C9"),
+		Success:   lipgloss.Color("#8BAD72"),
 	},
 	"green": {
-		Primary:    lipgloss.Color("#33FF33"),
-		Secondary:  lipgloss.Color("#20C020"),
-		Accent:     lipgloss.Color("#66FF66"),
-		Error:      lipgloss.Color("#FF4444"),
-		Muted:      lipgloss.Color("#2E8B2E"),
-		Border:     lipgloss.Color("#1A3A1A"),
-		Foreground: lipgloss.Color("#B8FFB8"),
+		Primary:   lipgloss.Color("#33FF33"),
+		Secondary: lipgloss.Color("#20C020"),
+		Accent:    lipgloss.Color("#66FF66"),
+		Error:     lipgloss.Color("#FF4444"),
+		Muted:     lipgloss.Color("#2E8B2E"),
+		Dim:       lipgloss.Color("#336633"),
+		Border:    lipgloss.Color("#1A3A1A"),
+		Link:      lipgloss.Color("#44AAFF"),
+		Success:   lipgloss.Color("#44FF88"),
 	},
 }
 
@@ -67,7 +77,10 @@ var (
 	ColorAccent    = lipgloss.Color("#F59E0B")
 	ColorError     = lipgloss.Color("#EF4444")
 	ColorMuted     = lipgloss.Color("#6B7280")
+	ColorDim       = lipgloss.Color("#5A6370")
 	ColorBorder    = lipgloss.Color("#374151")
+	ColorLink      = lipgloss.Color("#3B82F6")
+	ColorSuccess   = lipgloss.Color("#22C55E")
 )
 
 // ApplyTheme updates the package-level color variables based on the theme.
@@ -81,7 +94,10 @@ func ApplyTheme(theme string) {
 	ColorAccent = palette.Accent
 	ColorError = palette.Error
 	ColorMuted = palette.Muted
+	ColorDim = palette.Dim
 	ColorBorder = palette.Border
+	ColorLink = palette.Link
+	ColorSuccess = palette.Success
 }
 
 // Styles contains all the styles used in the application.
@@ -151,16 +167,16 @@ func NewStyles(theme string) Styles {
 			Padding(1, 3),
 
 		Rating: lipgloss.NewStyle().
-			Foreground(ColorAccent),
+			Foreground(ColorSecondary),
 
 		Rank: lipgloss.NewStyle().
 			Foreground(ColorSecondary),
 
 		Players: lipgloss.NewStyle().
-			Foreground(ColorPrimary),
+			Foreground(ColorSecondary),
 
 		Time: lipgloss.NewStyle().
-			Foreground(ColorMuted),
+			Foreground(ColorSecondary),
 
 		Label: lipgloss.NewStyle().
 			Foreground(ColorMuted).
@@ -195,7 +211,7 @@ func renderView(content string, styles Styles, width, height int, borderStyle st
 	if border, ok := borderForStyle(borderStyle); ok {
 		content = lipgloss.NewStyle().
 			Border(border).
-			BorderForeground(ColorMuted).
+			BorderForeground(ColorDim).
 			Padding(1, 3).
 			Render(content)
 	}
