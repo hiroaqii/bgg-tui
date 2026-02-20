@@ -4,6 +4,49 @@ import (
 	"testing"
 )
 
+func TestExtractBoardGameRank(t *testing.T) {
+	tests := []struct {
+		name  string
+		ranks []xmlRank
+		want  int
+	}{
+		{
+			name:  "ranked game",
+			ranks: []xmlRank{{Name: "boardgame", Value: "42"}},
+			want:  42,
+		},
+		{
+			name:  "not ranked",
+			ranks: []xmlRank{{Name: "boardgame", Value: "Not Ranked"}},
+			want:  0,
+		},
+		{
+			name:  "no boardgame rank",
+			ranks: []xmlRank{{Name: "strategygames", Value: "10"}},
+			want:  0,
+		},
+		{
+			name:  "empty ranks",
+			ranks: nil,
+			want:  0,
+		},
+		{
+			name:  "boardgame rank among others",
+			ranks: []xmlRank{{Name: "strategygames", Value: "5"}, {Name: "boardgame", Value: "100"}},
+			want:  100,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractBoardGameRank(tt.ranks)
+			if got != tt.want {
+				t.Errorf("extractBoardGameRank() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseXML(t *testing.T) {
 	type simple struct {
 		Name string `xml:"name"`

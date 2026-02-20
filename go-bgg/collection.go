@@ -75,16 +75,7 @@ func convertXMLToCollectionItem(item xmlCollectionItem) CollectionItem {
 	ci.BayesAverage = item.Stats.Rating.BayesAverage.Value
 
 	// Extract rank (board game rank)
-	for _, rank := range item.Stats.Rating.Ranks.Ranks {
-		if rank.Name == "boardgame" {
-			if rank.Value != "Not Ranked" {
-				if r, err := strconv.Atoi(rank.Value); err == nil {
-					ci.Rank = r
-				}
-			}
-			break
-		}
-	}
+	ci.Rank = extractBoardGameRank(item.Stats.Rating.Ranks.Ranks)
 
 	return ci
 }

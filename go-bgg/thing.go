@@ -130,16 +130,7 @@ func convertXMLToGame(item xmlThingItem) Game {
 	game.NumWeights = item.Statistics.Ratings.NumWeights.Value
 
 	// Extract rank (board game rank)
-	for _, rank := range item.Statistics.Ratings.Ranks.Ranks {
-		if rank.Name == "boardgame" {
-			if rank.Value != "Not Ranked" {
-				if r, err := strconv.Atoi(rank.Value); err == nil {
-					game.Rank = r
-				}
-			}
-			break
-		}
-	}
+	game.Rank = extractBoardGameRank(item.Statistics.Ratings.Ranks.Ranks)
 
 	// Extract suggested_numplayers poll
 	for _, poll := range item.Polls {
