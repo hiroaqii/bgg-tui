@@ -176,22 +176,15 @@ func (m hotModel) Update(msg tea.Msg, client *bgg.Client) (hotModel, tea.Cmd) {
 		case tea.KeyMsg:
 			switch {
 			case key.Matches(msg, m.keys.Up):
-				if m.filter.cursor > 0 {
-					m.filter.cursor--
-				}
+				m.filter.moveCursorUp()
 				m, cmd := m.maybeLoadThumb()
 				return m, cmd
 			case key.Matches(msg, m.keys.Down):
-				if m.filter.cursor < len(m.filter.items)-1 {
-					m.filter.cursor++
-				}
+				m.filter.moveCursorDown()
 				m, cmd := m.maybeLoadThumb()
 				return m, cmd
 			case key.Matches(msg, m.keys.Enter):
-				if len(m.filter.items) > 0 {
-					id := m.filter.items[m.filter.cursor].ID
-					m.selected = &id
-				}
+				m.selected = m.filter.selectedID()
 			case key.Matches(msg, m.keys.Filter):
 				filterCmd := m.filter.startFilter()
 				m, thumbCmd := m.maybeLoadThumb()

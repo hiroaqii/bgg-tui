@@ -65,6 +65,21 @@ func (f *filterState[T]) selectedID() *int {
 	return nil
 }
 
+// moveCursorUp moves the cursor one position up, clamping at 0.
+func (f *filterState[T]) moveCursorUp() {
+	if f.cursor > 0 {
+		f.cursor--
+	}
+}
+
+// moveCursorDown moves the cursor one position down, clamping at the last item.
+func (f *filterState[T]) moveCursorDown() {
+	items := f.displayItems()
+	if f.cursor < len(items)-1 {
+		f.cursor++
+	}
+}
+
 // updateFilter handles key input while filter mode is active.
 // Returns the result type and any tea.Cmd.
 // The caller is responsible for handling thumb loading after cursor changes.
@@ -78,14 +93,10 @@ func (f *filterState[T]) updateFilter(msg tea.Msg, keys KeyMap) (filterResult, b
 		case key.Matches(msg, keys.Enter):
 			return filterSelected, true, nil
 		case msg.String() == "up":
-			if f.cursor > 0 {
-				f.cursor--
-			}
+			f.moveCursorUp()
 			return filterNone, true, nil
 		case msg.String() == "down":
-			if f.cursor < len(f.filtered)-1 {
-				f.cursor++
-			}
+			f.moveCursorDown()
 			return filterNone, true, nil
 		}
 	}
