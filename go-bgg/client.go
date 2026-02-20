@@ -70,6 +70,16 @@ func NewClient(cfg Config) (*Client, error) {
 	}, nil
 }
 
+// parseRetryAfter extracts the Retry-After duration from an HTTP response header.
+func parseRetryAfter(header http.Header, defaultDelay time.Duration) time.Duration {
+	if ra := header.Get("Retry-After"); ra != "" {
+		if d, err := time.ParseDuration(ra + "s"); err == nil {
+			return d
+		}
+	}
+	return defaultDelay
+}
+
 // requestOptions controls retry behavior for HTTP requests.
 type requestOptions struct {
 	maxRetries         int
@@ -129,20 +139,9 @@ func (c *Client) doRequestWithOpts(endpoint string, opts requestOptions) ([]byte
 			return nil, newNotFoundError(0)
 
 		case http.StatusTooManyRequests:
+			retryAfter := parseRetryAfter(resp.Header, 5*time.Second)
 			if !opts.retryOn429 {
-				retryAfter := 5 * time.Second
-				if ra := resp.Header.Get("Retry-After"); ra != "" {
-					if d, err := time.ParseDuration(ra + "s"); err == nil {
-						retryAfter = d
-					}
-				}
 				return nil, newRateLimitError("rate limit exceeded", retryAfter)
-			}
-			retryAfter := 5 * time.Second
-			if ra := resp.Header.Get("Retry-After"); ra != "" {
-				if d, err := time.ParseDuration(ra + "s"); err == nil {
-					retryAfter = d
-				}
 			}
 			lastErr = newRateLimitError("rate limit exceeded", retryAfter)
 			time.Sleep(retryAfter)
