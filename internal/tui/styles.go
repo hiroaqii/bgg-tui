@@ -167,16 +167,16 @@ func NewStyles(theme string) Styles {
 			Padding(1, 3),
 
 		Rating: lipgloss.NewStyle().
-			Foreground(ColorSecondary),
+			Foreground(ColorAccent),
 
 		Rank: lipgloss.NewStyle().
 			Foreground(ColorSecondary),
 
 		Players: lipgloss.NewStyle().
-			Foreground(ColorSecondary),
+			Foreground(ColorPrimary),
 
 		Time: lipgloss.NewStyle().
-			Foreground(ColorSecondary),
+			Foreground(ColorMuted),
 
 		Label: lipgloss.NewStyle().
 			Foreground(ColorMuted).
