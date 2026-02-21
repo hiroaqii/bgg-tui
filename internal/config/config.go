@@ -65,7 +65,7 @@ func DefaultConfig() *Config {
 		},
 		Interface: InterfaceConfig{
 			ColorTheme:  "default",
-			Transition:  "fade",
+			Transition:  "random",
 			Selection:   "wave",
 			ListDensity: "normal",
 			DateFormat:  "YYYY-MM-DD",

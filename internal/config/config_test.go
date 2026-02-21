@@ -33,8 +33,8 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("expected ColorTheme 'default', got '%s'", cfg.Interface.ColorTheme)
 	}
 
-	if cfg.Interface.Transition != "fade" {
-		t.Errorf("expected Transition 'fade', got '%s'", cfg.Interface.Transition)
+	if cfg.Interface.Transition != "random" {
+		t.Errorf("expected Transition 'random', got '%s'", cfg.Interface.Transition)
 	}
 
 	if cfg.Interface.Selection != "wave" {
