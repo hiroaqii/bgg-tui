@@ -1,10 +1,9 @@
-## bgg-tui v0.2.0 — Homebrew Support & Version Display Improvements
+## bgg-tui v0.3.0 — UI Polish & Customization
 
 ### Features
 
-- Install via Homebrew
-  ```
-  brew tap hiroaqii/bgg-tui
-  brew install bgg-tui
-  ```
-- Unified version display across all build methods (GoReleaser, Makefile, `go install`)
+- Add configurable `list_width` setting for list screens
+
+### Bug Fixes
+
+- Align help screen position with main screens
