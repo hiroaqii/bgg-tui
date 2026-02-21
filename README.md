@@ -6,7 +6,7 @@ A terminal user interface for [BoardGameGeek](https://boardgamegeek.com/).
 >
 > **Note:** Displaying board game images requires a terminal that supports the Kitty graphics protocol (e.g., Kitty, Ghostty, WezTerm).
 
-<!-- TODO: Add screenshots -->
+![bgg-tui demo](https://github.com/user-attachments/assets/eb51219a-3597-49b3-9b39-06389537bd0f)
 
 ## Features
 
