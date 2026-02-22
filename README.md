@@ -4,7 +4,7 @@ A terminal user interface for [BoardGameGeek](https://boardgamegeek.com/).
 
 > **Note:** This app uses the BGG API. The BGG API currently requires registration to use. You must register and obtain a bearer token at <https://boardgamegeek.com/applications> before using this app.
 >
-> **Note:** Displaying board game images requires a terminal that supports the Kitty graphics protocol (e.g., Kitty, Ghostty, WezTerm).
+> **Note:** Displaying board game images requires a terminal that supports the Kitty graphics protocol. Currently, image display works correctly only on **Ghostty**. There are known issues with Kitty ([#10](https://github.com/hiroaqii/bgg-tui/issues/10)) and WezTerm ([#11](https://github.com/hiroaqii/bgg-tui/issues/11)).
 
 ![bgg-tui demo](https://github.com/user-attachments/assets/eb51219a-3597-49b3-9b39-06389537bd0f)
 
@@ -15,7 +15,7 @@ A terminal user interface for [BoardGameGeek](https://boardgamegeek.com/).
 - 📚 View user collections with ratings
 - 📋 Game details: year, rating, geek rating, rank, players, play time, weight, age, owned, comments, designers, artists, categories, mechanics, description
 - 💬 Browse game forums and read threads
-- 🖼️ Thumbnail images via Kitty graphics protocol (Kitty, Ghostty, WezTerm)
+- 🖼️ Thumbnail images via Kitty graphics protocol (currently Ghostty only — see [#10](https://github.com/hiroaqii/bgg-tui/issues/10), [#11](https://github.com/hiroaqii/bgg-tui/issues/11))
 - 🔎 Filter-as-you-type on any list
 - 🎨 Multiple color themes
 - ✨ Screen transition effects
@@ -28,7 +28,7 @@ A terminal user interface for [BoardGameGeek](https://boardgamegeek.com/).
 
 - Go 1.25+
 - **BGG API bearer token** — You must register for API access on BoardGameGeek and generate a token at <https://boardgamegeek.com/applications>. Without a valid token, the app cannot fetch any data.
-- Terminal with Kitty graphics protocol support (optional, for images)
+- Terminal with Kitty graphics protocol support (optional, for images — currently Ghostty only)
 
 ## Installation
 
