@@ -325,25 +325,27 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 		b.WriteString(m.renderStatusFilterBar())
 		b.WriteString("\n\n")
 
+		// Calculate content width for list and footer centering
+		hasBorder := HasBorder(m.config.Interface.BorderStyle)
+		contentWidth := listContentWidth(m.config.Display.ListWidth, width, hasBorder)
+
 		if len(displayItems) == 0 {
 			b.WriteString(m.styles.Subtitle.Render("No games found."))
 			b.WriteString("\n")
 		} else {
 			// Show results with scrolling
 			listHeight := height
-			if HasBorder(m.config.Interface.BorderStyle) {
+			if hasBorder {
 				listHeight -= BorderHeightOverhead
 			}
 			if m.statusPicker {
 				listHeight -= statusPickerExtraLines
 			}
-			listHeight--
+			listHeight -= 2
 			start, end := calcListRange(m.filter.cursor, len(displayItems), listHeight, m.config.Interface.ListDensity)
 
 			// Calculate dynamic name width from ListWidth
 			// overhead: prefix(2) + " (" + year(4) + ")" = 9
-			hasBorder := HasBorder(m.config.Interface.BorderStyle)
-			contentWidth := listContentWidth(m.config.Display.ListWidth, width, hasBorder)
 			maxNameW := calcMaxNameWidth(contentWidth, 9)
 
 			// First pass: find max name+year width for stats alignment
@@ -396,7 +398,10 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 		} else if m.filter.active {
 			b.WriteString(m.styles.Help.Render(helpFilterActive))
 		} else {
-			b.WriteString(m.styles.Help.Render("j/k ↑↓: Navigate  Enter: Detail  /: Filter  s: Status  u: Change User  ?: Help  b: Back  Esc: Menu"))
+			helpLine1 := "j/k ↑↓: Navigate  Enter: Detail  /: Filter  s: Status"
+			helpLine2 := "u: Change User  ?: Help  b: Back  Esc: Menu"
+			helpText := lipgloss.PlaceHorizontal(contentWidth, lipgloss.Center, helpLine1) + "\n" + lipgloss.PlaceHorizontal(contentWidth, lipgloss.Center, helpLine2)
+			b.WriteString(m.styles.Help.Render(helpText))
 		}
 
 		// Add image panel
