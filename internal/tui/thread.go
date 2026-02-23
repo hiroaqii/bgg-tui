@@ -131,7 +131,7 @@ func (m threadModel) Update(msg tea.Msg) (threadModel, tea.Cmd) {
 				// Open in browser
 				url := fmt.Sprintf("https://boardgamegeek.com/thread/%d", m.threadID)
 				openBrowser(url)
-			case key.Matches(msg, m.keys.StatusFilter):
+			case key.Matches(msg, m.keys.Sort):
 				m.sortNewest = !m.sortNewest
 				sort.Slice(m.thread.Articles, func(i, j int) bool {
 					ti := parseDate(m.thread.Articles[i].PostDate)

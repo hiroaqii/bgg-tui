@@ -212,40 +212,7 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 
 		// Status picker mode
 		if m.statusPicker {
-			switch msg := msg.(type) {
-			case tea.KeyMsg:
-				pickerLen := len(allStatuses) + 1 // +1 for "Show All (clear)"
-				switch {
-				case key.Matches(msg, m.keys.Up):
-					if m.statusCursor > 0 {
-						m.statusCursor--
-					}
-				case key.Matches(msg, m.keys.Down):
-					if m.statusCursor < pickerLen-1 {
-						m.statusCursor++
-					}
-				case key.Matches(msg, m.keys.Enter):
-					if m.statusCursor < len(allStatuses) {
-						// Toggle status
-						s := allStatuses[m.statusCursor]
-						if m.activeStatuses[s] {
-							delete(m.activeStatuses, s)
-						} else {
-							m.activeStatuses[s] = true
-						}
-					} else {
-						// "Show All (clear)"
-						m.activeStatuses = make(map[CollectionStatus]bool)
-					}
-					m.applyStatusFilter()
-					m.saveStatusFilterToConfig()
-					m, cmd := m.maybeLoadThumb()
-					return m, cmd
-				case key.Matches(msg, m.keys.Escape):
-					m.statusPicker = false
-				}
-			}
-			return m, nil
+			return m.updateStatusPicker(msg)
 		}
 
 		if m.filter.active {
@@ -442,6 +409,43 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 	content := b.String()
 	borderStyle := m.config.Interface.BorderStyle
 	return transmit + renderView(content, m.styles, width, height, borderStyle)
+}
+
+// updateStatusPicker handles key input while the status picker is open.
+func (m collectionModel) updateStatusPicker(msg tea.Msg) (collectionModel, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		pickerLen := len(allStatuses) + 1 // +1 for "Show All (clear)"
+		switch {
+		case key.Matches(msg, m.keys.Up):
+			if m.statusCursor > 0 {
+				m.statusCursor--
+			}
+		case key.Matches(msg, m.keys.Down):
+			if m.statusCursor < pickerLen-1 {
+				m.statusCursor++
+			}
+		case key.Matches(msg, m.keys.Enter):
+			if m.statusCursor < len(allStatuses) {
+				// Toggle status
+				s := allStatuses[m.statusCursor]
+				if m.activeStatuses[s] {
+					delete(m.activeStatuses, s)
+				} else {
+					m.activeStatuses[s] = true
+				}
+			} else {
+				// "Show All (clear)"
+				m.activeStatuses = make(map[CollectionStatus]bool)
+			}
+			m.applyStatusFilter()
+			m.saveStatusFilterToConfig()
+			return m.maybeLoadThumb()
+		case key.Matches(msg, m.keys.Escape):
+			m.statusPicker = false
+		}
+	}
+	return m, nil
 }
 
 // renderStatusPicker renders the inline status picker overlay.

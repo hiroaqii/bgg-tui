@@ -21,7 +21,8 @@ type KeyMap struct {
 	Open     key.Binding
 	Refresh  key.Binding
 	User     key.Binding
-	Filter   key.Binding
+	Filter       key.Binding
+	Sort         key.Binding
 	StatusFilter key.Binding
 }
 
@@ -99,6 +100,10 @@ func DefaultKeyMap() KeyMap {
 		Filter: key.NewBinding(
 			key.WithKeys("/"),
 			key.WithHelp("/", "filter"),
+		),
+		Sort: key.NewBinding(
+			key.WithKeys("s"),
+			key.WithHelp("s", "sort"),
 		),
 		StatusFilter: key.NewBinding(
 			key.WithKeys("s"),

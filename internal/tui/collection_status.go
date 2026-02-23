@@ -14,8 +14,26 @@ const (
 	StatusWantToBuy
 	StatusWishlist
 	StatusPreordered
-	statusCount // sentinel
 )
+
+// statusDef holds the metadata for a single collection status.
+type statusDef struct {
+	label     string
+	configKey string
+	match     func(bgg.CollectionItem) bool
+}
+
+// statusDefs maps each CollectionStatus to its metadata.
+var statusDefs = [...]statusDef{
+	StatusOwned:      {"Owned", "owned", func(i bgg.CollectionItem) bool { return i.Owned }},
+	StatusPrevOwned:  {"Prev Owned", "prev_owned", func(i bgg.CollectionItem) bool { return i.PrevOwned }},
+	StatusForTrade:   {"For Trade", "for_trade", func(i bgg.CollectionItem) bool { return i.ForTrade }},
+	StatusWant:       {"Want Trade", "want", func(i bgg.CollectionItem) bool { return i.Want }},
+	StatusWantToPlay: {"Want Play", "want_to_play", func(i bgg.CollectionItem) bool { return i.WantToPlay }},
+	StatusWantToBuy:  {"Want Buy", "want_to_buy", func(i bgg.CollectionItem) bool { return i.WantToBuy }},
+	StatusWishlist:   {"Wishlist", "wishlist", func(i bgg.CollectionItem) bool { return i.Wishlist }},
+	StatusPreordered: {"Preordered", "preordered", func(i bgg.CollectionItem) bool { return i.Preordered }},
+}
 
 // allStatuses is the ordered list of all statuses shown in the picker.
 var allStatuses = []CollectionStatus{
@@ -30,56 +48,16 @@ var allStatuses = []CollectionStatus{
 }
 
 // statusLabel returns the display label for a status.
-func statusLabel(s CollectionStatus) string {
-	switch s {
-	case StatusOwned:
-		return "Owned"
-	case StatusPrevOwned:
-		return "Prev Owned"
-	case StatusForTrade:
-		return "For Trade"
-	case StatusWant:
-		return "Want Trade"
-	case StatusWantToPlay:
-		return "Want Play"
-	case StatusWantToBuy:
-		return "Want Buy"
-	case StatusWishlist:
-		return "Wishlist"
-	case StatusPreordered:
-		return "Preordered"
-	}
-	return ""
-}
+func statusLabel(s CollectionStatus) string { return statusDefs[s].label }
 
 // statusConfigKey returns the config key used in StatusFilter for a status.
-func statusConfigKey(s CollectionStatus) string {
-	switch s {
-	case StatusOwned:
-		return "owned"
-	case StatusPrevOwned:
-		return "prev_owned"
-	case StatusForTrade:
-		return "for_trade"
-	case StatusWant:
-		return "want"
-	case StatusWantToPlay:
-		return "want_to_play"
-	case StatusWantToBuy:
-		return "want_to_buy"
-	case StatusWishlist:
-		return "wishlist"
-	case StatusPreordered:
-		return "preordered"
-	}
-	return ""
-}
+func statusConfigKey(s CollectionStatus) string { return statusDefs[s].configKey }
 
 // statusFromConfigKey converts a config key to a CollectionStatus.
 // Returns -1 if not found.
 func statusFromConfigKey(key string) CollectionStatus {
 	for _, s := range allStatuses {
-		if statusConfigKey(s) == key {
+		if statusDefs[s].configKey == key {
 			return s
 		}
 	}
@@ -88,23 +66,5 @@ func statusFromConfigKey(key string) CollectionStatus {
 
 // itemMatchesStatus returns true if the collection item has the given status.
 func itemMatchesStatus(item bgg.CollectionItem, s CollectionStatus) bool {
-	switch s {
-	case StatusOwned:
-		return item.Owned
-	case StatusPrevOwned:
-		return item.PrevOwned
-	case StatusForTrade:
-		return item.ForTrade
-	case StatusWant:
-		return item.Want
-	case StatusWantToPlay:
-		return item.WantToPlay
-	case StatusWantToBuy:
-		return item.WantToBuy
-	case StatusWishlist:
-		return item.Wishlist
-	case StatusPreordered:
-		return item.Preordered
-	}
-	return false
+	return statusDefs[s].match(item)
 }
