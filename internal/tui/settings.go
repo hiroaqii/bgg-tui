@@ -203,24 +203,6 @@ func (m *settingsModel) buildItems() []settingItem {
 				return "(not set)"
 			},
 		},
-		{
-			label: "Status Filter", kind: settingInfo,
-			getValue: func() string {
-				if len(cfg.Collection.StatusFilter) == 0 {
-					return "All"
-				}
-				var labels []string
-				for _, key := range cfg.Collection.StatusFilter {
-					if s := statusFromConfigKey(key); s >= 0 {
-						labels = append(labels, statusLabel(s))
-					}
-				}
-				if len(labels) == 0 {
-					return "All"
-				}
-				return strings.Join(labels, ", ")
-			},
-		},
 		// API
 		{
 			label: "Token", section: "API", kind: settingText,
