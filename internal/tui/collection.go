@@ -23,6 +23,10 @@ const (
 	collectionStateError
 )
 
+// statusPickerExtraLines is the extra vertical lines the picker occupies
+// beyond the normal 1-line help text (title + 8 statuses + "Show All" + help - normal help = 10).
+const statusPickerExtraLines = 10
+
 type collectionModel struct {
 	state     collectionState
 	styles    Styles
@@ -34,7 +38,13 @@ type collectionModel struct {
 	wantsBack bool
 	wantsMenu bool
 
-	filter filterState[bgg.CollectionItem]
+	filter   filterState[bgg.CollectionItem]
+	allItems []bgg.CollectionItem // unfiltered API results
+
+	// Status picker
+	statusPicker   bool
+	statusCursor   int
+	activeStatuses map[CollectionStatus]bool
 
 	img listImageState
 }
@@ -58,13 +68,22 @@ func newCollectionModel(cfg *config.Config, styles Styles, keys KeyMap, imageEna
 	ti.SetValue(cfg.Collection.DefaultUsername)
 	ti.Focus()
 
+	// Initialize active statuses from config
+	active := make(map[CollectionStatus]bool)
+	for _, key := range cfg.Collection.StatusFilter {
+		if s := statusFromConfigKey(key); s >= 0 {
+			active[s] = true
+		}
+	}
+
 	return collectionModel{
-		state:  collectionStateInput,
-		styles: styles,
-		keys:   keys,
-		config: cfg,
-		input:  ti,
-		img:    listImageState{enabled: imageEnabled, cache: cache},
+		state:          collectionStateInput,
+		styles:         styles,
+		keys:           keys,
+		config:         cfg,
+		input:          ti,
+		activeStatuses: active,
+		img:            listImageState{enabled: imageEnabled, cache: cache},
 		filter: filterState[bgg.CollectionItem]{
 			getName: func(item bgg.CollectionItem) string { return item.Name },
 			getID:   func(item bgg.CollectionItem) int { return item.ID },
@@ -72,17 +91,63 @@ func newCollectionModel(cfg *config.Config, styles Styles, keys KeyMap, imageEna
 	}
 }
 
-func (m collectionModel) loadCollection(client *bgg.Client, username string, ownedOnly bool) tea.Cmd {
+func (m collectionModel) loadCollection(client *bgg.Client, username string) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
 			return collectionResultMsg{err: fmt.Errorf(errNoToken)}
 		}
-		opts := bgg.CollectionOptions{
-			OwnedOnly: ownedOnly,
-		}
-		items, err := client.GetCollection(username, opts)
+		items, err := client.GetCollection(username, bgg.CollectionOptions{})
 		return collectionResultMsg{items: items, err: err}
 	}
+}
+
+// applyStatusFilter filters allItems by active statuses and updates filter.items.
+func (m *collectionModel) applyStatusFilter() {
+	if len(m.activeStatuses) == 0 {
+		m.filter.items = m.allItems
+	} else {
+		filtered := make([]bgg.CollectionItem, 0, len(m.allItems))
+		for _, item := range m.allItems {
+			for s := range m.activeStatuses {
+				if itemMatchesStatus(item, s) {
+					filtered = append(filtered, item)
+					break
+				}
+			}
+		}
+		m.filter.items = filtered
+	}
+	// Reset name filter if active
+	if m.filter.active {
+		m.filter.clearFilter()
+	}
+	m.filter.cursor = 0
+}
+
+// statusFilterLabel returns a short label describing the active status filter.
+func (m collectionModel) statusFilterLabel() string {
+	if len(m.activeStatuses) == 0 {
+		return ""
+	}
+	var labels []string
+	for _, s := range allStatuses {
+		if m.activeStatuses[s] {
+			labels = append(labels, statusLabel(s))
+		}
+	}
+	return strings.Join(labels, ", ")
+}
+
+// saveStatusFilterToConfig persists the current active statuses to config.
+func (m *collectionModel) saveStatusFilterToConfig() {
+	var keys []string
+	for _, s := range allStatuses {
+		if m.activeStatuses[s] {
+			keys = append(keys, statusConfigKey(s))
+		}
+	}
+	m.config.Collection.StatusFilter = keys
+	m.config.Save()
 }
 
 func (m collectionModel) currentThumbURL() string {
@@ -110,7 +175,7 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 				username := strings.TrimSpace(m.input.Value())
 				if username != "" {
 					m.state = collectionStateLoading
-					return m, m.loadCollection(client, username, m.config.Collection.ShowOnlyOwned)
+					return m, m.loadCollection(client, username)
 				}
 			case key.Matches(msg, m.keys.Escape):
 				m.wantsMenu = true
@@ -128,8 +193,8 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 				m.errMsg = msg.err.Error()
 			} else {
 				m.state = collectionStateResults
-				m.filter.items = msg.items
-				m.filter.cursor = 0
+				m.allItems = msg.items
+				m.applyStatusFilter()
 				m, cmd := m.maybeLoadThumb()
 				return m, cmd
 			}
@@ -140,6 +205,44 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 		// Handle image loaded
 		if msg, ok := msg.(listImageMsg); ok {
 			m.img.handleLoaded(msg)
+			return m, nil
+		}
+
+		// Status picker mode
+		if m.statusPicker {
+			switch msg := msg.(type) {
+			case tea.KeyMsg:
+				pickerLen := len(allStatuses) + 1 // +1 for "Show All (clear)"
+				switch {
+				case key.Matches(msg, m.keys.Up):
+					if m.statusCursor > 0 {
+						m.statusCursor--
+					}
+				case key.Matches(msg, m.keys.Down):
+					if m.statusCursor < pickerLen-1 {
+						m.statusCursor++
+					}
+				case key.Matches(msg, m.keys.Enter):
+					if m.statusCursor < len(allStatuses) {
+						// Toggle status
+						s := allStatuses[m.statusCursor]
+						if m.activeStatuses[s] {
+							delete(m.activeStatuses, s)
+						} else {
+							m.activeStatuses[s] = true
+						}
+					} else {
+						// "Show All (clear)"
+						m.activeStatuses = make(map[CollectionStatus]bool)
+					}
+					m.applyStatusFilter()
+					m.saveStatusFilterToConfig()
+					m, cmd := m.maybeLoadThumb()
+					return m, cmd
+				case key.Matches(msg, m.keys.Escape):
+					m.statusPicker = false
+				}
+			}
 			return m, nil
 		}
 
@@ -174,11 +277,16 @@ func (m collectionModel) Update(msg tea.Msg, client *bgg.Client) (collectionMode
 				filterCmd := m.filter.startFilter()
 				m, thumbCmd := m.maybeLoadThumb()
 				return m, tea.Batch(filterCmd, thumbCmd)
+			case key.Matches(msg, m.keys.StatusFilter):
+				m.statusPicker = true
+				m.statusCursor = 0
+				return m, nil
 			case key.Matches(msg, m.keys.User):
 				// Change user - go back to input
 				m.state = collectionStateInput
 				m.input.Focus()
 				m.filter.items = nil
+				m.allItems = nil
 				m.filter.cursor = 0
 				return m, textinput.Blink
 			case key.Matches(msg, m.keys.Back):
@@ -242,7 +350,12 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 
 		displayItems := m.filter.displayItems()
 
-		b.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("%d/%d games  ♥User Rating ★Rating #Rank", min(m.filter.cursor+1, len(displayItems)), len(displayItems))))
+		subtitle := fmt.Sprintf("%d/%d games  ♥User Rating ★Rating #Rank", min(m.filter.cursor+1, len(displayItems)), len(displayItems))
+		b.WriteString(m.styles.Subtitle.Render(subtitle))
+		if label := m.statusFilterLabel(); label != "" {
+			b.WriteString("\n")
+			b.WriteString(m.styles.Subtitle.Render("[" + label + "]"))
+		}
 		b.WriteString("\n\n")
 
 		if len(displayItems) == 0 {
@@ -253,6 +366,12 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 			listHeight := height
 			if HasBorder(m.config.Interface.BorderStyle) {
 				listHeight -= BorderHeightOverhead
+			}
+			if m.statusPicker {
+				listHeight -= statusPickerExtraLines
+			}
+			if len(m.activeStatuses) > 0 {
+				listHeight--
 			}
 			start, end := calcListRange(m.filter.cursor, len(displayItems), listHeight, m.config.Interface.ListDensity)
 
@@ -307,10 +426,12 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 		}
 
 		b.WriteString("\n")
-		if m.filter.active {
+		if m.statusPicker {
+			b.WriteString(m.renderStatusPicker())
+		} else if m.filter.active {
 			b.WriteString(m.styles.Help.Render(helpFilterActive))
 		} else {
-			b.WriteString(m.styles.Help.Render("j/k ↑↓: Navigate  Enter: Detail  /: Filter  u: Change User  ?: Help  b: Back  Esc: Menu"))
+			b.WriteString(m.styles.Help.Render("j/k ↑↓: Navigate  Enter: Detail  /: Filter  s: Status  u: Change User  ?: Help  b: Back  Esc: Menu"))
 		}
 
 		// Add image panel
@@ -323,4 +444,30 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 	content := b.String()
 	borderStyle := m.config.Interface.BorderStyle
 	return transmit + renderView(content, m.styles, width, height, borderStyle)
+}
+
+// renderStatusPicker renders the inline status picker overlay.
+func (m collectionModel) renderStatusPicker() string {
+	var b strings.Builder
+	b.WriteString(m.styles.Subtitle.Render("Status Filter"))
+	b.WriteString("\n")
+	for i, s := range allStatuses {
+		check := "[ ]"
+		if m.activeStatuses[s] {
+			check = "[x]"
+		}
+		cursor := "  "
+		if i == m.statusCursor {
+			cursor = "> "
+		}
+		b.WriteString(fmt.Sprintf("%s%s %s\n", cursor, check, statusLabel(s)))
+	}
+	// "Show All (clear)" option
+	cursor := "  "
+	if m.statusCursor == len(allStatuses) {
+		cursor = "> "
+	}
+	b.WriteString(fmt.Sprintf("%s    Show All (clear)\n", cursor))
+	b.WriteString(m.styles.Help.Render("j/k: Move  Enter: Toggle  Esc: Close"))
+	return b.String()
 }

@@ -32,8 +32,9 @@ type DisplayConfig struct {
 
 // CollectionConfig contains collection-related configuration.
 type CollectionConfig struct {
-	DefaultUsername string `toml:"default_username"`
-	ShowOnlyOwned   bool   `toml:"show_only_owned"`
+	DefaultUsername string   `toml:"default_username"`
+	ShowOnlyOwned  bool     `toml:"show_only_owned,omitempty"` // deprecated: migrated to StatusFilter
+	StatusFilter   []string `toml:"status_filter,omitempty"`
 }
 
 // InterfaceConfig contains interface-related configuration.
@@ -61,7 +62,6 @@ func DefaultConfig() *Config {
 		},
 		Collection: CollectionConfig{
 			DefaultUsername: "",
-			ShowOnlyOwned:   false,
 		},
 		Interface: InterfaceConfig{
 			ColorTheme:  "default",
@@ -111,6 +111,13 @@ func LoadFromPath(path string) (*Config, error) {
 			}
 		}
 		return cfg, nil
+	}
+
+	// Migrate deprecated ShowOnlyOwned → StatusFilter
+	if cfg.Collection.ShowOnlyOwned && len(cfg.Collection.StatusFilter) == 0 {
+		cfg.Collection.StatusFilter = []string{"owned"}
+		cfg.Collection.ShowOnlyOwned = false
+		_ = cfg.SaveToPath(path)
 	}
 
 	return cfg, nil

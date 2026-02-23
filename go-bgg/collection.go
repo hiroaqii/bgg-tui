@@ -18,8 +18,22 @@ func (c *Client) GetCollection(username string, opts CollectionOptions) ([]Colle
 	}
 
 	endpoint := fmt.Sprintf("/collection?username=%s&stats=1", url.QueryEscape(username))
-	if opts.OwnedOnly {
-		endpoint += "&own=1"
+	for _, f := range []struct {
+		flag bool
+		key  string
+	}{
+		{opts.Own, "own"},
+		{opts.PrevOwned, "prevowned"},
+		{opts.ForTrade, "fortrade"},
+		{opts.Want, "want"},
+		{opts.WantToPlay, "wanttoplay"},
+		{opts.WantToBuy, "wanttobuy"},
+		{opts.Wishlist, "wishlist"},
+		{opts.Preordered, "preordered"},
+	} {
+		if f.flag {
+			endpoint += "&" + f.key + "=1"
+		}
 	}
 
 	body, err := c.doRequestWithRetryOn202(endpoint, collectionMaxRetries)
@@ -58,9 +72,14 @@ func convertXMLToCollectionItem(item xmlCollectionItem) CollectionItem {
 		Thumbnail: item.Thumbnail,
 		Image:     item.Image,
 		NumPlays:  item.NumPlays,
-		Owned:     item.Status.Own == "1",
+		Owned:      item.Status.Own == "1",
+		PrevOwned:  item.Status.PrevOwned == "1",
+		ForTrade:   item.Status.ForTrade == "1",
+		Want:       item.Status.Want == "1",
 		WantToPlay: item.Status.WantToPlay == "1",
-		Wishlist:  item.Status.Wishlist == "1",
+		WantToBuy:  item.Status.WantToBuy == "1",
+		Wishlist:   item.Status.Wishlist == "1",
+		Preordered: item.Status.Preordered == "1",
 	}
 
 	// Parse user rating

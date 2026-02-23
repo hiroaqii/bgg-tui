@@ -204,16 +204,21 @@ func (m *settingsModel) buildItems() []settingItem {
 			},
 		},
 		{
-			label: "Show Only Owned", kind: settingToggle,
+			label: "Status Filter", kind: settingInfo,
 			getValue: func() string {
-				if cfg.Collection.ShowOnlyOwned {
-					return "ON"
+				if len(cfg.Collection.StatusFilter) == 0 {
+					return "All"
 				}
-				return "OFF"
-			},
-			onEnter: func() {
-				cfg.Collection.ShowOnlyOwned = !cfg.Collection.ShowOnlyOwned
-				cfg.Save()
+				var labels []string
+				for _, key := range cfg.Collection.StatusFilter {
+					if s := statusFromConfigKey(key); s >= 0 {
+						labels = append(labels, statusLabel(s))
+					}
+				}
+				if len(labels) == 0 {
+					return "All"
+				}
+				return strings.Join(labels, ", ")
 			},
 		},
 		// API
