@@ -126,7 +126,7 @@ func (m *collectionModel) applyStatusFilter() {
 
 // renderStatusFilterBar renders all statuses with active ones highlighted and inactive ones muted.
 func (m collectionModel) renderStatusFilterBar() string {
-	activeStyle := lipgloss.NewStyle().Foreground(ColorMuted).Italic(true)
+	activeStyle := lipgloss.NewStyle().Foreground(ColorAccent).Italic(true)
 	dimStyle := lipgloss.NewStyle().Foreground(ColorDim)
 	var parts []string
 	for _, s := range allStatuses {
