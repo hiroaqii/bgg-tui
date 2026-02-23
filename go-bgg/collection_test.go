@@ -65,8 +65,23 @@ func TestGetCollection(t *testing.T) {
 	if !items[0].Owned {
 		t.Error("expected Owned to be true")
 	}
+	if items[0].PrevOwned {
+		t.Error("expected PrevOwned to be false")
+	}
+	if items[0].ForTrade {
+		t.Error("expected ForTrade to be false")
+	}
+	if items[0].Want {
+		t.Error("expected Want to be false")
+	}
 	if !items[0].WantToPlay {
 		t.Error("expected WantToPlay to be true")
+	}
+	if items[0].WantToBuy {
+		t.Error("expected WantToBuy to be false")
+	}
+	if items[0].Preordered {
+		t.Error("expected Preordered to be false")
 	}
 	if items[0].Rating != 8 {
 		t.Errorf("expected Rating 8, got %f", items[0].Rating)
@@ -107,7 +122,7 @@ func TestGetCollection_OwnedOnly(t *testing.T) {
 
 	client := createTestClient(t, server)
 
-	_, err = client.GetCollection("testuser", CollectionOptions{OwnedOnly: true})
+	_, err = client.GetCollection("testuser", CollectionOptions{Own: true})
 	if err != nil {
 		t.Fatalf("GetCollection failed: %v", err)
 	}

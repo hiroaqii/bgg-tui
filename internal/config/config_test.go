@@ -25,8 +25,8 @@ func TestDefaultConfig(t *testing.T) {
 		t.Error("expected empty DefaultUsername")
 	}
 
-	if cfg.Collection.ShowOnlyOwned {
-		t.Error("expected ShowOnlyOwned to be false by default")
+	if len(cfg.Collection.StatusFilter) != 0 {
+		t.Error("expected StatusFilter to be nil by default")
 	}
 
 	if cfg.Interface.ColorTheme != "default" {
@@ -212,6 +212,28 @@ func TestExtractToken(t *testing.T) {
 				t.Errorf("extractToken() = %q, want %q", got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestLoadFromPath_MigrateShowOnlyOwned(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "config.toml")
+
+	oldConfig := []byte("[collection]\nshow_only_owned = true\ndefault_username = \"testuser\"\n")
+	if err := os.WriteFile(path, oldConfig, 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	cfg, err := LoadFromPath(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Collection.ShowOnlyOwned {
+		t.Error("expected ShowOnlyOwned to be cleared after migration")
+	}
+	if len(cfg.Collection.StatusFilter) != 1 || cfg.Collection.StatusFilter[0] != "owned" {
+		t.Errorf("expected StatusFilter [owned], got %v", cfg.Collection.StatusFilter)
 	}
 }
 

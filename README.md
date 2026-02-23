@@ -12,7 +12,7 @@ A terminal user interface for [BoardGameGeek](https://boardgamegeek.com/).
 
 - 🔥 Browse trending (Hot) games with ratings, weight, and rank
 - 🔍 Search games by name
-- 📚 View user collections with ratings
+- 📚 View user collections with status filter and ratings
 - 📋 Game details: year, rating, geek rating, rank, players, play time, weight, age, owned, comments, designers, artists, categories, mechanics, description
 - 💬 Browse game forums and read threads
 - 🖼️ Thumbnail images via Kitty graphics protocol (currently Ghostty only — see [#10](https://github.com/hiroaqii/bgg-tui/issues/10), [#11](https://github.com/hiroaqii/bgg-tui/issues/11))
@@ -93,7 +93,7 @@ Configuration file is created on first launch in your OS's default config direct
 | `display` | `thread_width` | Forum thread display width |
 | `display` | `detail_width` | Game detail display width |
 | `collection` | `default_username` | Default BGG username for collection lookup |
-| `collection` | `show_only_owned` | Show only owned games in collection |
+| `collection` | `status_filter` | Filter by collection status: owned, prev_owned, for_trade, want, want_to_play, want_to_buy, wishlist, preordered |
 | `api` | `token` | BGG API bearer token |
 
 ## Special Thanks

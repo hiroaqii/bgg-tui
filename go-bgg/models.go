@@ -68,7 +68,14 @@ type HotGame struct {
 
 // CollectionOptions specifies options for fetching a user's collection.
 type CollectionOptions struct {
-	OwnedOnly bool // true: own=1
+	Own        bool
+	PrevOwned  bool
+	ForTrade   bool
+	Want       bool
+	WantToPlay bool
+	WantToBuy  bool
+	Wishlist   bool
+	Preordered bool
 }
 
 // CollectionItem represents a game in a user's collection.
@@ -84,8 +91,13 @@ type CollectionItem struct {
 	BayesAverage float64 `json:"bayes_average"` // BGG Geek rating (Bayes average)
 	Rank         int     `json:"rank"`          // BGG board game rank (0 = Not Ranked)
 	Owned      bool    `json:"owned"`
+	PrevOwned  bool    `json:"prev_owned"`
+	ForTrade   bool    `json:"for_trade"`
+	Want       bool    `json:"want"`
 	WantToPlay bool    `json:"want_to_play"`
+	WantToBuy  bool    `json:"want_to_buy"`
 	Wishlist   bool    `json:"wishlist"`
+	Preordered bool    `json:"preordered"`
 }
 
 // Forum represents a forum category for a game.

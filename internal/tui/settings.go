@@ -203,19 +203,6 @@ func (m *settingsModel) buildItems() []settingItem {
 				return "(not set)"
 			},
 		},
-		{
-			label: "Show Only Owned", kind: settingToggle,
-			getValue: func() string {
-				if cfg.Collection.ShowOnlyOwned {
-					return "ON"
-				}
-				return "OFF"
-			},
-			onEnter: func() {
-				cfg.Collection.ShowOnlyOwned = !cfg.Collection.ShowOnlyOwned
-				cfg.Save()
-			},
-		},
 		// API
 		{
 			label: "Token", section: "API", kind: settingText,
