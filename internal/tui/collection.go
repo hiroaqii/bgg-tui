@@ -124,18 +124,20 @@ func (m *collectionModel) applyStatusFilter() {
 	m.filter.cursor = 0
 }
 
-// statusFilterLabel returns a short label describing the active status filter.
-func (m collectionModel) statusFilterLabel() string {
-	if len(m.activeStatuses) == 0 {
-		return ""
-	}
-	var labels []string
+// renderStatusFilterBar renders all statuses with active ones highlighted and inactive ones muted.
+func (m collectionModel) renderStatusFilterBar() string {
+	activeStyle := lipgloss.NewStyle().Foreground(ColorMuted).Italic(true)
+	dimStyle := lipgloss.NewStyle().Foreground(ColorDim)
+	var parts []string
 	for _, s := range allStatuses {
+		label := statusLabel(s)
 		if m.activeStatuses[s] {
-			labels = append(labels, statusLabel(s))
+			parts = append(parts, activeStyle.Render(label))
+		} else {
+			parts = append(parts, dimStyle.Render(label))
 		}
 	}
-	return strings.Join(labels, ", ")
+	return "[" + strings.Join(parts, dimStyle.Render(", ")) + "]"
 }
 
 // saveStatusFilterToConfig persists the current active statuses to config.
@@ -350,12 +352,10 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 
 		displayItems := m.filter.displayItems()
 
-		subtitle := fmt.Sprintf("%d/%d games  ♥User Rating ★Rating #Rank", min(m.filter.cursor+1, len(displayItems)), len(displayItems))
+		subtitle := fmt.Sprintf("%d/%d games  ♥ User Rating  ★ Rating  #Rank", min(m.filter.cursor+1, len(displayItems)), len(displayItems))
 		b.WriteString(m.styles.Subtitle.Render(subtitle))
-		if label := m.statusFilterLabel(); label != "" {
-			b.WriteString("\n")
-			b.WriteString(m.styles.Subtitle.Render("[" + label + "]"))
-		}
+		b.WriteString("\n")
+		b.WriteString(m.renderStatusFilterBar())
 		b.WriteString("\n\n")
 
 		if len(displayItems) == 0 {
@@ -370,9 +370,7 @@ func (m collectionModel) View(width, height int, selType string, animFrame int) 
 			if m.statusPicker {
 				listHeight -= statusPickerExtraLines
 			}
-			if len(m.activeStatuses) > 0 {
-				listHeight--
-			}
+			listHeight--
 			start, end := calcListRange(m.filter.cursor, len(displayItems), listHeight, m.config.Interface.ListDensity)
 
 			// Calculate dynamic name width from ListWidth
