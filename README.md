@@ -2,11 +2,13 @@
 
 A terminal user interface for [BoardGameGeek](https://boardgamegeek.com/).
 
-> **Note:** This app uses the BGG API. The BGG API currently requires registration to use. You must register and obtain a bearer token at <https://boardgamegeek.com/applications> before using this app.
->
-> **Note:** Displaying board game images requires a terminal that supports the Kitty graphics protocol. Currently, image display works correctly only on **Ghostty**. There are known issues with Kitty ([#10](https://github.com/hiroaqii/bgg-tui/issues/10)) and WezTerm ([#11](https://github.com/hiroaqii/bgg-tui/issues/11)).
+This branch is the Zig port of the original Go implementation. The port keeps
+the existing feature set as the target, but the internal module layout is being
+rebuilt around Zig and Chasen conventions.
 
-![bgg-tui demo](https://github.com/user-attachments/assets/eb51219a-3597-49b3-9b39-06389537bd0f)
+> **Note:** This app uses the BGG API. The BGG API currently requires
+> registration to use. You must register and obtain a bearer token at
+> <https://boardgamegeek.com/applications> before using this app.
 
 ## Features
 
@@ -26,42 +28,26 @@ A terminal user interface for [BoardGameGeek](https://boardgamegeek.com/).
 
 ## Requirements
 
-- Go 1.25+
-- **BGG API bearer token** — You must register for API access on BoardGameGeek and generate a token at <https://boardgamegeek.com/applications>. Without a valid token, the app cannot fetch any data.
-- Terminal with Kitty graphics protocol support (optional, for images — currently Ghostty only)
+- Zig 0.16.0+
+- BGG API bearer token. You must register for API access on BoardGameGeek and
+  generate a token at <https://boardgamegeek.com/applications>.
+- Terminal with Kitty graphics protocol support for images, once image support
+  is restored.
 
 ## Installation
-
-### Homebrew (macOS)
-
-```bash
-brew tap hiroaqii/bgg-tui
-brew install bgg-tui
-```
-
-> **Note:** macOS may block the first launch because the binary is not notarized by Apple. To allow it, run:
-> ```bash
-> xattr -d com.apple.quarantine $(which bgg-tui)
-> ```
-
-### go install
-
-```bash
-go install github.com/hiroaqii/bgg-tui/cmd/bgg-tui@latest
-```
 
 ### Build from source
 
 ```bash
 git clone https://github.com/hiroaqii/bgg-tui.git
 cd bgg-tui
-make build
+zig build
 ```
 
-If `make` is not available (e.g., Windows), you can build directly with Go:
+Run the current development scaffold:
 
 ```bash
-go build -o bgg-tui ./cmd/bgg-tui
+zig build run
 ```
 
 ## Getting Started
