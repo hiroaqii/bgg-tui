@@ -65,6 +65,19 @@ pub const CollectionItem = struct {
     year_published: ?i32 = null,
     image_url: ?[]const u8 = null,
     thumbnail_url: ?[]const u8 = null,
+    num_plays: u32 = 0,
+    rating: f64 = 0,
+    bgg_rating: f64 = 0,
+    bayes_average: f64 = 0,
+    rank: u32 = 0,
+    owned: bool = false,
+    prev_owned: bool = false,
+    for_trade: bool = false,
+    want: bool = false,
+    want_to_play: bool = false,
+    want_to_buy: bool = false,
+    wishlist: bool = false,
+    preordered: bool = false,
 };
 
 test "model declarations compile" {

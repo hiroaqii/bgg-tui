@@ -121,6 +121,34 @@ pub fn parseThingResponse(allocator: Allocator, bytes: []const u8) ![]model.Game
     return games.toOwnedSlice(allocator);
 }
 
+pub fn parseCollectionResponse(allocator: Allocator, bytes: []const u8) ![]model.CollectionItem {
+    var static_reader: xml_lib.Reader.Static = .init(allocator, bytes, .{});
+    defer static_reader.deinit();
+    const reader = &static_reader.interface;
+
+    var items: std.ArrayList(model.CollectionItem) = .empty;
+    errdefer {
+        freeCollectionItemsOnly(allocator, items.items);
+        items.deinit(allocator);
+    }
+
+    while (true) {
+        const node = try reader.read();
+        switch (node) {
+            .eof => break,
+            .xml_declaration, .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
+            .element_start => {
+                if (std.mem.eql(u8, reader.elementName(), "item")) {
+                    try items.append(allocator, try parseCollectionItem(allocator, reader));
+                }
+            },
+            .element_end => continue,
+        }
+    }
+
+    return items.toOwnedSlice(allocator);
+}
+
 pub fn freeSearchResults(allocator: Allocator, results: []model.GameSearchResult) void {
     for (results) |item| {
         allocator.free(item.name);
@@ -136,6 +164,11 @@ pub fn freeHotGames(allocator: Allocator, games: []model.HotGame) void {
 pub fn freeGames(allocator: Allocator, games: []model.Game) void {
     freeGameItems(allocator, games);
     allocator.free(games);
+}
+
+pub fn freeCollectionItems(allocator: Allocator, items: []model.CollectionItem) void {
+    freeCollectionItemsOnly(allocator, items);
+    allocator.free(items);
 }
 
 fn parseSearchItem(allocator: Allocator, reader: *xml_lib.Reader) !model.GameSearchResult {
@@ -313,6 +346,51 @@ fn parseThingItem(allocator: Allocator, reader: *xml_lib.Reader) !model.Game {
     }
 }
 
+fn parseCollectionItem(allocator: Allocator, reader: *xml_lib.Reader) !model.CollectionItem {
+    var item: model.CollectionItem = .{
+        .id = try parseU32Attribute(reader, "objectid"),
+        .name = "",
+    };
+    errdefer freeCollectionItem(allocator, item);
+
+    while (true) {
+        const node = try reader.read();
+        switch (node) {
+            .eof => return ParseError.UnexpectedEndOfDocument,
+            .xml_declaration => unreachable,
+            .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
+            .element_start => {
+                const element_name = reader.elementName();
+                if (std.mem.eql(u8, element_name, "name")) {
+                    replaceRequiredString(allocator, &item.name, try reader.readElementTextAlloc(allocator));
+                } else if (std.mem.eql(u8, element_name, "yearpublished")) {
+                    item.year_published = try parseElementTextI32(reader);
+                } else if (std.mem.eql(u8, element_name, "image")) {
+                    replaceOptionalString(allocator, &item.image_url, try reader.readElementTextAlloc(allocator));
+                } else if (std.mem.eql(u8, element_name, "thumbnail")) {
+                    replaceOptionalString(allocator, &item.thumbnail_url, try reader.readElementTextAlloc(allocator));
+                } else if (std.mem.eql(u8, element_name, "status")) {
+                    parseCollectionStatus(reader, &item);
+                    try reader.skipElement();
+                } else if (std.mem.eql(u8, element_name, "numplays")) {
+                    item.num_plays = try parseElementTextU32(reader);
+                } else if (std.mem.eql(u8, element_name, "stats")) {
+                    try parseCollectionStats(reader, &item);
+                } else {
+                    try reader.skipElement();
+                }
+            },
+            .element_end => {
+                if (std.mem.eql(u8, reader.elementName(), "item")) {
+                    if (item.name.len == 0) return ParseError.MissingName;
+                    return item;
+                }
+                return ParseError.UnexpectedElementEnd;
+            },
+        }
+    }
+}
+
 fn freeHotGameItems(allocator: Allocator, games: []model.HotGame) void {
     for (games) |game| {
         allocator.free(game.name);
@@ -395,6 +473,18 @@ fn freeStringListItems(allocator: Allocator, values: []const []const u8) void {
     for (values) |value| {
         allocator.free(value);
     }
+}
+
+fn freeCollectionItemsOnly(allocator: Allocator, items: []model.CollectionItem) void {
+    for (items) |item| {
+        freeCollectionItem(allocator, item);
+    }
+}
+
+fn freeCollectionItem(allocator: Allocator, item: model.CollectionItem) void {
+    if (item.name.len > 0) allocator.free(item.name);
+    if (item.image_url) |image_url| allocator.free(image_url);
+    if (item.thumbnail_url) |thumbnail_url| allocator.free(thumbnail_url);
 }
 
 fn parseThingLink(builder: *GameBuilder, reader: *xml_lib.Reader) !void {
@@ -614,6 +704,90 @@ fn parseRanks(reader: *xml_lib.Reader, game: *model.Game) !void {
     }
 }
 
+fn parseCollectionStatus(reader: *xml_lib.Reader, item: *model.CollectionItem) void {
+    item.owned = isAttributeValue(reader, "own", "1");
+    item.prev_owned = isAttributeValue(reader, "prevowned", "1");
+    item.for_trade = isAttributeValue(reader, "fortrade", "1");
+    item.want = isAttributeValue(reader, "want", "1");
+    item.want_to_play = isAttributeValue(reader, "wanttoplay", "1");
+    item.want_to_buy = isAttributeValue(reader, "wanttobuy", "1");
+    item.wishlist = isAttributeValue(reader, "wishlist", "1");
+    item.preordered = isAttributeValue(reader, "preordered", "1");
+}
+
+fn parseCollectionStats(reader: *xml_lib.Reader, item: *model.CollectionItem) !void {
+    while (true) {
+        const node = try reader.read();
+        switch (node) {
+            .eof => return ParseError.UnexpectedEndOfDocument,
+            .xml_declaration => unreachable,
+            .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
+            .element_start => {
+                if (std.mem.eql(u8, reader.elementName(), "rating")) {
+                    item.rating = parseOptionalF64Attribute(reader, "value");
+                    try parseCollectionRating(reader, item);
+                } else {
+                    try reader.skipElement();
+                }
+            },
+            .element_end => {
+                if (std.mem.eql(u8, reader.elementName(), "stats")) return;
+                return ParseError.UnexpectedElementEnd;
+            },
+        }
+    }
+}
+
+fn parseCollectionRating(reader: *xml_lib.Reader, item: *model.CollectionItem) !void {
+    while (true) {
+        const node = try reader.read();
+        switch (node) {
+            .eof => return ParseError.UnexpectedEndOfDocument,
+            .xml_declaration => unreachable,
+            .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
+            .element_start => {
+                const element_name = reader.elementName();
+                if (std.mem.eql(u8, element_name, "average")) {
+                    item.bgg_rating = try parseF64Attribute(reader, "value");
+                    try reader.skipElement();
+                } else if (std.mem.eql(u8, element_name, "bayesaverage")) {
+                    item.bayes_average = try parseF64Attribute(reader, "value");
+                    try reader.skipElement();
+                } else if (std.mem.eql(u8, element_name, "ranks")) {
+                    try parseCollectionRanks(reader, item);
+                } else {
+                    try reader.skipElement();
+                }
+            },
+            .element_end => {
+                if (std.mem.eql(u8, reader.elementName(), "rating")) return;
+                return ParseError.UnexpectedElementEnd;
+            },
+        }
+    }
+}
+
+fn parseCollectionRanks(reader: *xml_lib.Reader, item: *model.CollectionItem) !void {
+    while (true) {
+        const node = try reader.read();
+        switch (node) {
+            .eof => return ParseError.UnexpectedEndOfDocument,
+            .xml_declaration => unreachable,
+            .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
+            .element_start => {
+                if (std.mem.eql(u8, reader.elementName(), "rank") and isAttributeValue(reader, "name", "boardgame")) {
+                    item.rank = parseOptionalRank(reader);
+                }
+                try reader.skipElement();
+            },
+            .element_end => {
+                if (std.mem.eql(u8, reader.elementName(), "ranks")) return;
+                return ParseError.UnexpectedElementEnd;
+            },
+        }
+    }
+}
+
 fn parseU32Attribute(reader: *xml_lib.Reader, name: []const u8) !u32 {
     const value = try attributeValue(reader, name);
     return std.fmt.parseInt(u32, value, 10);
@@ -629,9 +803,24 @@ fn parseF64Attribute(reader: *xml_lib.Reader, name: []const u8) !f64 {
     return std.fmt.parseFloat(f64, value);
 }
 
+fn parseOptionalF64Attribute(reader: *xml_lib.Reader, name: []const u8) f64 {
+    const value = attributeValue(reader, name) catch return 0;
+    return std.fmt.parseFloat(f64, value) catch 0;
+}
+
 fn parseOptionalRank(reader: *xml_lib.Reader) u32 {
     const value = attributeValue(reader, "value") catch return 0;
     return std.fmt.parseInt(u32, value, 10) catch 0;
+}
+
+fn parseElementTextU32(reader: *xml_lib.Reader) !u32 {
+    const value = try reader.readElementText();
+    return std.fmt.parseInt(u32, value, 10);
+}
+
+fn parseElementTextI32(reader: *xml_lib.Reader) !i32 {
+    const value = try reader.readElementText();
+    return std.fmt.parseInt(i32, value, 10);
 }
 
 fn dupeAttributeValue(allocator: Allocator, reader: *xml_lib.Reader, name: []const u8) ![]const u8 {
@@ -786,4 +975,45 @@ test "parse thing XML fixture" {
     try std.testing.expectEqual(@as(u32, 52), poll.results[3].not_recommended);
     try std.testing.expectEqualStrings("Best with 4 players", poll.best_with.?);
     try std.testing.expectEqualStrings("Recommended with 3-4 players", poll.recommended_with.?);
+}
+
+test "parse collection XML fixture" {
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        Fixture.path(.collection),
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(bytes);
+
+    const items = try parseCollectionResponse(std.testing.allocator, bytes);
+    defer freeCollectionItems(std.testing.allocator, items);
+
+    try std.testing.expectEqual(@as(usize, 3), items.len);
+
+    try std.testing.expectEqual(@as(u32, 13), items[0].id);
+    try std.testing.expectEqualStrings("CATAN", items[0].name);
+    try std.testing.expectEqual(@as(?i32, 1995), items[0].year_published);
+    try std.testing.expect(items[0].image_url != null);
+    try std.testing.expect(items[0].thumbnail_url != null);
+    try std.testing.expectEqual(@as(u32, 25), items[0].num_plays);
+    try std.testing.expect(items[0].owned);
+    try std.testing.expect(!items[0].prev_owned);
+    try std.testing.expect(!items[0].for_trade);
+    try std.testing.expect(!items[0].want);
+    try std.testing.expect(items[0].want_to_play);
+    try std.testing.expect(!items[0].want_to_buy);
+    try std.testing.expect(!items[0].wishlist);
+    try std.testing.expect(!items[0].preordered);
+    try std.testing.expectApproxEqAbs(@as(f64, 8), items[0].rating, 0.00001);
+    try std.testing.expectApproxEqAbs(@as(f64, 7.14), items[0].bgg_rating, 0.00001);
+    try std.testing.expectApproxEqAbs(@as(f64, 7.01), items[0].bayes_average, 0.00001);
+    try std.testing.expectEqual(@as(u32, 42), items[0].rank);
+
+    try std.testing.expectEqual(@as(u32, 224517), items[2].id);
+    try std.testing.expectEqualStrings("Brass: Birmingham", items[2].name);
+    try std.testing.expect(!items[2].owned);
+    try std.testing.expect(items[2].wishlist);
+    try std.testing.expectApproxEqAbs(@as(f64, 0), items[2].rating, 0.00001);
+    try std.testing.expectEqual(@as(u32, 0), items[2].rank);
 }
