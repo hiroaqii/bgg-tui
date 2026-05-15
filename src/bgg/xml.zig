@@ -1,6 +1,7 @@
 const std = @import("std");
 const xml_lib = @import("xml");
 
+const html = @import("html.zig");
 const model = @import("model.zig");
 
 const Allocator = std.mem.Allocator;
@@ -375,7 +376,7 @@ fn parseThingItem(allocator: Allocator, reader: *xml_lib.Reader) !model.Game {
                     }
                     try reader.skipElement();
                 } else if (std.mem.eql(u8, element_name, "description")) {
-                    replaceRequiredString(allocator, &builder.game.description, try reader.readElementTextAlloc(allocator));
+                    replaceRequiredString(allocator, &builder.game.description, try readDecodedElementText(allocator, reader));
                 } else if (std.mem.eql(u8, element_name, "yearpublished")) {
                     builder.game.year_published = try parseI32Attribute(reader, "value");
                     try reader.skipElement();
@@ -639,7 +640,7 @@ fn parseArticle(allocator: Allocator, reader: *xml_lib.Reader) !model.Article {
             .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
             .element_start => {
                 if (std.mem.eql(u8, reader.elementName(), "body")) {
-                    replaceRequiredString(allocator, &article.body, try reader.readElementTextAlloc(allocator));
+                    replaceRequiredString(allocator, &article.body, try readDecodedElementText(allocator, reader));
                 } else {
                     try reader.skipElement();
                 }
@@ -1141,6 +1142,12 @@ fn dupeAttributeValue(allocator: Allocator, reader: *xml_lib.Reader, name: []con
     return try reader.attributeValueAlloc(allocator, index);
 }
 
+fn readDecodedElementText(allocator: Allocator, reader: *xml_lib.Reader) ![]u8 {
+    const raw = try reader.readElementTextAlloc(allocator);
+    defer allocator.free(raw);
+    return try html.decodeEntities(allocator, raw);
+}
+
 fn replaceRequiredString(allocator: Allocator, target: *[]const u8, value: []const u8) void {
     if (target.len > 0) allocator.free(target.*);
     target.* = value;
@@ -1249,6 +1256,8 @@ test "parse thing XML fixture" {
     try std.testing.expectEqualStrings("CATAN", game.name);
     try std.testing.expectEqual(@as(?i32, 1995), game.year_published);
     try std.testing.expect(game.description.len > 0);
+    try std.testing.expect(std.mem.indexOf(u8, game.description, "\n\nSetup includes") != null);
+    try std.testing.expect(std.mem.indexOf(u8, game.description, "&#10;") == null);
     try std.testing.expect(game.thumbnail_url != null);
     try std.testing.expect(game.image_url != null);
 
