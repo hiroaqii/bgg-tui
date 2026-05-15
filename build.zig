@@ -4,9 +4,17 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const xml_dep = b.dependency("xml", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const mod = b.addModule("bgg_tui", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
+        .imports = &.{
+            .{ .name = "xml", .module = xml_dep.module("xml") },
+        },
     });
 
     const exe = b.addExecutable(.{

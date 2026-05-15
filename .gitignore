@@ -1,4 +1,7 @@
 /bgg-tui
+.zig-cache/
+zig-out/
+zig-pkg/
 TODO-*.md
 MEMO-*.md
 
