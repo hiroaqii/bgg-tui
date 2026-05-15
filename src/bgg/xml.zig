@@ -93,6 +93,34 @@ pub fn parseHotResponse(allocator: Allocator, bytes: []const u8) ![]model.HotGam
     return results.toOwnedSlice(allocator);
 }
 
+pub fn parseThingResponse(allocator: Allocator, bytes: []const u8) ![]model.Game {
+    var static_reader: xml_lib.Reader.Static = .init(allocator, bytes, .{});
+    defer static_reader.deinit();
+    const reader = &static_reader.interface;
+
+    var games: std.ArrayList(model.Game) = .empty;
+    errdefer {
+        freeGameItems(allocator, games.items);
+        games.deinit(allocator);
+    }
+
+    while (true) {
+        const node = try reader.read();
+        switch (node) {
+            .eof => break,
+            .xml_declaration, .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
+            .element_start => {
+                if (std.mem.eql(u8, reader.elementName(), "item")) {
+                    try games.append(allocator, try parseThingItem(allocator, reader));
+                }
+            },
+            .element_end => continue,
+        }
+    }
+
+    return games.toOwnedSlice(allocator);
+}
+
 pub fn freeSearchResults(allocator: Allocator, results: []model.GameSearchResult) void {
     for (results) |item| {
         allocator.free(item.name);
@@ -102,6 +130,11 @@ pub fn freeSearchResults(allocator: Allocator, results: []model.GameSearchResult
 
 pub fn freeHotGames(allocator: Allocator, games: []model.HotGame) void {
     freeHotGameItems(allocator, games);
+    allocator.free(games);
+}
+
+pub fn freeGames(allocator: Allocator, games: []model.Game) void {
+    freeGameItems(allocator, games);
     allocator.free(games);
 }
 
@@ -197,10 +230,387 @@ fn parseHotItem(allocator: Allocator, reader: *xml_lib.Reader) !model.HotGame {
     }
 }
 
+fn parseThingItem(allocator: Allocator, reader: *xml_lib.Reader) !model.Game {
+    var builder: GameBuilder = .{
+        .allocator = allocator,
+        .game = .{
+            .id = try parseU32Attribute(reader, "id"),
+            .name = "",
+        },
+    };
+    errdefer builder.deinit();
+
+    while (true) {
+        const node = try reader.read();
+        switch (node) {
+            .eof => return ParseError.UnexpectedEndOfDocument,
+            .xml_declaration => unreachable,
+            .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
+            .element_start => {
+                const element_name = reader.elementName();
+                if (std.mem.eql(u8, element_name, "thumbnail")) {
+                    replaceOptionalString(allocator, &builder.game.thumbnail_url, try reader.readElementTextAlloc(allocator));
+                } else if (std.mem.eql(u8, element_name, "image")) {
+                    replaceOptionalString(allocator, &builder.game.image_url, try reader.readElementTextAlloc(allocator));
+                } else if (std.mem.eql(u8, element_name, "name")) {
+                    if (isAttributeValue(reader, "type", "primary")) {
+                        replaceRequiredString(allocator, &builder.game.name, try dupeAttributeValue(allocator, reader, "value"));
+                    }
+                    try reader.skipElement();
+                } else if (std.mem.eql(u8, element_name, "description")) {
+                    replaceRequiredString(allocator, &builder.game.description, try reader.readElementTextAlloc(allocator));
+                } else if (std.mem.eql(u8, element_name, "yearpublished")) {
+                    builder.game.year_published = try parseI32Attribute(reader, "value");
+                    try reader.skipElement();
+                } else if (std.mem.eql(u8, element_name, "minplayers")) {
+                    builder.game.min_players = try parseU32Attribute(reader, "value");
+                    try reader.skipElement();
+                } else if (std.mem.eql(u8, element_name, "maxplayers")) {
+                    builder.game.max_players = try parseU32Attribute(reader, "value");
+                    try reader.skipElement();
+                } else if (std.mem.eql(u8, element_name, "playingtime")) {
+                    builder.game.playing_time = try parseU32Attribute(reader, "value");
+                    try reader.skipElement();
+                } else if (std.mem.eql(u8, element_name, "minplaytime")) {
+                    builder.game.min_play_time = try parseU32Attribute(reader, "value");
+                    try reader.skipElement();
+                } else if (std.mem.eql(u8, element_name, "maxplaytime")) {
+                    builder.game.max_play_time = try parseU32Attribute(reader, "value");
+                    try reader.skipElement();
+                } else if (std.mem.eql(u8, element_name, "minage")) {
+                    builder.game.min_age = try parseU32Attribute(reader, "value");
+                    try reader.skipElement();
+                } else if (std.mem.eql(u8, element_name, "link")) {
+                    try parseThingLink(&builder, reader);
+                    try reader.skipElement();
+                } else if (std.mem.eql(u8, element_name, "poll")) {
+                    if (isAttributeValue(reader, "name", "suggested_numplayers")) {
+                        if (builder.game.player_count_poll) |poll| freePlayerCountPoll(allocator, poll);
+                        builder.game.player_count_poll = try parsePlayerCountPoll(allocator, reader);
+                    } else {
+                        try reader.skipElement();
+                    }
+                } else if (std.mem.eql(u8, element_name, "poll-summary")) {
+                    if (isAttributeValue(reader, "name", "suggested_numplayers")) {
+                        try parsePlayerCountSummary(allocator, reader, &builder.game.player_count_poll);
+                    } else {
+                        try reader.skipElement();
+                    }
+                } else if (std.mem.eql(u8, element_name, "statistics")) {
+                    try parseStatistics(reader, &builder.game);
+                } else {
+                    try reader.skipElement();
+                }
+            },
+            .element_end => {
+                if (std.mem.eql(u8, reader.elementName(), "item")) {
+                    if (builder.game.name.len == 0) return ParseError.MissingPrimaryName;
+                    return try builder.finish();
+                }
+                return ParseError.UnexpectedElementEnd;
+            },
+        }
+    }
+}
+
 fn freeHotGameItems(allocator: Allocator, games: []model.HotGame) void {
     for (games) |game| {
         allocator.free(game.name);
         if (game.thumbnail_url) |thumbnail_url| allocator.free(thumbnail_url);
+    }
+}
+
+fn freeGameItems(allocator: Allocator, games: []model.Game) void {
+    for (games) |game| {
+        freeGame(allocator, game);
+    }
+}
+
+fn freeGame(allocator: Allocator, game: model.Game) void {
+    if (game.name.len > 0) allocator.free(game.name);
+    if (game.description.len > 0) allocator.free(game.description);
+    if (game.thumbnail_url) |thumbnail_url| allocator.free(thumbnail_url);
+    if (game.image_url) |image_url| allocator.free(image_url);
+    freeStringList(allocator, game.designers);
+    freeStringList(allocator, game.artists);
+    freeStringList(allocator, game.publishers);
+    freeStringList(allocator, game.categories);
+    freeStringList(allocator, game.mechanics);
+    if (game.player_count_poll) |poll| freePlayerCountPoll(allocator, poll);
+}
+
+fn freeStringList(allocator: Allocator, values: []const []const u8) void {
+    for (values) |value| {
+        allocator.free(value);
+    }
+    allocator.free(values);
+}
+
+fn freePlayerCountPoll(allocator: Allocator, poll: model.PlayerCountPoll) void {
+    for (poll.results) |result| {
+        allocator.free(result.num_players);
+    }
+    allocator.free(poll.results);
+    if (poll.best_with) |value| allocator.free(value);
+    if (poll.recommended_with) |value| allocator.free(value);
+}
+
+const GameBuilder = struct {
+    allocator: Allocator,
+    game: model.Game,
+    designers: std.ArrayList([]const u8) = .empty,
+    artists: std.ArrayList([]const u8) = .empty,
+    publishers: std.ArrayList([]const u8) = .empty,
+    categories: std.ArrayList([]const u8) = .empty,
+    mechanics: std.ArrayList([]const u8) = .empty,
+
+    fn deinit(builder: *GameBuilder) void {
+        freeGame(builder.allocator, builder.game);
+        freeStringListItems(builder.allocator, builder.designers.items);
+        builder.designers.deinit(builder.allocator);
+        freeStringListItems(builder.allocator, builder.artists.items);
+        builder.artists.deinit(builder.allocator);
+        freeStringListItems(builder.allocator, builder.publishers.items);
+        builder.publishers.deinit(builder.allocator);
+        freeStringListItems(builder.allocator, builder.categories.items);
+        builder.categories.deinit(builder.allocator);
+        freeStringListItems(builder.allocator, builder.mechanics.items);
+        builder.mechanics.deinit(builder.allocator);
+    }
+
+    fn finish(builder: *GameBuilder) !model.Game {
+        errdefer builder.deinit();
+        builder.game.designers = try builder.designers.toOwnedSlice(builder.allocator);
+        builder.game.artists = try builder.artists.toOwnedSlice(builder.allocator);
+        builder.game.publishers = try builder.publishers.toOwnedSlice(builder.allocator);
+        builder.game.categories = try builder.categories.toOwnedSlice(builder.allocator);
+        builder.game.mechanics = try builder.mechanics.toOwnedSlice(builder.allocator);
+        const game = builder.game;
+        builder.* = undefined;
+        return game;
+    }
+};
+
+fn freeStringListItems(allocator: Allocator, values: []const []const u8) void {
+    for (values) |value| {
+        allocator.free(value);
+    }
+}
+
+fn parseThingLink(builder: *GameBuilder, reader: *xml_lib.Reader) !void {
+    const link_type = try attributeValue(reader, "type");
+    const value = try dupeAttributeValue(builder.allocator, reader, "value");
+    errdefer builder.allocator.free(value);
+
+    if (std.mem.eql(u8, link_type, "boardgamedesigner")) {
+        try builder.designers.append(builder.allocator, value);
+    } else if (std.mem.eql(u8, link_type, "boardgameartist")) {
+        try builder.artists.append(builder.allocator, value);
+    } else if (std.mem.eql(u8, link_type, "boardgamepublisher")) {
+        try builder.publishers.append(builder.allocator, value);
+    } else if (std.mem.eql(u8, link_type, "boardgamecategory")) {
+        try builder.categories.append(builder.allocator, value);
+    } else if (std.mem.eql(u8, link_type, "boardgamemechanic")) {
+        try builder.mechanics.append(builder.allocator, value);
+    } else {
+        builder.allocator.free(value);
+    }
+}
+
+fn parsePlayerCountPoll(allocator: Allocator, reader: *xml_lib.Reader) !model.PlayerCountPoll {
+    var poll: model.PlayerCountPoll = .{
+        .total_votes = try parseU32Attribute(reader, "totalvotes"),
+    };
+    errdefer freePlayerCountPoll(allocator, poll);
+
+    var results: std.ArrayList(model.PlayerCountVotes) = .empty;
+    errdefer {
+        for (results.items) |result| allocator.free(result.num_players);
+        results.deinit(allocator);
+    }
+
+    while (true) {
+        const node = try reader.read();
+        switch (node) {
+            .eof => return ParseError.UnexpectedEndOfDocument,
+            .xml_declaration => unreachable,
+            .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
+            .element_start => {
+                if (std.mem.eql(u8, reader.elementName(), "results")) {
+                    try results.append(allocator, try parsePlayerCountVotes(allocator, reader));
+                } else {
+                    try reader.skipElement();
+                }
+            },
+            .element_end => {
+                if (std.mem.eql(u8, reader.elementName(), "poll")) {
+                    poll.results = try results.toOwnedSlice(allocator);
+                    return poll;
+                }
+                return ParseError.UnexpectedElementEnd;
+            },
+        }
+    }
+}
+
+fn parsePlayerCountVotes(allocator: Allocator, reader: *xml_lib.Reader) !model.PlayerCountVotes {
+    var votes: model.PlayerCountVotes = .{
+        .num_players = try dupeAttributeValue(allocator, reader, "numplayers"),
+    };
+    errdefer allocator.free(votes.num_players);
+
+    while (true) {
+        const node = try reader.read();
+        switch (node) {
+            .eof => return ParseError.UnexpectedEndOfDocument,
+            .xml_declaration => unreachable,
+            .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
+            .element_start => {
+                if (std.mem.eql(u8, reader.elementName(), "result")) {
+                    const value = try attributeValue(reader, "value");
+                    const num_votes = try parseU32Attribute(reader, "numvotes");
+                    if (std.mem.eql(u8, value, "Best")) {
+                        votes.best = num_votes;
+                    } else if (std.mem.eql(u8, value, "Recommended")) {
+                        votes.recommended = num_votes;
+                    } else if (std.mem.eql(u8, value, "Not Recommended")) {
+                        votes.not_recommended = num_votes;
+                    }
+                    try reader.skipElement();
+                } else {
+                    try reader.skipElement();
+                }
+            },
+            .element_end => {
+                if (std.mem.eql(u8, reader.elementName(), "results")) return votes;
+                return ParseError.UnexpectedElementEnd;
+            },
+        }
+    }
+}
+
+fn parsePlayerCountSummary(allocator: Allocator, reader: *xml_lib.Reader, poll: *?model.PlayerCountPoll) !void {
+    if (poll.* == null) {
+        poll.* = .{};
+    }
+
+    while (true) {
+        const node = try reader.read();
+        switch (node) {
+            .eof => return ParseError.UnexpectedEndOfDocument,
+            .xml_declaration => unreachable,
+            .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
+            .element_start => {
+                if (std.mem.eql(u8, reader.elementName(), "result")) {
+                    const name = try attributeValue(reader, "name");
+                    if (std.mem.eql(u8, name, "bestwith")) {
+                        replaceOptionalString(allocator, &poll.*.?.best_with, try dupeAttributeValue(allocator, reader, "value"));
+                    } else if (std.mem.eql(u8, name, "recommmendedwith") or std.mem.eql(u8, name, "recommendedwith")) {
+                        replaceOptionalString(allocator, &poll.*.?.recommended_with, try dupeAttributeValue(allocator, reader, "value"));
+                    }
+                    try reader.skipElement();
+                } else {
+                    try reader.skipElement();
+                }
+            },
+            .element_end => {
+                if (std.mem.eql(u8, reader.elementName(), "poll-summary")) return;
+                return ParseError.UnexpectedElementEnd;
+            },
+        }
+    }
+}
+
+fn parseStatistics(reader: *xml_lib.Reader, game: *model.Game) !void {
+    while (true) {
+        const node = try reader.read();
+        switch (node) {
+            .eof => return ParseError.UnexpectedEndOfDocument,
+            .xml_declaration => unreachable,
+            .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
+            .element_start => {
+                if (std.mem.eql(u8, reader.elementName(), "ratings")) {
+                    try parseRatings(reader, game);
+                } else {
+                    try reader.skipElement();
+                }
+            },
+            .element_end => {
+                if (std.mem.eql(u8, reader.elementName(), "statistics")) return;
+                return ParseError.UnexpectedElementEnd;
+            },
+        }
+    }
+}
+
+fn parseRatings(reader: *xml_lib.Reader, game: *model.Game) !void {
+    while (true) {
+        const node = try reader.read();
+        switch (node) {
+            .eof => return ParseError.UnexpectedEndOfDocument,
+            .xml_declaration => unreachable,
+            .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
+            .element_start => {
+                const element_name = reader.elementName();
+                if (std.mem.eql(u8, element_name, "usersrated")) {
+                    game.users_rated = try parseU32Attribute(reader, "value");
+                    try reader.skipElement();
+                } else if (std.mem.eql(u8, element_name, "average")) {
+                    game.rating = try parseF64Attribute(reader, "value");
+                    try reader.skipElement();
+                } else if (std.mem.eql(u8, element_name, "bayesaverage")) {
+                    game.bayes_average = try parseF64Attribute(reader, "value");
+                    try reader.skipElement();
+                } else if (std.mem.eql(u8, element_name, "ranks")) {
+                    try parseRanks(reader, game);
+                } else if (std.mem.eql(u8, element_name, "stddev")) {
+                    game.stddev = try parseF64Attribute(reader, "value");
+                    try reader.skipElement();
+                } else if (std.mem.eql(u8, element_name, "median")) {
+                    game.median = try parseF64Attribute(reader, "value");
+                    try reader.skipElement();
+                } else if (std.mem.eql(u8, element_name, "owned")) {
+                    game.owned = try parseU32Attribute(reader, "value");
+                    try reader.skipElement();
+                } else if (std.mem.eql(u8, element_name, "numcomments")) {
+                    game.num_comments = try parseU32Attribute(reader, "value");
+                    try reader.skipElement();
+                } else if (std.mem.eql(u8, element_name, "numweights")) {
+                    game.num_weights = try parseU32Attribute(reader, "value");
+                    try reader.skipElement();
+                } else if (std.mem.eql(u8, element_name, "averageweight")) {
+                    game.weight = try parseF64Attribute(reader, "value");
+                    try reader.skipElement();
+                } else {
+                    try reader.skipElement();
+                }
+            },
+            .element_end => {
+                if (std.mem.eql(u8, reader.elementName(), "ratings")) return;
+                return ParseError.UnexpectedElementEnd;
+            },
+        }
+    }
+}
+
+fn parseRanks(reader: *xml_lib.Reader, game: *model.Game) !void {
+    while (true) {
+        const node = try reader.read();
+        switch (node) {
+            .eof => return ParseError.UnexpectedEndOfDocument,
+            .xml_declaration => unreachable,
+            .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
+            .element_start => {
+                if (std.mem.eql(u8, reader.elementName(), "rank") and isAttributeValue(reader, "name", "boardgame")) {
+                    game.rank = parseOptionalRank(reader);
+                }
+                try reader.skipElement();
+            },
+            .element_end => {
+                if (std.mem.eql(u8, reader.elementName(), "ranks")) return;
+                return ParseError.UnexpectedElementEnd;
+            },
+        }
     }
 }
 
@@ -214,9 +624,29 @@ fn parseI32Attribute(reader: *xml_lib.Reader, name: []const u8) !i32 {
     return std.fmt.parseInt(i32, value, 10);
 }
 
+fn parseF64Attribute(reader: *xml_lib.Reader, name: []const u8) !f64 {
+    const value = try attributeValue(reader, name);
+    return std.fmt.parseFloat(f64, value);
+}
+
+fn parseOptionalRank(reader: *xml_lib.Reader) u32 {
+    const value = attributeValue(reader, "value") catch return 0;
+    return std.fmt.parseInt(u32, value, 10) catch 0;
+}
+
 fn dupeAttributeValue(allocator: Allocator, reader: *xml_lib.Reader, name: []const u8) ![]const u8 {
     const index = reader.attributeIndex(name) orelse return ParseError.MissingRequiredAttribute;
     return try reader.attributeValueAlloc(allocator, index);
+}
+
+fn replaceRequiredString(allocator: Allocator, target: *[]const u8, value: []const u8) void {
+    if (target.len > 0) allocator.free(target.*);
+    target.* = value;
+}
+
+fn replaceOptionalString(allocator: Allocator, target: *?[]const u8, value: []const u8) void {
+    if (target.*) |old| allocator.free(old);
+    target.* = value;
 }
 
 fn isAttributeValue(reader: *xml_lib.Reader, name: []const u8, expected: []const u8) bool {
@@ -296,4 +726,64 @@ test "parse hot XML fixture" {
     try std.testing.expectEqualStrings("Gloomhaven: Jaws of the Lion", games[4].name);
     try std.testing.expectEqualStrings("https://cf.geekdo-images.com/example5__thumb/img/example5.jpg", games[4].thumbnail_url.?);
     try std.testing.expectEqual(@as(?i32, 2020), games[4].year_published);
+}
+
+test "parse thing XML fixture" {
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        Fixture.path(.thing),
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(bytes);
+
+    const games = try parseThingResponse(std.testing.allocator, bytes);
+    defer freeGames(std.testing.allocator, games);
+
+    try std.testing.expectEqual(@as(usize, 1), games.len);
+
+    const game = games[0];
+    try std.testing.expectEqual(@as(u32, 13), game.id);
+    try std.testing.expectEqualStrings("CATAN", game.name);
+    try std.testing.expectEqual(@as(?i32, 1995), game.year_published);
+    try std.testing.expect(game.description.len > 0);
+    try std.testing.expect(game.thumbnail_url != null);
+    try std.testing.expect(game.image_url != null);
+
+    try std.testing.expectEqual(@as(u32, 3), game.min_players);
+    try std.testing.expectEqual(@as(u32, 4), game.max_players);
+    try std.testing.expectEqual(@as(u32, 120), game.playing_time);
+    try std.testing.expectEqual(@as(u32, 60), game.min_play_time);
+    try std.testing.expectEqual(@as(u32, 120), game.max_play_time);
+    try std.testing.expectEqual(@as(u32, 10), game.min_age);
+
+    try std.testing.expectApproxEqAbs(@as(f64, 7.14567), game.rating, 0.00001);
+    try std.testing.expectEqual(@as(u32, 98765), game.users_rated);
+    try std.testing.expectApproxEqAbs(@as(f64, 7.01234), game.bayes_average, 0.00001);
+    try std.testing.expectEqual(@as(u32, 389), game.rank);
+    try std.testing.expectApproxEqAbs(@as(f64, 2.32), game.weight, 0.00001);
+    try std.testing.expectApproxEqAbs(@as(f64, 1.54321), game.stddev, 0.00001);
+    try std.testing.expectApproxEqAbs(@as(f64, 0), game.median, 0.00001);
+    try std.testing.expectEqual(@as(u32, 123456), game.owned);
+    try std.testing.expectEqual(@as(u32, 23456), game.num_comments);
+    try std.testing.expectEqual(@as(u32, 7890), game.num_weights);
+
+    try std.testing.expectEqual(@as(usize, 1), game.designers.len);
+    try std.testing.expectEqualStrings("Klaus Teuber", game.designers[0]);
+    try std.testing.expectEqual(@as(usize, 2), game.artists.len);
+    try std.testing.expectEqualStrings("Volkan Baga", game.artists[0]);
+    try std.testing.expectEqualStrings("Tanja Donner", game.artists[1]);
+    try std.testing.expectEqual(@as(usize, 2), game.categories.len);
+    try std.testing.expectEqual(@as(usize, 4), game.mechanics.len);
+    try std.testing.expectEqual(@as(usize, 2), game.publishers.len);
+
+    const poll = game.player_count_poll.?;
+    try std.testing.expectEqual(@as(u32, 2551), poll.total_votes);
+    try std.testing.expectEqual(@as(usize, 5), poll.results.len);
+    try std.testing.expectEqualStrings("4", poll.results[3].num_players);
+    try std.testing.expectEqual(@as(u32, 1838), poll.results[3].best);
+    try std.testing.expectEqual(@as(u32, 525), poll.results[3].recommended);
+    try std.testing.expectEqual(@as(u32, 52), poll.results[3].not_recommended);
+    try std.testing.expectEqualStrings("Best with 4 players", poll.best_with.?);
+    try std.testing.expectEqualStrings("Recommended with 3-4 players", poll.recommended_with.?);
 }

@@ -14,6 +14,51 @@ pub const HotGame = struct {
     year_published: ?i32 = null,
 };
 
+pub const PlayerCountVotes = struct {
+    num_players: []const u8,
+    best: u32 = 0,
+    recommended: u32 = 0,
+    not_recommended: u32 = 0,
+};
+
+pub const PlayerCountPoll = struct {
+    total_votes: u32 = 0,
+    results: []PlayerCountVotes = &.{},
+    best_with: ?[]const u8 = null,
+    recommended_with: ?[]const u8 = null,
+};
+
+pub const Game = struct {
+    id: u32,
+    name: []const u8,
+    year_published: ?i32 = null,
+    description: []const u8 = "",
+    thumbnail_url: ?[]const u8 = null,
+    image_url: ?[]const u8 = null,
+    min_players: u32 = 0,
+    max_players: u32 = 0,
+    playing_time: u32 = 0,
+    min_play_time: u32 = 0,
+    max_play_time: u32 = 0,
+    min_age: u32 = 0,
+    rating: f64 = 0,
+    users_rated: u32 = 0,
+    bayes_average: f64 = 0,
+    rank: u32 = 0,
+    weight: f64 = 0,
+    stddev: f64 = 0,
+    median: f64 = 0,
+    owned: u32 = 0,
+    num_comments: u32 = 0,
+    num_weights: u32 = 0,
+    designers: []const []const u8 = &.{},
+    artists: []const []const u8 = &.{},
+    publishers: []const []const u8 = &.{},
+    categories: []const []const u8 = &.{},
+    mechanics: []const []const u8 = &.{},
+    player_count_poll: ?PlayerCountPoll = null,
+};
+
 pub const CollectionItem = struct {
     id: u32,
     name: []const u8,
