@@ -80,6 +80,15 @@ pub const CollectionItem = struct {
     preordered: bool = false,
 };
 
+pub const Forum = struct {
+    id: u32,
+    title: []const u8,
+    description: []const u8 = "",
+    num_threads: u32 = 0,
+    num_posts: u32 = 0,
+    last_post_date: []const u8 = "",
+};
+
 test "model declarations compile" {
     const result = GameSearchResult{ .id = 1, .name = "Gloomhaven" };
     try std.testing.expectEqual(@as(u32, 1), result.id);

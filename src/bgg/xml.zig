@@ -149,6 +149,34 @@ pub fn parseCollectionResponse(allocator: Allocator, bytes: []const u8) ![]model
     return items.toOwnedSlice(allocator);
 }
 
+pub fn parseForumListResponse(allocator: Allocator, bytes: []const u8) ![]model.Forum {
+    var static_reader: xml_lib.Reader.Static = .init(allocator, bytes, .{});
+    defer static_reader.deinit();
+    const reader = &static_reader.interface;
+
+    var forums: std.ArrayList(model.Forum) = .empty;
+    errdefer {
+        freeForumItems(allocator, forums.items);
+        forums.deinit(allocator);
+    }
+
+    while (true) {
+        const node = try reader.read();
+        switch (node) {
+            .eof => break,
+            .xml_declaration, .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
+            .element_start => {
+                if (std.mem.eql(u8, reader.elementName(), "forum")) {
+                    try forums.append(allocator, try parseForumListItem(allocator, reader));
+                }
+            },
+            .element_end => continue,
+        }
+    }
+
+    return forums.toOwnedSlice(allocator);
+}
+
 pub fn freeSearchResults(allocator: Allocator, results: []model.GameSearchResult) void {
     for (results) |item| {
         allocator.free(item.name);
@@ -169,6 +197,11 @@ pub fn freeGames(allocator: Allocator, games: []model.Game) void {
 pub fn freeCollectionItems(allocator: Allocator, items: []model.CollectionItem) void {
     freeCollectionItemsOnly(allocator, items);
     allocator.free(items);
+}
+
+pub fn freeForums(allocator: Allocator, forums: []model.Forum) void {
+    freeForumItems(allocator, forums);
+    allocator.free(forums);
 }
 
 fn parseSearchItem(allocator: Allocator, reader: *xml_lib.Reader) !model.GameSearchResult {
@@ -391,6 +424,21 @@ fn parseCollectionItem(allocator: Allocator, reader: *xml_lib.Reader) !model.Col
     }
 }
 
+fn parseForumListItem(allocator: Allocator, reader: *xml_lib.Reader) !model.Forum {
+    const forum: model.Forum = .{
+        .id = try parseU32Attribute(reader, "id"),
+        .title = try dupeAttributeValue(allocator, reader, "title"),
+        .description = try dupeAttributeValue(allocator, reader, "description"),
+        .num_threads = try parseU32Attribute(reader, "numthreads"),
+        .num_posts = try parseU32Attribute(reader, "numposts"),
+        .last_post_date = try dupeAttributeValue(allocator, reader, "lastpostdate"),
+    };
+    errdefer freeForum(allocator, forum);
+
+    try reader.skipElement();
+    return forum;
+}
+
 fn freeHotGameItems(allocator: Allocator, games: []model.HotGame) void {
     for (games) |game| {
         allocator.free(game.name);
@@ -485,6 +533,18 @@ fn freeCollectionItem(allocator: Allocator, item: model.CollectionItem) void {
     if (item.name.len > 0) allocator.free(item.name);
     if (item.image_url) |image_url| allocator.free(image_url);
     if (item.thumbnail_url) |thumbnail_url| allocator.free(thumbnail_url);
+}
+
+fn freeForumItems(allocator: Allocator, forums: []model.Forum) void {
+    for (forums) |forum| {
+        freeForum(allocator, forum);
+    }
+}
+
+fn freeForum(allocator: Allocator, forum: model.Forum) void {
+    allocator.free(forum.title);
+    if (forum.description.len > 0) allocator.free(forum.description);
+    if (forum.last_post_date.len > 0) allocator.free(forum.last_post_date);
 }
 
 fn parseThingLink(builder: *GameBuilder, reader: *xml_lib.Reader) !void {
@@ -1016,4 +1076,31 @@ test "parse collection XML fixture" {
     try std.testing.expect(items[2].wishlist);
     try std.testing.expectApproxEqAbs(@as(f64, 0), items[2].rating, 0.00001);
     try std.testing.expectEqual(@as(u32, 0), items[2].rank);
+}
+
+test "parse forum list XML fixture" {
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        Fixture.path(.forum_list),
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(bytes);
+
+    const forums = try parseForumListResponse(std.testing.allocator, bytes);
+    defer freeForums(std.testing.allocator, forums);
+
+    try std.testing.expectEqual(@as(usize, 3), forums.len);
+
+    try std.testing.expectEqual(@as(u32, 19), forums[0].id);
+    try std.testing.expectEqualStrings("Reviews", forums[0].title);
+    try std.testing.expectEqualStrings("Post your game reviews in this forum.", forums[0].description);
+    try std.testing.expectEqual(@as(u32, 150), forums[0].num_threads);
+    try std.testing.expectEqual(@as(u32, 450), forums[0].num_posts);
+    try std.testing.expectEqualStrings("Sat, 01 Jan 2025 10:00:00 +0000", forums[0].last_post_date);
+
+    try std.testing.expectEqual(@as(u32, 21), forums[2].id);
+    try std.testing.expectEqualStrings("General", forums[2].title);
+    try std.testing.expectEqual(@as(u32, 500), forums[2].num_threads);
+    try std.testing.expectEqual(@as(u32, 2500), forums[2].num_posts);
 }
