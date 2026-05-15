@@ -89,6 +89,21 @@ pub const Forum = struct {
     last_post_date: []const u8 = "",
 };
 
+pub const ThreadSummary = struct {
+    id: u32,
+    subject: []const u8,
+    author: []const u8,
+    num_articles: u32 = 0,
+    post_date: []const u8 = "",
+    last_post_date: []const u8 = "",
+};
+
+pub const ThreadList = struct {
+    threads: []ThreadSummary = &.{},
+    page: u32 = 1,
+    total_pages: u32 = 1,
+};
+
 test "model declarations compile" {
     const result = GameSearchResult{ .id = 1, .name = "Gloomhaven" };
     try std.testing.expectEqual(@as(u32, 1), result.id);

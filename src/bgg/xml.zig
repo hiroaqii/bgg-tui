@@ -177,6 +177,27 @@ pub fn parseForumListResponse(allocator: Allocator, bytes: []const u8) ![]model.
     return forums.toOwnedSlice(allocator);
 }
 
+pub fn parseForumResponse(allocator: Allocator, bytes: []const u8, page: u32) !model.ThreadList {
+    var static_reader: xml_lib.Reader.Static = .init(allocator, bytes, .{});
+    defer static_reader.deinit();
+    const reader = &static_reader.interface;
+
+    while (true) {
+        const node = try reader.read();
+        switch (node) {
+            .eof => return ParseError.UnexpectedEndOfDocument,
+            .xml_declaration, .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
+            .element_start => {
+                if (std.mem.eql(u8, reader.elementName(), "forum")) {
+                    return try parseForumPage(allocator, reader, if (page == 0) 1 else page);
+                }
+                try reader.skipElement();
+            },
+            .element_end => return ParseError.UnexpectedElementEnd,
+        }
+    }
+}
+
 pub fn freeSearchResults(allocator: Allocator, results: []model.GameSearchResult) void {
     for (results) |item| {
         allocator.free(item.name);
@@ -202,6 +223,10 @@ pub fn freeCollectionItems(allocator: Allocator, items: []model.CollectionItem) 
 pub fn freeForums(allocator: Allocator, forums: []model.Forum) void {
     freeForumItems(allocator, forums);
     allocator.free(forums);
+}
+
+pub fn freeThreadList(allocator: Allocator, thread_list: model.ThreadList) void {
+    freeThreadSummaries(allocator, thread_list.threads);
 }
 
 fn parseSearchItem(allocator: Allocator, reader: *xml_lib.Reader) !model.GameSearchResult {
@@ -439,6 +464,78 @@ fn parseForumListItem(allocator: Allocator, reader: *xml_lib.Reader) !model.Foru
     return forum;
 }
 
+fn parseForumPage(allocator: Allocator, reader: *xml_lib.Reader, page: u32) !model.ThreadList {
+    const num_threads = try parseU32Attribute(reader, "numthreads");
+    var thread_list: model.ThreadList = .{
+        .page = page,
+        .total_pages = totalPages(num_threads, 50),
+    };
+    errdefer freeThreadList(allocator, thread_list);
+
+    while (true) {
+        const node = try reader.read();
+        switch (node) {
+            .eof => return ParseError.UnexpectedEndOfDocument,
+            .xml_declaration => unreachable,
+            .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
+            .element_start => {
+                if (std.mem.eql(u8, reader.elementName(), "threads")) {
+                    thread_list.threads = try parseThreadSummaries(allocator, reader);
+                } else {
+                    try reader.skipElement();
+                }
+            },
+            .element_end => {
+                if (std.mem.eql(u8, reader.elementName(), "forum")) return thread_list;
+                return ParseError.UnexpectedElementEnd;
+            },
+        }
+    }
+}
+
+fn parseThreadSummaries(allocator: Allocator, reader: *xml_lib.Reader) ![]model.ThreadSummary {
+    var threads: std.ArrayList(model.ThreadSummary) = .empty;
+    errdefer {
+        freeThreadSummaryItems(allocator, threads.items);
+        threads.deinit(allocator);
+    }
+
+    while (true) {
+        const node = try reader.read();
+        switch (node) {
+            .eof => return ParseError.UnexpectedEndOfDocument,
+            .xml_declaration => unreachable,
+            .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
+            .element_start => {
+                if (std.mem.eql(u8, reader.elementName(), "thread")) {
+                    try threads.append(allocator, try parseThreadSummary(allocator, reader));
+                } else {
+                    try reader.skipElement();
+                }
+            },
+            .element_end => {
+                if (std.mem.eql(u8, reader.elementName(), "threads")) return try threads.toOwnedSlice(allocator);
+                return ParseError.UnexpectedElementEnd;
+            },
+        }
+    }
+}
+
+fn parseThreadSummary(allocator: Allocator, reader: *xml_lib.Reader) !model.ThreadSummary {
+    const thread: model.ThreadSummary = .{
+        .id = try parseU32Attribute(reader, "id"),
+        .subject = try dupeAttributeValue(allocator, reader, "subject"),
+        .author = try dupeAttributeValue(allocator, reader, "author"),
+        .num_articles = try parseU32Attribute(reader, "numarticles"),
+        .post_date = try dupeAttributeValue(allocator, reader, "postdate"),
+        .last_post_date = try dupeAttributeValue(allocator, reader, "lastpostdate"),
+    };
+    errdefer freeThreadSummary(allocator, thread);
+
+    try reader.skipElement();
+    return thread;
+}
+
 fn freeHotGameItems(allocator: Allocator, games: []model.HotGame) void {
     for (games) |game| {
         allocator.free(game.name);
@@ -545,6 +642,24 @@ fn freeForum(allocator: Allocator, forum: model.Forum) void {
     allocator.free(forum.title);
     if (forum.description.len > 0) allocator.free(forum.description);
     if (forum.last_post_date.len > 0) allocator.free(forum.last_post_date);
+}
+
+fn freeThreadSummaries(allocator: Allocator, threads: []model.ThreadSummary) void {
+    freeThreadSummaryItems(allocator, threads);
+    allocator.free(threads);
+}
+
+fn freeThreadSummaryItems(allocator: Allocator, threads: []model.ThreadSummary) void {
+    for (threads) |thread| {
+        freeThreadSummary(allocator, thread);
+    }
+}
+
+fn freeThreadSummary(allocator: Allocator, thread: model.ThreadSummary) void {
+    allocator.free(thread.subject);
+    allocator.free(thread.author);
+    if (thread.post_date.len > 0) allocator.free(thread.post_date);
+    if (thread.last_post_date.len > 0) allocator.free(thread.last_post_date);
 }
 
 fn parseThingLink(builder: *GameBuilder, reader: *xml_lib.Reader) !void {
@@ -873,6 +988,11 @@ fn parseOptionalRank(reader: *xml_lib.Reader) u32 {
     return std.fmt.parseInt(u32, value, 10) catch 0;
 }
 
+fn totalPages(total_items: u32, page_size: u32) u32 {
+    if (total_items == 0) return 1;
+    return (total_items + page_size - 1) / page_size;
+}
+
 fn parseElementTextU32(reader: *xml_lib.Reader) !u32 {
     const value = try reader.readElementText();
     return std.fmt.parseInt(u32, value, 10);
@@ -1103,4 +1223,33 @@ test "parse forum list XML fixture" {
     try std.testing.expectEqualStrings("General", forums[2].title);
     try std.testing.expectEqual(@as(u32, 500), forums[2].num_threads);
     try std.testing.expectEqual(@as(u32, 2500), forums[2].num_posts);
+}
+
+test "parse forum threads XML fixture" {
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        Fixture.path(.forum),
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(bytes);
+
+    const thread_list = try parseForumResponse(std.testing.allocator, bytes, 1);
+    defer freeThreadList(std.testing.allocator, thread_list);
+
+    try std.testing.expectEqual(@as(u32, 1), thread_list.page);
+    try std.testing.expectEqual(@as(u32, 3), thread_list.total_pages);
+    try std.testing.expectEqual(@as(usize, 3), thread_list.threads.len);
+
+    try std.testing.expectEqual(@as(u32, 1001), thread_list.threads[0].id);
+    try std.testing.expectEqualStrings("Best strategy for beginners?", thread_list.threads[0].subject);
+    try std.testing.expectEqualStrings("player1", thread_list.threads[0].author);
+    try std.testing.expectEqual(@as(u32, 15), thread_list.threads[0].num_articles);
+    try std.testing.expectEqualStrings("Mon, 25 Dec 2024 08:00:00 +0000", thread_list.threads[0].post_date);
+    try std.testing.expectEqualStrings("Sat, 01 Jan 2025 12:00:00 +0000", thread_list.threads[0].last_post_date);
+
+    try std.testing.expectEqual(@as(u32, 1003), thread_list.threads[2].id);
+    try std.testing.expectEqualStrings("Component quality issues", thread_list.threads[2].subject);
+    try std.testing.expectEqualStrings("collector99", thread_list.threads[2].author);
+    try std.testing.expectEqual(@as(u32, 25), thread_list.threads[2].num_articles);
 }
