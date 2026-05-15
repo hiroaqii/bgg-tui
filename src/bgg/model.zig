@@ -104,6 +104,21 @@ pub const ThreadList = struct {
     total_pages: u32 = 1,
 };
 
+pub const Article = struct {
+    id: u32,
+    username: []const u8,
+    post_date: []const u8 = "",
+    body: []const u8 = "",
+};
+
+pub const Thread = struct {
+    id: u32,
+    subject: []const u8,
+    articles: []Article = &.{},
+    page: u32 = 1,
+    total_pages: u32 = 1,
+};
+
 test "model declarations compile" {
     const result = GameSearchResult{ .id = 1, .name = "Gloomhaven" };
     try std.testing.expectEqual(@as(u32, 1), result.id);

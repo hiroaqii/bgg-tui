@@ -198,6 +198,27 @@ pub fn parseForumResponse(allocator: Allocator, bytes: []const u8, page: u32) !m
     }
 }
 
+pub fn parseThreadResponse(allocator: Allocator, bytes: []const u8) !model.Thread {
+    var static_reader: xml_lib.Reader.Static = .init(allocator, bytes, .{});
+    defer static_reader.deinit();
+    const reader = &static_reader.interface;
+
+    while (true) {
+        const node = try reader.read();
+        switch (node) {
+            .eof => return ParseError.UnexpectedEndOfDocument,
+            .xml_declaration, .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
+            .element_start => {
+                if (std.mem.eql(u8, reader.elementName(), "thread")) {
+                    return try parseThread(allocator, reader);
+                }
+                try reader.skipElement();
+            },
+            .element_end => return ParseError.UnexpectedElementEnd,
+        }
+    }
+}
+
 pub fn freeSearchResults(allocator: Allocator, results: []model.GameSearchResult) void {
     for (results) |item| {
         allocator.free(item.name);
@@ -227,6 +248,11 @@ pub fn freeForums(allocator: Allocator, forums: []model.Forum) void {
 
 pub fn freeThreadList(allocator: Allocator, thread_list: model.ThreadList) void {
     freeThreadSummaries(allocator, thread_list.threads);
+}
+
+pub fn freeThread(allocator: Allocator, thread: model.Thread) void {
+    allocator.free(thread.subject);
+    freeArticles(allocator, thread.articles);
 }
 
 fn parseSearchItem(allocator: Allocator, reader: *xml_lib.Reader) !model.GameSearchResult {
@@ -536,6 +562,96 @@ fn parseThreadSummary(allocator: Allocator, reader: *xml_lib.Reader) !model.Thre
     return thread;
 }
 
+fn parseThread(allocator: Allocator, reader: *xml_lib.Reader) !model.Thread {
+    var thread: model.Thread = .{
+        .id = try parseU32Attribute(reader, "id"),
+        .subject = "",
+    };
+    errdefer freeThread(allocator, thread);
+
+    while (true) {
+        const node = try reader.read();
+        switch (node) {
+            .eof => return ParseError.UnexpectedEndOfDocument,
+            .xml_declaration => unreachable,
+            .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
+            .element_start => {
+                if (std.mem.eql(u8, reader.elementName(), "subject")) {
+                    replaceRequiredString(allocator, &thread.subject, try reader.readElementTextAlloc(allocator));
+                } else if (std.mem.eql(u8, reader.elementName(), "articles")) {
+                    thread.articles = try parseArticles(allocator, reader);
+                } else {
+                    try reader.skipElement();
+                }
+            },
+            .element_end => {
+                if (std.mem.eql(u8, reader.elementName(), "thread")) {
+                    if (thread.subject.len == 0) return ParseError.MissingName;
+                    return thread;
+                }
+                return ParseError.UnexpectedElementEnd;
+            },
+        }
+    }
+}
+
+fn parseArticles(allocator: Allocator, reader: *xml_lib.Reader) ![]model.Article {
+    var articles: std.ArrayList(model.Article) = .empty;
+    errdefer {
+        freeArticleItems(allocator, articles.items);
+        articles.deinit(allocator);
+    }
+
+    while (true) {
+        const node = try reader.read();
+        switch (node) {
+            .eof => return ParseError.UnexpectedEndOfDocument,
+            .xml_declaration => unreachable,
+            .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
+            .element_start => {
+                if (std.mem.eql(u8, reader.elementName(), "article")) {
+                    try articles.append(allocator, try parseArticle(allocator, reader));
+                } else {
+                    try reader.skipElement();
+                }
+            },
+            .element_end => {
+                if (std.mem.eql(u8, reader.elementName(), "articles")) return try articles.toOwnedSlice(allocator);
+                return ParseError.UnexpectedElementEnd;
+            },
+        }
+    }
+}
+
+fn parseArticle(allocator: Allocator, reader: *xml_lib.Reader) !model.Article {
+    var article: model.Article = .{
+        .id = try parseU32Attribute(reader, "id"),
+        .username = try dupeAttributeValue(allocator, reader, "username"),
+        .post_date = try dupeAttributeValue(allocator, reader, "postdate"),
+    };
+    errdefer freeArticle(allocator, article);
+
+    while (true) {
+        const node = try reader.read();
+        switch (node) {
+            .eof => return ParseError.UnexpectedEndOfDocument,
+            .xml_declaration => unreachable,
+            .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
+            .element_start => {
+                if (std.mem.eql(u8, reader.elementName(), "body")) {
+                    replaceRequiredString(allocator, &article.body, try reader.readElementTextAlloc(allocator));
+                } else {
+                    try reader.skipElement();
+                }
+            },
+            .element_end => {
+                if (std.mem.eql(u8, reader.elementName(), "article")) return article;
+                return ParseError.UnexpectedElementEnd;
+            },
+        }
+    }
+}
+
 fn freeHotGameItems(allocator: Allocator, games: []model.HotGame) void {
     for (games) |game| {
         allocator.free(game.name);
@@ -660,6 +776,23 @@ fn freeThreadSummary(allocator: Allocator, thread: model.ThreadSummary) void {
     allocator.free(thread.author);
     if (thread.post_date.len > 0) allocator.free(thread.post_date);
     if (thread.last_post_date.len > 0) allocator.free(thread.last_post_date);
+}
+
+fn freeArticles(allocator: Allocator, articles: []model.Article) void {
+    freeArticleItems(allocator, articles);
+    allocator.free(articles);
+}
+
+fn freeArticleItems(allocator: Allocator, articles: []model.Article) void {
+    for (articles) |article| {
+        freeArticle(allocator, article);
+    }
+}
+
+fn freeArticle(allocator: Allocator, article: model.Article) void {
+    allocator.free(article.username);
+    if (article.post_date.len > 0) allocator.free(article.post_date);
+    if (article.body.len > 0) allocator.free(article.body);
 }
 
 fn parseThingLink(builder: *GameBuilder, reader: *xml_lib.Reader) !void {
@@ -1252,4 +1385,35 @@ test "parse forum threads XML fixture" {
     try std.testing.expectEqualStrings("Component quality issues", thread_list.threads[2].subject);
     try std.testing.expectEqualStrings("collector99", thread_list.threads[2].author);
     try std.testing.expectEqual(@as(u32, 25), thread_list.threads[2].num_articles);
+}
+
+test "parse thread XML fixture" {
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        Fixture.path(.thread),
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(bytes);
+
+    const thread = try parseThreadResponse(std.testing.allocator, bytes);
+    defer freeThread(std.testing.allocator, thread);
+
+    try std.testing.expectEqual(@as(u32, 1001), thread.id);
+    try std.testing.expectEqualStrings("Best strategy for beginners?", thread.subject);
+    try std.testing.expectEqual(@as(usize, 3), thread.articles.len);
+
+    try std.testing.expectEqual(@as(u32, 5001), thread.articles[0].id);
+    try std.testing.expectEqualStrings("player1", thread.articles[0].username);
+    try std.testing.expectEqualStrings("Mon, 25 Dec 2024 08:00:00 +0000", thread.articles[0].post_date);
+    try std.testing.expect(std.mem.indexOf(u8, thread.articles[0].body, "I'm looking") != null);
+
+    try std.testing.expectEqual(@as(u32, 5002), thread.articles[1].id);
+    try std.testing.expectEqualStrings("expert_gamer", thread.articles[1].username);
+    try std.testing.expect(std.mem.indexOf(u8, thread.articles[1].body, "Don't spread") != null);
+    try std.testing.expect(std.mem.indexOf(u8, thread.articles[1].body, "Good luck & have fun!") != null);
+
+    try std.testing.expectEqual(@as(u32, 5003), thread.articles[2].id);
+    try std.testing.expectEqualStrings("player1", thread.articles[2].username);
+    try std.testing.expect(std.mem.endsWith(u8, thread.articles[2].body, "next game."));
 }
