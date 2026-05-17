@@ -3,8 +3,10 @@ pub const version = "0.0.0";
 
 pub const bgg = @import("bgg/root.zig");
 pub const config = @import("config.zig");
+pub const format = @import("format.zig");
 
 test {
     _ = bgg;
     _ = config;
+    _ = format;
 }
