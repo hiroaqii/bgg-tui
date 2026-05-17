@@ -61,6 +61,10 @@ bgg-tui requires a BGG API bearer token. You need to register for API access on 
 
 You can change the token later from the Settings screen.
 
+During the Zig port development, the scaffold can also read the token from
+`BGG_TUI_API_TOKEN`. `BGG_API_TOKEN` is accepted as a fallback for local manual
+checks.
+
 ## Configuration
 
 Configuration file is created on first launch in your OS's default config directory (`bgg-tui/config.toml`). You can check the exact path in the Settings screen. Settings can also be changed from the Settings screen within the app.
