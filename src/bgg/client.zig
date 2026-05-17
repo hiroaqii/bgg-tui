@@ -8,8 +8,8 @@ const Allocator = std.mem.Allocator;
 pub const Options = struct {
     base_url: []const u8 = endpoint.base_url,
     token: ?[]const u8 = null,
-    // Kept in the public options now so the client boundary already names the
-    // intended safety limit. Enforcement will move into the request body reader.
+    // Prevents accidental unbounded allocation when BGG returns an unexpectedly
+    // large response body.
     max_response_bytes: usize = 8 * 1024 * 1024,
     retry: RetryOptions = .{},
 };
@@ -70,56 +70,75 @@ pub const Client = struct {
         var auth_value: ?[]u8 = null;
         defer if (auth_value) |value| client.allocator.free(value);
 
+        const token = client.options.token orelse return .{ .api_error = missingTokenError() };
+        if (token.len == 0) return .{ .api_error = missingTokenError() };
+
         var headers_buf: [1]std.http.Header = undefined;
-        var privileged_headers: []const std.http.Header = &.{};
-        if (client.options.token) |token| {
-            auth_value = try authorizationValue(client.allocator, token);
-            headers_buf[0] = .{ .name = "authorization", .value = auth_value.? };
-            privileged_headers = headers_buf[0..1];
-        }
+        auth_value = try authorizationValue(client.allocator, token);
+        headers_buf[0] = .{ .name = "authorization", .value = auth_value.? };
+        const privileged_headers: []const std.http.Header = headers_buf[0..1];
 
         var attempt: u8 = 0;
         while (true) : (attempt += 1) {
-            var body: std.Io.Writer.Allocating = .init(client.allocator);
-            errdefer body.deinit();
-
-            // fetch is enough for the first client boundary, but it does not
-            // expose response headers. Retry-After support will need lower-level
-            // request handling before it can be wired into retryDelayMs.
-            const result = client.http.fetch(.{
-                .location = .{ .url = url },
-                .method = .GET,
-                .response_writer = &body.writer,
-                .privileged_headers = privileged_headers,
-            }) catch |fetch_error| {
-                body.deinit();
-                return .{ .api_error = .{ .network = .{ .message = @errorName(fetch_error) } } };
+            const uri = std.Uri.parse(url) catch |parse_error| {
+                return .{ .api_error = .{ .network = .{ .message = @errorName(parse_error) } } };
             };
+
+            var request = client.http.request(.GET, uri, .{
+                .privileged_headers = privileged_headers,
+            }) catch |request_error| {
+                return .{ .api_error = .{ .network = .{ .message = @errorName(request_error) } } };
+            };
+            defer request.deinit();
+
+            request.sendBodiless() catch |send_error| {
+                return .{ .api_error = .{ .network = .{ .message = @errorName(send_error) } } };
+            };
+
+            var redirect_buffer: [8 * 1024]u8 = undefined;
+            var http_response = request.receiveHead(&redirect_buffer) catch |receive_error| {
+                return .{ .api_error = .{ .network = .{ .message = @errorName(receive_error) } } };
+            };
+
+            const status = http_response.head.status;
+            const retry_after_seconds = retryAfterSecondsFromHead(http_response.head);
 
             // BGG uses 202 for collection requests while server-side processing
             // is still in progress. Other endpoints treat it as a normal 2xx.
-            if (shouldRetryStatus(result.status, attempt, client.options.retry, endpoint_kind)) {
-                body.deinit();
-                std.Thread.sleep(retryDelayMs(attempt, client.options.retry, null) * std.time.ns_per_ms);
+            if (shouldRetryStatus(status, attempt, client.options.retry, endpoint_kind)) {
+                discardResponseBody(&http_response);
+                std.Thread.sleep(retryDelayMs(attempt, client.options.retry, retry_after_seconds) * std.time.ns_per_ms);
                 continue;
             }
 
-            if (result.status == .accepted and endpoint_kind == .collection) {
-                body.deinit();
+            if (status == .accepted and endpoint_kind == .collection) {
+                discardResponseBody(&http_response);
                 return .{ .api_error = .{ .network = .{
                     .message = "BGG collection is still processing",
-                    .status_code = @intFromEnum(result.status),
+                    .status_code = @intFromEnum(status),
                 } } };
             }
 
-            if (classifyStatus(result.status, null)) |err| {
-                body.deinit();
+            if (classifyStatus(status, retry_after_seconds)) |err| {
+                discardResponseBody(&http_response);
                 return .{ .api_error = err };
             }
 
+            const body = readResponseBody(client, &http_response) catch |read_error| switch (read_error) {
+                error.OutOfMemory => return error.OutOfMemory,
+                error.StreamTooLong => return .{ .api_error = .{ .network = .{
+                    .message = "BGG API response exceeded the configured body size limit",
+                    .status_code = @intFromEnum(status),
+                } } },
+                else => return .{ .api_error = .{ .network = .{
+                    .message = @errorName(read_error),
+                    .status_code = @intFromEnum(status),
+                } } },
+            };
+
             return .{ .ok = .{
-                .status = result.status,
-                .body = try body.toOwnedSlice(),
+                .status = status,
+                .body = body,
             } };
         }
     }
@@ -142,6 +161,10 @@ pub fn joinBaseUrl(allocator: Allocator, base_url: []const u8, path: []const u8)
 
 pub fn authorizationValue(allocator: Allocator, token: []const u8) ![]u8 {
     return try std.fmt.allocPrint(allocator, "Bearer {s}", .{token});
+}
+
+fn missingTokenError() api_error.ApiError {
+    return .{ .auth = .{ .message = "BGG API token is required" } };
 }
 
 /// Converts protocol-level HTTP statuses into the domain error shape used by
@@ -181,7 +204,10 @@ pub fn shouldRetryStatus(status: std.http.Status, attempt: u8, options: RetryOpt
 
 pub fn retryDelayMs(attempt: u8, options: RetryOptions, retry_after_seconds: ?u64) u64 {
     if (retry_after_seconds) |seconds| {
-        return std.math.clamp(seconds * std.time.ms_per_s, options.base_delay_ms, options.max_delay_ms);
+        const max_seconds = options.max_delay_ms / std.time.ms_per_s;
+        const clamped_seconds = @min(seconds, max_seconds);
+        const delay_ms = clamped_seconds * std.time.ms_per_s;
+        return std.math.clamp(delay_ms, options.base_delay_ms, options.max_delay_ms);
     }
 
     const shift: std.math.Log2Int(u64) = @intCast(@min(attempt, 62));
@@ -193,6 +219,41 @@ pub fn parseRetryAfterSeconds(value: []const u8) ?u64 {
     const trimmed = std.mem.trim(u8, value, " \t\r\n");
     if (trimmed.len == 0) return null;
     return std.fmt.parseInt(u64, trimmed, 10) catch null;
+}
+
+pub fn retryAfterSecondsFromHead(head: std.http.Client.Response.Head) ?u64 {
+    var headers = head.iterateHeaders();
+    while (headers.next()) |header| {
+        if (std.ascii.eqlIgnoreCase(header.name, "retry-after")) {
+            return parseRetryAfterSeconds(header.value);
+        }
+    }
+    return null;
+}
+
+fn readResponseBody(client: *Client, response: *std.http.Client.Response) ![]u8 {
+    const decompress_buffer: []u8 = switch (response.head.content_encoding) {
+        .identity => &.{},
+        .zstd => try client.allocator.alloc(u8, std.compress.zstd.default_window_len),
+        .deflate, .gzip => try client.allocator.alloc(u8, std.compress.flate.max_window_len),
+        .compress => return error.UnsupportedCompressionMethod,
+    };
+    defer if (response.head.content_encoding != .identity) client.allocator.free(decompress_buffer);
+
+    var transfer_buffer: [64]u8 = undefined;
+    var decompress: std.http.Decompress = undefined;
+    const reader = response.readerDecompressing(&transfer_buffer, &decompress, decompress_buffer);
+
+    return reader.allocRemaining(client.allocator, .limited(client.options.max_response_bytes)) catch |read_error| switch (read_error) {
+        error.ReadFailed => return response.bodyErr() orelse error.ReadFailed,
+        else => |err| return err,
+    };
+}
+
+fn discardResponseBody(response: *std.http.Client.Response) void {
+    var transfer_buffer: [64]u8 = undefined;
+    const reader = response.reader(&transfer_buffer);
+    _ = reader.discardRemaining() catch {};
 }
 
 test "client joins base URL and endpoint path" {
@@ -247,10 +308,21 @@ test "client retry delay uses retry-after when available and otherwise backs off
     try std.testing.expectEqual(@as(u64, 1_000), retryDelayMs(2, options, null));
     try std.testing.expectEqual(@as(u64, 2_000), retryDelayMs(4, options, null));
     try std.testing.expectEqual(@as(u64, 2_000), retryDelayMs(0, options, 10));
+    try std.testing.expectEqual(@as(u64, 2_000), retryDelayMs(0, options, std.math.maxInt(u64)));
 }
 
 test "client parses numeric Retry-After header values" {
     try std.testing.expectEqual(@as(?u64, 30), parseRetryAfterSeconds(" 30\r\n"));
     try std.testing.expectEqual(@as(?u64, null), parseRetryAfterSeconds(""));
     try std.testing.expectEqual(@as(?u64, null), parseRetryAfterSeconds("Wed, 21 Oct 2015 07:28:00 GMT"));
+}
+
+test "client reads Retry-After from HTTP response headers" {
+    const bytes = "HTTP/1.1 429 Too Many Requests\r\n" ++
+        "Date: Sun, 17 May 2026 00:00:00 GMT\r\n" ++
+        "Retry-After: 42\r\n" ++
+        "Content-Length: 0\r\n\r\n";
+    const head = try std.http.Client.Response.Head.parse(bytes);
+
+    try std.testing.expectEqual(@as(?u64, 42), retryAfterSecondsFromHead(head));
 }
