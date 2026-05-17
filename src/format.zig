@@ -2,12 +2,14 @@ const std = @import("std");
 
 const model = @import("bgg/model.zig");
 
+/// User-facing date formats supported by bgg-tui settings and display helpers.
 pub const DateFormat = enum {
     yyyy_mm_dd,
     yyyy_slash_mm_slash_dd,
     relative,
 };
 
+/// Calendar date without time zone information.
 pub const Date = struct {
     year: i32,
     month: u8,
@@ -19,12 +21,21 @@ pub const DateFormatError = error{
     InvalidDateFormat,
 };
 
+/// Controls display-width wrapping.
+///
+/// Width is measured in terminal cells, not bytes. The two indents are written
+/// as-is and count toward the available width on their respective lines.
 pub const WrapOptions = struct {
     width: usize,
     first_indent: []const u8 = "",
     subsequent_indent: []const u8 = "",
 };
 
+/// Returns the approximate terminal cell width for UTF-8 text.
+///
+/// This is intentionally small and app-local. It handles ASCII, combining marks,
+/// common wide CJK ranges, and emoji ranges well enough for bgg-tui list/detail
+/// text, but it is not a full Unicode grapheme width implementation.
 pub fn displayWidth(text: []const u8) usize {
     const view = std.unicode.Utf8View.init(text) catch return text.len;
     var iter = view.iterator();
@@ -36,6 +47,11 @@ pub fn displayWidth(text: []const u8) usize {
     return width;
 }
 
+/// Writes text truncated to `max_width` terminal cells, appending `ellipsis`
+/// when truncation is needed.
+///
+/// The output never splits a valid UTF-8 codepoint. Invalid UTF-8 falls back to
+/// byte-oriented fitting.
 pub fn writeTruncated(writer: *std.Io.Writer, text: []const u8, max_width: usize, ellipsis: []const u8) std.Io.Writer.Error!void {
     if (max_width == 0) return;
     if (displayWidth(text) <= max_width) {
@@ -53,6 +69,10 @@ pub fn writeTruncated(writer: *std.Io.Writer, text: []const u8, max_width: usize
     try writer.writeAll(ellipsis);
 }
 
+/// Writes text wrapped to `options.width` terminal cells.
+///
+/// Inline whitespace is collapsed, explicit `\n` is preserved, and words longer
+/// than the available width are split at UTF-8 codepoint boundaries.
 pub fn writeWrapped(writer: *std.Io.Writer, text: []const u8, options: WrapOptions) std.Io.Writer.Error!void {
     if (options.width == 0) return;
 
@@ -84,6 +104,7 @@ pub fn writeWrapped(writer: *std.Io.Writer, text: []const u8, options: WrapOptio
     }
 }
 
+/// Writes `label: text` and wraps continuation lines under the value column.
 pub fn writeLabeledWrapped(writer: *std.Io.Writer, label: []const u8, text: []const u8, width: usize) std.Io.Writer.Error!void {
     if (width == 0) return;
 
@@ -124,10 +145,12 @@ pub fn writeLabeledWrapped(writer: *std.Io.Writer, label: []const u8, text: []co
     }
 }
 
+/// Writes an unsigned integer without grouping.
 pub fn writeUnsigned(writer: *std.Io.Writer, value: u64) std.Io.Writer.Error!void {
     try writer.print("{d}", .{value});
 }
 
+/// Writes an unsigned integer with comma grouping.
 pub fn writeUnsignedGrouped(writer: *std.Io.Writer, value: u64) std.Io.Writer.Error!void {
     var digits: [20]u8 = undefined;
     const raw = std.fmt.bufPrint(&digits, "{d}", .{value}) catch unreachable;
@@ -140,6 +163,10 @@ pub fn writeUnsignedGrouped(writer: *std.Io.Writer, value: u64) std.Io.Writer.Er
     }
 }
 
+/// Writes a fixed decimal value for the small precision set used by the UI.
+///
+/// Supported precisions are 0 through 3. Other values fall back to Zig's default
+/// float formatting.
 pub fn writeFixedDecimal(writer: *std.Io.Writer, value: f64, precision: usize) std.Io.Writer.Error!void {
     switch (precision) {
         0 => try writer.print("{d:.0}", .{value}),
@@ -150,6 +177,7 @@ pub fn writeFixedDecimal(writer: *std.Io.Writer, value: f64, precision: usize) s
     }
 }
 
+/// Writes a BGG rating with one decimal place, or `-` for missing values.
 pub fn writeOptionalRating(writer: *std.Io.Writer, value: f64) std.Io.Writer.Error!void {
     if (value <= 0) {
         try writer.writeByte('-');
@@ -159,6 +187,7 @@ pub fn writeOptionalRating(writer: *std.Io.Writer, value: f64) std.Io.Writer.Err
     try writeFixedDecimal(writer, value, 1);
 }
 
+/// Writes a BGG weight with two decimal places, or `-` for missing values.
 pub fn writeOptionalWeight(writer: *std.Io.Writer, value: f64) std.Io.Writer.Error!void {
     if (value <= 0) {
         try writer.writeByte('-');
@@ -168,6 +197,7 @@ pub fn writeOptionalWeight(writer: *std.Io.Writer, value: f64) std.Io.Writer.Err
     try writeFixedDecimal(writer, value, 2);
 }
 
+/// Writes a BGG rank as `#1,234`, or `-` for unranked values.
 pub fn writeOptionalRank(writer: *std.Io.Writer, rank: u32) std.Io.Writer.Error!void {
     if (rank == 0) {
         try writer.writeByte('-');
@@ -178,6 +208,7 @@ pub fn writeOptionalRank(writer: *std.Io.Writer, rank: u32) std.Io.Writer.Error!
     try writeUnsignedGrouped(writer, rank);
 }
 
+/// Writes the compact stats line used by list/detail views.
 pub fn writeGameStats(writer: *std.Io.Writer, game: model.Game) std.Io.Writer.Error!void {
     try writer.writeAll("Rating ");
     try writeOptionalRating(writer, game.rating);
@@ -189,6 +220,7 @@ pub fn writeGameStats(writer: *std.Io.Writer, game: model.Game) std.Io.Writer.Er
     try writeOptionalWeight(writer, game.weight);
 }
 
+/// Writes player count, play time, and minimum age as one compact line.
 pub fn writePlayerSummary(writer: *std.Io.Writer, game: model.Game) std.Io.Writer.Error!void {
     if (game.min_players == 0 and game.max_players == 0) {
         try writer.writeByte('-');
@@ -206,6 +238,10 @@ pub fn writePlayerSummary(writer: *std.Io.Writer, game: model.Game) std.Io.Write
     }
 }
 
+/// Writes the parsed BGG suggested player count poll summary.
+///
+/// `best_with` and `recommended_with` are expected to already be display-ready
+/// strings from the XML parser.
 pub fn writePlayerCountPollSummary(writer: *std.Io.Writer, poll: model.PlayerCountPoll) std.Io.Writer.Error!void {
     var wrote = false;
     if (poll.best_with) |best_with| {
@@ -230,6 +266,7 @@ pub fn writePlayerCountPollSummary(writer: *std.Io.Writer, poll: model.PlayerCou
     if (!wrote) try writer.writeByte('-');
 }
 
+/// Writes collection status flags as comma-separated labels, or `-` if none are set.
 pub fn writeCollectionStatuses(writer: *std.Io.Writer, item: model.CollectionItem) std.Io.Writer.Error!void {
     var count: usize = 0;
     try writeStatusIf(writer, &count, item.owned, "Owned");
@@ -243,10 +280,12 @@ pub fn writeCollectionStatuses(writer: *std.Io.Writer, item: model.CollectionIte
     if (count == 0) try writer.writeByte('-');
 }
 
+/// Writes the canonical BGG game page URL for a board game id.
 pub fn writeBggGameUrl(writer: *std.Io.Writer, game_id: u32) std.Io.Writer.Error!void {
     try writer.print("https://boardgamegeek.com/boardgame/{d}", .{game_id});
 }
 
+/// Parses a config string into a supported date format.
 pub fn dateFormatFromConfig(value: []const u8) DateFormatError!DateFormat {
     if (std.mem.eql(u8, value, "yyyy-mm-dd") or std.mem.eql(u8, value, "YYYY-MM-DD")) return .yyyy_mm_dd;
     if (std.mem.eql(u8, value, "yyyy/mm/dd")) return .yyyy_slash_mm_slash_dd;
@@ -254,6 +293,9 @@ pub fn dateFormatFromConfig(value: []const u8) DateFormatError!DateFormat {
     return error.InvalidDateFormat;
 }
 
+/// Parses BGG's RFC-style date strings, ignoring the time and offset portion.
+///
+/// Example input: `Sat, 01 Jan 2025 10:00:00 +0000`.
 pub fn parseBggDate(value: []const u8) DateFormatError!Date {
     if (value.len < "Sat, 01 Jan 2025".len) return error.InvalidBggDate;
     if (value.len < 16 or value[3] != ',' or value[4] != ' ') return error.InvalidBggDate;
@@ -268,11 +310,16 @@ pub fn parseBggDate(value: []const u8) DateFormatError!Date {
     return validateDate(.{ .year = year, .month = month, .day = day });
 }
 
+/// Parses and writes a BGG date string in the requested display format.
 pub fn writeBggDate(writer: *std.Io.Writer, value: []const u8, format: DateFormat, today: ?Date) (DateFormatError || std.Io.Writer.Error)!void {
     const date = try parseBggDate(value);
     try writeDate(writer, date, format, today);
 }
 
+/// Writes a validated date using a configured display format.
+///
+/// For `.relative`, `today` controls the relative base date. If no base date is
+/// supplied, the function falls back to `yyyy-mm-dd`.
 pub fn writeDate(writer: *std.Io.Writer, date: Date, format: DateFormat, today: ?Date) (DateFormatError || std.Io.Writer.Error)!void {
     const validated = try validateDate(date);
     switch (format) {
