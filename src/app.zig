@@ -455,10 +455,23 @@ pub const App = struct {
     }
 
     fn showScreen(self: *App, screen: Screen, ctx: *chasen.Ctx(Msg)) !void {
+        const previous_screen = self.screen;
         self.screen = screen;
         if (screen == .hot_games) {
             try self.startHotGamesLoad(ctx);
         }
+        if (screen == .search and previous_screen != .game_detail) {
+            try self.resetSearchScreen();
+        }
+    }
+
+    fn resetSearchScreen(self: *App) !void {
+        if (self.search_input) |*input| {
+            try input.update(.clear);
+        }
+        self.search_request_id +%= 1;
+        self.search_focus = .input;
+        self.search.deinit(self.allocator.?);
     }
 
     fn openHotGame(self: *App, index: usize, ctx: *chasen.Ctx(Msg)) !void {
@@ -1200,6 +1213,54 @@ test "search screen escape returns to main menu" {
 
     const msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.escape } }).?;
     try std.testing.expectEqual(App.Msg{ .show_screen = .main_menu }, msg);
+}
+
+test "showing search from non-detail screen resets previous query and results" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.allocator = std.testing.allocator;
+    app.screen = .hot_games;
+    app.search_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "root" });
+    defer app.deinitOwnedState();
+
+    const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
+    results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+    try app.search.setLoaded(std.testing.allocator, results);
+    app.search_focus = .results;
+    app.search_request_id = 7;
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.showScreen(.search, &tc.ctx);
+
+    try std.testing.expectEqual(Screen.search, app.screen);
+    try std.testing.expectEqualStrings("", app.search_input.?.text());
+    try std.testing.expect(app.search.load_state == .idle);
+    try std.testing.expectEqual(@as(usize, 0), app.search.results.len);
+    try std.testing.expectEqual(SearchFocus.input, app.search_focus);
+    try std.testing.expectEqual(@as(u64, 8), app.search_request_id);
+}
+
+test "showing search from detail preserves previous query and results" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.allocator = std.testing.allocator;
+    app.screen = .game_detail;
+    app.search_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "root" });
+    defer app.deinitOwnedState();
+
+    const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
+    results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+    try app.search.setLoaded(std.testing.allocator, results);
+    app.search_focus = .results;
+    app.search_request_id = 7;
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.showScreen(.search, &tc.ctx);
+
+    try std.testing.expectEqual(Screen.search, app.screen);
+    try std.testing.expectEqualStrings("root", app.search_input.?.text());
+    try std.testing.expect(app.search.load_state == .loaded);
+    try std.testing.expectEqual(@as(usize, 1), app.search.results.len);
+    try std.testing.expectEqual(SearchFocus.results, app.search_focus);
+    try std.testing.expectEqual(@as(u64, 7), app.search_request_id);
 }
 
 test "loaded search results receive activation before search input" {
