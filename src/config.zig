@@ -53,16 +53,26 @@ pub const Config = struct {
         return .{};
     }
 
+    /// Builds config from environment-only values.
+    ///
+    /// This is used for first launch and broken-file recovery. File loading later
+    /// applies the same environment token as an override so temporary credentials
+    /// can be supplied without editing `config.toml`.
     pub fn fromEnvironment(env: *const std.process.Environ.Map) Config {
         var config = defaults();
         config.api.token = tokenFromEnvironment(env);
         return config;
     }
 
+    /// Returns the configured API token after trimming whitespace.
+    ///
+    /// Empty strings are treated as missing so callers can use this directly
+    /// before opening a network request.
     pub fn apiClientToken(config: Config) ?[]const u8 {
         return nonEmptyTrimmed(config.api.token);
     }
 
+    /// Validates settings whose values affect layout or UI option dispatch.
     pub fn validate(config: Config) ValidationError!void {
         try validateWidth(config.display.list_width);
         try validateWidth(config.display.thread_width);
@@ -80,6 +90,7 @@ pub const LoadedConfig = struct {
     config: Config,
     source_bytes: ?[]u8 = null,
 
+    /// Releases file bytes retained so parsed string fields can borrow from them.
     pub fn deinit(loaded: *LoadedConfig, allocator: std.mem.Allocator) void {
         if (loaded.source_bytes) |bytes| allocator.free(bytes);
         loaded.* = undefined;
@@ -129,6 +140,10 @@ pub const Interface = struct {
     border_style: []const u8 = "rounded",
 };
 
+/// Serializes the fixed config schema into TOML.
+///
+/// The writer intentionally supports only plain strings for now. Values that
+/// would require escape encoding fail instead of writing ambiguous config.
 pub fn formatToml(allocator: std.mem.Allocator, config: Config) SaveError![]u8 {
     try config.validate();
 
@@ -191,6 +206,7 @@ pub fn formatToml(allocator: std.mem.Allocator, config: Config) SaveError![]u8 {
     return try out.toOwnedSlice();
 }
 
+/// Writes config to disk, creating the parent directory if needed.
 pub fn saveConfig(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -278,11 +294,15 @@ fn loadConfigFromDir(
     };
     errdefer allocator.free(bytes);
 
+    // A malformed file should not block startup. Keep a copy for inspection,
+    // then recover defaults plus the best token we can safely extract.
     var config = parseToml(bytes) catch {
         backupBrokenConfigToDir(allocator, io, dir, path, bytes) catch {};
         return .{ .config = fallbackConfigFromBrokenBytes(bytes, env), .source_bytes = bytes };
     };
     applyEnvironmentOverrides(&config, env);
+    // Validation failures follow the same recovery path as parse failures:
+    // preserve the bad file and keep enough config to let the user repair it.
     config.validate() catch {
         backupBrokenConfigToDir(allocator, io, dir, path, bytes) catch {};
         return .{ .config = fallbackConfigFromBrokenBytes(bytes, env), .source_bytes = bytes };
@@ -294,6 +314,8 @@ fn loadConfigFromDir(
     };
 }
 
+// Environment token always wins over file token. This is useful for live checks,
+// CI/manual testing, and emergency token rotation without rewriting config.
 fn applyEnvironmentOverrides(config: *Config, env: *const std.process.Environ.Map) void {
     if (tokenFromEnvironment(env)) |token| {
         config.api.token = token;
@@ -319,6 +341,9 @@ fn saveConfigToDir(
     try dir.writeFile(io, .{ .sub_path = path, .data = bytes });
 }
 
+// Broken config recovery only extracts the API token. Other settings fall back
+// to defaults because accepting partially parsed UI settings could preserve the
+// invalid state that caused recovery.
 fn fallbackConfigFromBrokenBytes(bytes: []const u8, env: *const std.process.Environ.Map) Config {
     var config = Config.fromEnvironment(env);
     if (config.apiClientToken() == null) {
@@ -339,6 +364,8 @@ fn backupBrokenConfigToDir(
     try dir.writeFile(io, .{ .sub_path = backup_path, .data = bytes });
 }
 
+// Best-effort token extraction is deliberately narrow: only `[api] token = "..."`
+// is read, and normal string parsing rules still apply.
 fn extractTokenBestEffort(bytes: []const u8) ?[]const u8 {
     var section: Section = .root;
     var lines = std.mem.splitScalar(u8, bytes, '\n');
@@ -465,6 +492,8 @@ fn parseCollectionValue(collection: *Collection, key: []const u8, value: []const
     } else if (std.mem.eql(u8, key, "status_filter")) {
         collection.status_filter = try parseEnum(CollectionStatus, value);
     } else if (std.mem.eql(u8, key, "show_only_owned")) {
+        // Deprecated Go config compatibility. The Zig schema stores the same
+        // intent as a named status filter.
         if (try parseBool(value)) collection.status_filter = .own;
     } else {
         return error.UnknownKey;
