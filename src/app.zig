@@ -2,12 +2,18 @@ const std = @import("std");
 const chasen = @import("chasen");
 const ui = @import("chasen_ui");
 
+const bgg_client = @import("bgg/client.zig");
+const bgg_endpoint = @import("bgg/endpoint.zig");
+const bgg_error = @import("bgg/error.zig");
+const bgg_model = @import("bgg/model.zig");
+const bgg_xml = @import("bgg/xml.zig");
 const config_mod = @import("config.zig");
 
 // Keep top-level screens centered until a screen needs its own full-page layout.
 const main_menu_size = chasen.Size{ .width = 48, .height = 12 };
 const setup_token_size = chasen.Size{ .width = 56, .height = 9 };
 const placeholder_size = chasen.Size{ .width = 56, .height = 6 };
+const hot_list_size = chasen.Size{ .width = 72, .height = 18 };
 
 const menu_items = [_]ui.Menu.Item{
     .{ .label = "Hot Games", .shortcut = "h" },
@@ -32,6 +38,7 @@ pub const App = struct {
     allocator: ?std.mem.Allocator = null,
     setup_token_input: ?ui.PasswordInput = null,
     owned_token: ?[]u8 = null,
+    hot_games: HotGamesState = .{},
     menu: ui.Menu = ui.Menu.init(.{ .items = &menu_items }),
     shell: ui.Panel = ui.Panel.init(.{}),
 
@@ -39,6 +46,8 @@ pub const App = struct {
         setup_token_input: ui.PasswordInput.Msg,
         setup_token_paste: []const u8,
         menu: ui.Menu.Msg,
+        hot_list: ui.List.Msg,
+        hot_games_loaded: HotGamesResult,
         show_screen: Screen,
         quit,
     };
@@ -78,9 +87,16 @@ pub const App = struct {
             },
             .menu => |menu_msg| switch (menu_msg) {
                 .move_prev, .move_next => self.menu.update(menu_msg),
-                .activate => |index| self.screen = screenForMenuIndex(index) orelse self.screen,
+                .activate => |index| {
+                    if (screenForMenuIndex(index)) |screen| try self.showScreen(screen, ctx);
+                },
             },
-            .show_screen => |screen| self.screen = screen,
+            .hot_list => |list_msg| switch (list_msg) {
+                .move_prev, .move_next => self.hot_games.update(list_msg),
+                .activate => {},
+            },
+            .hot_games_loaded => |result| try self.finishHotGamesLoad(result),
+            .show_screen => |screen| try self.showScreen(screen, ctx),
             .quit => {
                 self.deinitOwnedState();
                 ctx.quit();
@@ -152,6 +168,9 @@ pub const App = struct {
             // Menu owns only cursor movement and activation; App maps activation to screens.
             if (self.menu.handleEvent(event)) |msg| return .{ .menu = msg };
         }
+        if (self.screen == .hot_games) {
+            if (self.hot_games.handleEvent(event)) |msg| return .{ .hot_list = msg };
+        }
         return null;
     }
 
@@ -159,7 +178,7 @@ pub const App = struct {
         switch (self.screen) {
             .setup_token => self.viewSetupToken(sfc),
             .main_menu => try self.viewMainMenu(sfc),
-            .hot_games => self.viewPlaceholder(sfc, "Hot Games", "Loading and display will be added in the next small steps."),
+            .hot_games => self.viewHotGames(sfc),
             .search => self.viewPlaceholder(sfc, "Search Games", "Search input and results are pending."),
             .collection => self.viewPlaceholder(sfc, "Collection", "Collection loading is planned after the MVP list flow."),
             .settings => self.viewPlaceholder(sfc, "Settings", "Minimum settings screen is pending."),
@@ -208,6 +227,38 @@ pub const App = struct {
         _ = area.textAt(0, 4, "m: menu  Esc/q: quit", .{ .dim = true });
     }
 
+    fn viewHotGames(self: *const App, sfc: *chasen.Surface) void {
+        var area = centeredSurface(sfc, hot_list_size);
+        _ = area.textAt(0, 0, "Hot Games", .{ .bold = true, .fg = .{ .index = 14 } });
+
+        switch (self.hot_games.load_state) {
+            .idle, .loading => {
+                _ = area.textAt(0, 2, "Loading BoardGameGeek hot games...", .{ .fg = .gray });
+            },
+            .failed => |message| {
+                _ = area.textAt(0, 2, "Could not load hot games.", .{ .fg = .{ .index = 9 } });
+                _ = area.textAt(0, 4, message, .{ .fg = .gray });
+            },
+            .loaded => {
+                if (self.hot_games.list.items.len == 0) {
+                    _ = area.textAt(0, 2, "No hot games returned by BGG.", .{ .fg = .gray });
+                } else {
+                    var list_area = area.child(.{
+                        .col = 0,
+                        .row = 2,
+                        .width = area.size().width,
+                        .height = area.size().height -| 4,
+                    });
+                    self.hot_games.list.view(&list_area, .{
+                        .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
+                    });
+                }
+            },
+        }
+
+        _ = area.textAt(0, area.size().height -| 1, "Up/Down: move  m: menu  Esc/q: quit", .{ .dim = true });
+    }
+
     fn submitToken(self: *App, ctx: *chasen.Ctx(Msg)) !void {
         const input = if (self.setup_token_input) |*input| input else return;
         const token = std.mem.trim(u8, input.text(), " \t\r\n");
@@ -234,8 +285,171 @@ pub const App = struct {
             self.allocator.?.free(token);
             self.owned_token = null;
         }
+        self.hot_games.deinit(self.allocator.?);
+    }
+
+    fn showScreen(self: *App, screen: Screen, ctx: *chasen.Ctx(Msg)) !void {
+        self.screen = screen;
+        if (screen == .hot_games) {
+            try self.startHotGamesLoad(ctx);
+        }
+    }
+
+    fn startHotGamesLoad(self: *App, ctx: *chasen.Ctx(Msg)) !void {
+        if (self.hot_games.load_state == .loading or self.hot_games.load_state == .loaded) return;
+
+        const token = self.config.apiClientToken() orelse {
+            self.hot_games.setFailed("BGG API token is required");
+            return;
+        };
+
+        const task = try ctx.allocator().create(HotGamesTask);
+        errdefer ctx.allocator().destroy(task);
+        task.* = .{ .token = try ctx.allocator().dupe(u8, token) };
+        errdefer ctx.allocator().free(task.token);
+
+        self.hot_games.setLoading();
+        ctx.spawnWith(task, HotGamesTask.run) catch |err| {
+            self.hot_games.setFailed("Could not start hot games loading task");
+            return err;
+        };
+    }
+
+    fn finishHotGamesLoad(self: *App, result: HotGamesResult) !void {
+        switch (result) {
+            .ok => |games| try self.hot_games.setLoaded(self.allocator.?, games),
+            .failed => |message| self.hot_games.setFailed(message),
+        }
     }
 };
+
+const HotGamesState = struct {
+    load_state: LoadState = .idle,
+    games: []bgg_model.HotGame = &.{},
+    labels: []const []const u8 = &.{},
+    list: ui.List = ui.List.init(.{}),
+
+    const LoadState = union(enum) {
+        idle,
+        loading,
+        loaded,
+        failed: []const u8,
+    };
+
+    fn setLoading(self: *HotGamesState) void {
+        self.load_state = .loading;
+    }
+
+    fn setFailed(self: *HotGamesState, message: []const u8) void {
+        self.load_state = .{ .failed = message };
+    }
+
+    fn setLoaded(self: *HotGamesState, allocator: std.mem.Allocator, games: []bgg_model.HotGame) !void {
+        self.deinit(allocator);
+        self.games = games;
+        self.labels = try buildHotGameLabels(allocator, games);
+        self.list = ui.List.init(.{ .items = self.labels });
+        self.load_state = .loaded;
+    }
+
+    fn update(self: *HotGamesState, msg: ui.List.Msg) void {
+        self.list.update(msg);
+    }
+
+    fn handleEvent(self: *const HotGamesState, event: chasen.Event) ?ui.List.Msg {
+        if (self.load_state != .loaded) return null;
+        return self.list.handleEvent(event);
+    }
+
+    fn deinit(self: *HotGamesState, allocator: std.mem.Allocator) void {
+        freeHotGameLabels(allocator, self.labels);
+        bgg_xml.freeHotGames(allocator, self.games);
+        self.labels = &.{};
+        self.games = &.{};
+        self.list = ui.List.init(.{});
+        self.load_state = .idle;
+    }
+};
+
+const HotGamesResult = union(enum) {
+    ok: []bgg_model.HotGame,
+    failed: []const u8,
+};
+
+// The task owns only copied request inputs. API response data is transferred
+// back to App through the result message and released with the app state.
+const HotGamesTask = struct {
+    token: []const u8,
+
+    fn run(ctx_ptr: *anyopaque, allocator: std.mem.Allocator, io: std.Io) App.Msg {
+        const task: *HotGamesTask = @ptrCast(@alignCast(ctx_ptr));
+        defer {
+            allocator.free(task.token);
+            allocator.destroy(task);
+        }
+
+        return .{ .hot_games_loaded = loadHotGames(allocator, io, task.token) catch |err| .{ .failed = @errorName(err) } };
+    }
+};
+
+fn loadHotGames(allocator: std.mem.Allocator, io: std.Io, token: []const u8) !HotGamesResult {
+    var client = bgg_client.Client.init(allocator, io, .{ .token = token });
+    defer client.deinit();
+
+    const path = try bgg_endpoint.hot(allocator);
+    defer allocator.free(path);
+
+    const result = try client.getPath(path, .generic);
+    switch (result) {
+        .ok => |response| {
+            defer response.deinit(allocator);
+            const games = bgg_xml.parseHotResponse(allocator, response.body) catch |parse_error| switch (parse_error) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => return .{ .failed = apiErrorMessage(bgg_error.classifyParseError(parse_error)) },
+            };
+            return .{ .ok = games };
+        },
+        .api_error => |err| return .{ .failed = apiErrorMessage(err) },
+    }
+}
+
+fn apiErrorMessage(err: bgg_error.ApiError) []const u8 {
+    return switch (err) {
+        .auth => |auth| auth.message,
+        .rate_limit => |rate_limit| rate_limit.message,
+        .not_found => "BGG API resource was not found",
+        .network => |network| network.message,
+        .parse => |parse| parse.message,
+    };
+}
+
+fn buildHotGameLabels(allocator: std.mem.Allocator, games: []const bgg_model.HotGame) ![]const []const u8 {
+    const labels = try allocator.alloc([]const u8, games.len);
+    var initialized_count: usize = 0;
+    errdefer {
+        for (labels[0..initialized_count]) |label| allocator.free(label);
+        allocator.free(labels);
+    }
+
+    for (games, 0..) |game, index| {
+        labels[index] = try formatHotGameLabel(allocator, game);
+        initialized_count = index + 1;
+    }
+
+    return labels;
+}
+
+fn formatHotGameLabel(allocator: std.mem.Allocator, game: bgg_model.HotGame) ![]u8 {
+    if (game.year_published) |year| {
+        return try std.fmt.allocPrint(allocator, "#{d: >2}  {s} ({d})", .{ game.rank, game.name, year });
+    }
+    return try std.fmt.allocPrint(allocator, "#{d: >2}  {s}", .{ game.rank, game.name });
+}
+
+fn freeHotGameLabels(allocator: std.mem.Allocator, labels: []const []const u8) void {
+    for (labels) |label| allocator.free(label);
+    allocator.free(labels);
+}
 
 // App screens receive a local surface. `ui.layout.center` handles clamping when
 // the terminal is smaller than the requested block.
@@ -409,6 +623,41 @@ test "submit token saves config when path is available" {
     defer loaded.deinit(std.testing.allocator);
 
     try std.testing.expectEqualStrings("saved-token", loaded.config.apiClientToken().?);
+}
+
+test "hot game labels include rank and optional year" {
+    const with_year = try formatHotGameLabel(std.testing.allocator, .{
+        .id = 13,
+        .rank = 1,
+        .name = "CATAN",
+        .year_published = 1995,
+    });
+    defer std.testing.allocator.free(with_year);
+
+    const without_year = try formatHotGameLabel(std.testing.allocator, .{
+        .id = 42,
+        .rank = 12,
+        .name = "Unknown Year",
+    });
+    defer std.testing.allocator.free(without_year);
+
+    try std.testing.expectEqualStrings("# 1  CATAN (1995)", with_year);
+    try std.testing.expectEqualStrings("#12  Unknown Year", without_year);
+}
+
+test "hot games state owns labels for loaded games" {
+    const games = try std.testing.allocator.alloc(bgg_model.HotGame, 2);
+    games[0] = .{ .id = 1, .rank = 1, .name = try std.testing.allocator.dupe(u8, "First") };
+    games[1] = .{ .id = 2, .rank = 2, .name = try std.testing.allocator.dupe(u8, "Second"), .year_published = 2024 };
+
+    var state: HotGamesState = .{};
+    try state.setLoaded(std.testing.allocator, games);
+    defer state.deinit(std.testing.allocator);
+
+    try std.testing.expect(state.load_state == .loaded);
+    try std.testing.expectEqual(@as(usize, 2), state.list.items.len);
+    try std.testing.expectEqualStrings("# 1  First", state.list.items[0]);
+    try std.testing.expectEqualStrings("# 2  Second (2024)", state.list.items[1]);
 }
 
 test "surfaceRect creates a root-relative rectangle" {
