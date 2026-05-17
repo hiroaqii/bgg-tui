@@ -11,6 +11,19 @@ pub const PathError = std.mem.Allocator.Error || error{
     MissingConfigDirectory,
 };
 
+pub const ParseError = error{
+    InvalidLine,
+    InvalidSection,
+    InvalidKeyValue,
+    InvalidString,
+    InvalidBool,
+    InvalidInteger,
+    InvalidEnum,
+    UnknownSection,
+    UnknownKey,
+    UnsupportedEscape,
+};
+
 pub const Config = struct {
     api: Api = .{},
     display: Display = .{},
@@ -75,6 +88,40 @@ pub const Interface = struct {
     border_style: []const u8 = "rounded",
 };
 
+/// Parses the fixed bgg-tui config schema from TOML-like input.
+/// String values are borrowed from `input`; callers must keep the input buffer
+/// alive for as long as the returned `Config` is used.
+pub fn parseToml(input: []const u8) ParseError!Config {
+    var config = Config.defaults();
+    var section: Section = .root;
+
+    var lines = std.mem.splitScalar(u8, input, '\n');
+    while (lines.next()) |raw_line| {
+        const line = trimWhitespaceAndComment(raw_line);
+        if (line.len == 0) continue;
+
+        if (line[0] == '[') {
+            section = try parseSection(line);
+            continue;
+        }
+
+        const separator_index = std.mem.indexOfScalar(u8, line, '=') orelse return error.InvalidKeyValue;
+        const key = std.mem.trim(u8, line[0..separator_index], " \t\r");
+        const value = std.mem.trim(u8, line[separator_index + 1 ..], " \t\r");
+        if (key.len == 0 or value.len == 0) return error.InvalidKeyValue;
+
+        switch (section) {
+            .root => return error.UnknownKey,
+            .api => try parseApiValue(&config.api, key, value),
+            .display => try parseDisplayValue(&config.display, key, value),
+            .collection => try parseCollectionValue(&config.collection, key, value),
+            .interface => try parseInterfaceValue(&config.interface, key, value),
+        }
+    }
+
+    return config;
+}
+
 /// Resolves the config file path without creating directories or files.
 /// Explicit `BGG_TUI_CONFIG_PATH` wins; otherwise the path follows the host OS
 /// config directory convention.
@@ -135,11 +182,178 @@ fn joinConfigPath(allocator: std.mem.Allocator, config_root: []const u8) ![]u8 {
     return try std.fs.path.join(allocator, &.{ config_root, app_dir_name, config_file_name });
 }
 
+const Section = enum {
+    root,
+    api,
+    display,
+    collection,
+    interface,
+};
+
+fn trimWhitespaceAndComment(line: []const u8) []const u8 {
+    const without_cr = std.mem.trim(u8, line, "\r");
+    const comment_index = std.mem.indexOfScalar(u8, without_cr, '#') orelse without_cr.len;
+    return std.mem.trim(u8, without_cr[0..comment_index], " \t\r");
+}
+
+fn parseSection(line: []const u8) ParseError!Section {
+    if (line.len < 3 or line[line.len - 1] != ']') return error.InvalidSection;
+    const name = std.mem.trim(u8, line[1 .. line.len - 1], " \t\r");
+    if (std.mem.eql(u8, name, "api")) return .api;
+    if (std.mem.eql(u8, name, "display")) return .display;
+    if (std.mem.eql(u8, name, "collection")) return .collection;
+    if (std.mem.eql(u8, name, "interface")) return .interface;
+    return error.UnknownSection;
+}
+
+fn parseApiValue(api: *Api, key: []const u8, value: []const u8) ParseError!void {
+    if (std.mem.eql(u8, key, "token")) {
+        api.token = try parseString(value);
+        return;
+    }
+    return error.UnknownKey;
+}
+
+fn parseDisplayValue(display: *Display, key: []const u8, value: []const u8) ParseError!void {
+    if (std.mem.eql(u8, key, "show_images")) {
+        display.show_images = try parseBool(value);
+    } else if (std.mem.eql(u8, key, "image_protocol")) {
+        display.image_protocol = try parseEnum(ImageProtocol, value);
+    } else if (std.mem.eql(u8, key, "list_width")) {
+        display.list_width = try parseU16(value);
+    } else if (std.mem.eql(u8, key, "thread_width")) {
+        display.thread_width = try parseU16(value);
+    } else if (std.mem.eql(u8, key, "detail_width")) {
+        display.detail_width = try parseU16(value);
+    } else {
+        return error.UnknownKey;
+    }
+}
+
+fn parseCollectionValue(collection: *Collection, key: []const u8, value: []const u8) ParseError!void {
+    if (std.mem.eql(u8, key, "default_username")) {
+        collection.default_username = try parseString(value);
+    } else if (std.mem.eql(u8, key, "status_filter")) {
+        collection.status_filter = try parseEnum(CollectionStatus, value);
+    } else {
+        return error.UnknownKey;
+    }
+}
+
+fn parseInterfaceValue(interface: *Interface, key: []const u8, value: []const u8) ParseError!void {
+    if (std.mem.eql(u8, key, "color_theme")) {
+        interface.color_theme = try parseString(value);
+    } else if (std.mem.eql(u8, key, "transition")) {
+        interface.transition = try parseString(value);
+    } else if (std.mem.eql(u8, key, "selection")) {
+        interface.selection = try parseString(value);
+    } else if (std.mem.eql(u8, key, "list_density")) {
+        interface.list_density = try parseString(value);
+    } else if (std.mem.eql(u8, key, "date_format")) {
+        interface.date_format = try parseString(value);
+    } else if (std.mem.eql(u8, key, "border_style")) {
+        interface.border_style = try parseString(value);
+    } else {
+        return error.UnknownKey;
+    }
+}
+
+fn parseString(value: []const u8) ParseError![]const u8 {
+    if (value.len < 2 or value[0] != '"' or value[value.len - 1] != '"') return error.InvalidString;
+    const inner = value[1 .. value.len - 1];
+    if (std.mem.indexOfScalar(u8, inner, '\\') != null) return error.UnsupportedEscape;
+    return inner;
+}
+
+fn parseBool(value: []const u8) ParseError!bool {
+    if (std.mem.eql(u8, value, "true")) return true;
+    if (std.mem.eql(u8, value, "false")) return false;
+    return error.InvalidBool;
+}
+
+fn parseU16(value: []const u8) ParseError!u16 {
+    return std.fmt.parseInt(u16, value, 10) catch error.InvalidInteger;
+}
+
+fn parseEnum(comptime T: type, value: []const u8) ParseError!T {
+    const name = try parseString(value);
+    return std.meta.stringToEnum(T, name) orelse error.InvalidEnum;
+}
+
 fn nonEmptyTrimmed(value: ?[]const u8) ?[]const u8 {
     const raw = value orelse return null;
     const trimmed = std.mem.trim(u8, raw, " \t\r\n");
     if (trimmed.len == 0) return null;
     return trimmed;
+}
+
+test "config parses toml values into typed schema" {
+    const config = try parseToml(
+        \\# bgg-tui config
+        \\[api]
+        \\token = "token-from-file"
+        \\
+        \\[display]
+        \\show_images = false
+        \\image_protocol = "off"
+        \\list_width = 50
+        \\thread_width = 100
+        \\detail_width = 110
+        \\
+        \\[collection]
+        \\default_username = "hiro"
+        \\status_filter = "wishlist"
+        \\
+        \\[interface]
+        \\color_theme = "dark"
+        \\transition = "slide"
+        \\selection = "pulse"
+        \\list_density = "compact"
+        \\date_format = "yyyy/mm/dd"
+        \\border_style = "plain"
+    );
+
+    try std.testing.expectEqualStrings("token-from-file", config.apiClientToken().?);
+    try std.testing.expect(!config.display.show_images);
+    try std.testing.expectEqual(ImageProtocol.off, config.display.image_protocol);
+    try std.testing.expectEqual(@as(u16, 50), config.display.list_width);
+    try std.testing.expectEqual(@as(u16, 100), config.display.thread_width);
+    try std.testing.expectEqual(@as(u16, 110), config.display.detail_width);
+    try std.testing.expectEqualStrings("hiro", config.collection.default_username.?);
+    try std.testing.expectEqual(CollectionStatus.wishlist, config.collection.status_filter);
+    try std.testing.expectEqualStrings("dark", config.interface.color_theme);
+    try std.testing.expectEqualStrings("slide", config.interface.transition);
+    try std.testing.expectEqualStrings("pulse", config.interface.selection);
+    try std.testing.expectEqualStrings("compact", config.interface.list_density);
+    try std.testing.expectEqualStrings("yyyy/mm/dd", config.interface.date_format);
+    try std.testing.expectEqualStrings("plain", config.interface.border_style);
+}
+
+test "config parser preserves defaults for omitted values" {
+    const config = try parseToml(
+        \\[api]
+        \\token = "token-from-file"
+    );
+
+    try std.testing.expectEqualStrings("token-from-file", config.apiClientToken().?);
+    try std.testing.expect(config.display.show_images);
+    try std.testing.expectEqual(ImageProtocol.auto, config.display.image_protocol);
+    try std.testing.expectEqual(CollectionStatus.own, config.collection.status_filter);
+}
+
+test "config parser rejects unknown keys and escaped strings" {
+    try std.testing.expectError(error.UnknownKey, parseToml(
+        \\[api]
+        \\unexpected = "value"
+    ));
+    try std.testing.expectError(error.UnknownKey, parseToml(
+        \\[interface]
+        \\future_flag = true
+    ));
+    try std.testing.expectError(error.UnsupportedEscape, parseToml(
+        \\[api]
+        \\token = "token\n"
+    ));
 }
 
 test "config path uses explicit override when set" {
