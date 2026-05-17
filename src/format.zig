@@ -17,6 +17,34 @@ pub const DateFormatError = error{
     InvalidDateFormat,
 };
 
+pub fn displayWidth(text: []const u8) usize {
+    const view = std.unicode.Utf8View.init(text) catch return text.len;
+    var iter = view.iterator();
+
+    var width: usize = 0;
+    while (iter.nextCodepoint()) |codepoint| {
+        width += codepointDisplayWidth(codepoint);
+    }
+    return width;
+}
+
+pub fn writeTruncated(writer: *std.Io.Writer, text: []const u8, max_width: usize, ellipsis: []const u8) std.Io.Writer.Error!void {
+    if (max_width == 0) return;
+    if (displayWidth(text) <= max_width) {
+        try writer.writeAll(text);
+        return;
+    }
+
+    const ellipsis_width = displayWidth(ellipsis);
+    if (ellipsis_width >= max_width) {
+        try writeFitting(writer, ellipsis, max_width);
+        return;
+    }
+
+    try writeFitting(writer, text, max_width - ellipsis_width);
+    try writer.writeAll(ellipsis);
+}
+
 pub fn writeUnsigned(writer: *std.Io.Writer, value: u64) std.Io.Writer.Error!void {
     try writer.print("{d}", .{value});
 }
@@ -176,6 +204,57 @@ fn daysFromCivil(date: Date) i64 {
     return era * 146097 + doe - 719468;
 }
 
+fn writeFitting(writer: *std.Io.Writer, text: []const u8, max_width: usize) std.Io.Writer.Error!void {
+    const view = std.unicode.Utf8View.init(text) catch {
+        try writer.writeAll(text[0..@min(text.len, max_width)]);
+        return;
+    };
+    var iter = view.iterator();
+
+    var used_width: usize = 0;
+    var end_index: usize = 0;
+    while (iter.nextCodepointSlice()) |slice| {
+        const codepoint = std.unicode.utf8Decode(slice) catch unreachable;
+        const width = codepointDisplayWidth(codepoint);
+        if (used_width + width > max_width) break;
+
+        used_width += width;
+        end_index = iter.i;
+    }
+
+    try writer.writeAll(text[0..end_index]);
+}
+
+fn codepointDisplayWidth(codepoint: u21) usize {
+    if (codepoint == 0) return 0;
+    if (codepoint < 0x20 or (codepoint >= 0x7f and codepoint < 0xa0)) return 0;
+    if (isCombiningCodepoint(codepoint)) return 0;
+    if (isWideCodepoint(codepoint)) return 2;
+    return 1;
+}
+
+fn isCombiningCodepoint(codepoint: u21) bool {
+    return (codepoint >= 0x0300 and codepoint <= 0x036f) or
+        (codepoint >= 0x1ab0 and codepoint <= 0x1aff) or
+        (codepoint >= 0x1dc0 and codepoint <= 0x1dff) or
+        (codepoint >= 0x20d0 and codepoint <= 0x20ff) or
+        (codepoint >= 0xfe20 and codepoint <= 0xfe2f);
+}
+
+fn isWideCodepoint(codepoint: u21) bool {
+    return (codepoint >= 0x1100 and codepoint <= 0x115f) or
+        (codepoint >= 0x2329 and codepoint <= 0x232a) or
+        (codepoint >= 0x2e80 and codepoint <= 0xa4cf) or
+        (codepoint >= 0xac00 and codepoint <= 0xd7a3) or
+        (codepoint >= 0xf900 and codepoint <= 0xfaff) or
+        (codepoint >= 0xfe10 and codepoint <= 0xfe19) or
+        (codepoint >= 0xfe30 and codepoint <= 0xfe6f) or
+        (codepoint >= 0xff00 and codepoint <= 0xff60) or
+        (codepoint >= 0xffe0 and codepoint <= 0xffe6) or
+        (codepoint >= 0x1f300 and codepoint <= 0x1faff) or
+        (codepoint >= 0x20000 and codepoint <= 0x3fffd);
+}
+
 fn expectFormatted(expected: []const u8, write_fn: anytype, args: anytype) !void {
     var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer out.deinit();
@@ -216,6 +295,25 @@ test "format optional rank values" {
     try expectFormatted("-", writeOptionalRank, .{@as(u32, 0)});
     try expectFormatted("#389", writeOptionalRank, .{@as(u32, 389)});
     try expectFormatted("#1,234", writeOptionalRank, .{@as(u32, 1_234)});
+}
+
+test "calculate display width for ascii and common wide text" {
+    try std.testing.expectEqual(@as(usize, 5), displayWidth("Catan"));
+    try std.testing.expectEqual(@as(usize, 2), displayWidth("あ"));
+    try std.testing.expectEqual(@as(usize, 6), displayWidth("あいう"));
+    try std.testing.expectEqual(@as(usize, 1), displayWidth("e\u{301}"));
+}
+
+test "truncate text by display width" {
+    try expectFormatted("Catan", writeTruncated, .{ "Catan", @as(usize, 10), "..." });
+    try expectFormatted("Cat...", writeTruncated, .{ "Catan: Seafarers", @as(usize, 6), "..." });
+    try expectFormatted("...", writeTruncated, .{ "Catan", @as(usize, 3), "..." });
+    try expectFormatted(".", writeTruncated, .{ "Catan", @as(usize, 1), "..." });
+}
+
+test "truncate wide text without splitting utf-8 codepoints" {
+    try expectFormatted("あ...", writeTruncated, .{ "あいう", @as(usize, 5), "..." });
+    try expectFormatted("...", writeTruncated, .{ "あいう", @as(usize, 4), "..." });
 }
 
 test "parse date format config values" {
