@@ -15,6 +15,7 @@ const setup_token_size = chasen.Size{ .width = 56, .height = 9 };
 const placeholder_size = chasen.Size{ .width = 56, .height = 6 };
 const hot_list_size = chasen.Size{ .width = 72, .height = 18 };
 const search_size = chasen.Size{ .width = 72, .height = 18 };
+const detail_size = chasen.Size{ .width = 78, .height = 20 };
 
 const menu_items = [_]ui.Menu.Item{
     .{ .label = "Hot Games", .shortcut = "h" },
@@ -28,6 +29,7 @@ pub const Screen = enum {
     main_menu,
     hot_games,
     search,
+    game_detail,
     collection,
     settings,
 };
@@ -43,6 +45,10 @@ pub const App = struct {
     hot_games: HotGamesState = .{},
     search: SearchState = .{},
     search_request_id: u64 = 0,
+    search_focus: SearchFocus = .input,
+    game_detail: GameDetailState = .{},
+    detail_request_id: u64 = 0,
+    detail_back_screen: Screen = .main_menu,
     menu: ui.Menu = ui.Menu.init(.{ .items = &menu_items }),
     shell: ui.Panel = ui.Panel.init(.{}),
 
@@ -53,6 +59,7 @@ pub const App = struct {
         search_paste: []const u8,
         search_results_loaded: SearchTaskResult,
         search_list: ui.List.Msg,
+        game_detail_loaded: GameDetailTaskResult,
         menu: ui.Menu.Msg,
         hot_list: ui.List.Msg,
         hot_games_loaded: HotGamesResult,
@@ -101,18 +108,24 @@ pub const App = struct {
                     try self.startSearch(ctx);
                 } else if (self.search_input) |*input| {
                     try input.update(input_msg);
+                    self.search_focus = .input;
                 }
             },
             .search_paste => |text| {
                 if (self.search_input) |*input| {
                     try insertPastedText(input, text);
+                    self.search_focus = .input;
                 }
             },
             .search_results_loaded => |result| try self.finishSearch(result),
             .search_list => |list_msg| switch (list_msg) {
-                .move_prev, .move_next => self.search.update(list_msg),
-                .activate => {},
+                .move_prev, .move_next => {
+                    self.search_focus = .results;
+                    self.search.update(list_msg);
+                },
+                .activate => |index| try self.openSearchResult(index, ctx),
             },
+            .game_detail_loaded => |result| try self.finishGameDetail(result),
             .menu => |menu_msg| switch (menu_msg) {
                 .move_prev, .move_next => self.menu.update(menu_msg),
                 .activate => |index| {
@@ -121,7 +134,7 @@ pub const App = struct {
             },
             .hot_list => |list_msg| switch (list_msg) {
                 .move_prev, .move_next => self.hot_games.update(list_msg),
-                .activate => {},
+                .activate => |index| try self.openHotGame(index, ctx),
             },
             .hot_games_loaded => |result| try self.finishHotGamesLoad(result),
             .show_screen => |screen| try self.showScreen(screen, ctx),
@@ -185,10 +198,27 @@ pub const App = struct {
                 .paste => |text| return .{ .search_paste = text },
                 else => {},
             }
+            if (self.search_focus == .results) {
+                if (self.search.handleEvent(event)) |msg| return .{ .search_list = msg };
+            }
             if (self.search_input) |*input| {
                 if (input.handleEvent(event)) |msg| return .{ .search_input = msg };
             }
-            if (self.search.handleEvent(event)) |msg| return .{ .search_list = msg };
+            if (self.search_focus == .input) {
+                if (self.search.handleEvent(event)) |msg| return .{ .search_list = msg };
+            }
+            return null;
+        }
+
+        if (self.screen == .game_detail) {
+            switch (event) {
+                .key_press => |key| {
+                    if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'b') return .{ .show_screen = self.detail_back_screen };
+                    if (key.codepoint == 'm') return .{ .show_screen = .main_menu };
+                    if (key.codepoint == 'q') return .quit;
+                },
+                else => {},
+            }
             return null;
         }
 
@@ -221,6 +251,7 @@ pub const App = struct {
             .main_menu => try self.viewMainMenu(sfc),
             .hot_games => self.viewHotGames(sfc),
             .search => self.viewSearch(sfc),
+            .game_detail => try self.viewGameDetail(sfc),
             .collection => self.viewPlaceholder(sfc, "Collection", "Collection loading is planned after the MVP list flow."),
             .settings => self.viewPlaceholder(sfc, "Settings", "Minimum settings screen is pending."),
         }
@@ -306,7 +337,7 @@ pub const App = struct {
 
         if (self.search_input) |*input| {
             var input_area = area.child(.{ .col = 0, .row = 2, .width = @min(area.size().width, 48), .height = 1 });
-            input.view(&input_area, .{});
+            input.view(&input_area, .{ .show_cursor = self.search_focus == .input });
         }
 
         switch (self.search.load_state) {
@@ -332,12 +363,59 @@ pub const App = struct {
                     });
                     self.search.list.view(&list_area, .{
                         .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
+                        .show_cursor = self.search_focus == .results,
                     });
                 }
             },
         }
 
         _ = area.textAt(0, area.size().height -| 1, "Enter: search  Up/Down: move  Esc: menu", .{ .dim = true });
+    }
+
+    fn viewGameDetail(self: *const App, sfc: *chasen.Surface) !void {
+        sfc.hideCursor();
+        var area = centeredSurface(sfc, detail_size);
+        _ = area.textAt(0, 0, "Game Detail", .{ .bold = true, .fg = .{ .index = 14 } });
+
+        switch (self.game_detail.load_state) {
+            .idle, .loading => {
+                _ = area.textAt(0, 2, "Loading game detail...", .{ .fg = .gray });
+            },
+            .failed => |message| {
+                _ = area.textAt(0, 2, "Could not load game detail.", .{ .fg = .{ .index = 9 } });
+                _ = area.textAt(0, 4, message, .{ .fg = .gray });
+            },
+            .loaded => {
+                if (self.game_detail.games.len == 0) {
+                    _ = area.textAt(0, 2, "No game detail returned by BGG.", .{ .fg = .gray });
+                } else {
+                    const game = self.game_detail.games[0];
+                    if (game.year_published) |year| {
+                        _ = try area.printAt(0, 2, .{ .bold = true }, "{s} ({d})", .{ game.name, year });
+                    } else {
+                        _ = area.textAt(0, 2, game.name, .{ .bold = true });
+                    }
+
+                    _ = try area.printAt(0, 4, .{}, "Players: {d}-{d}  Time: {d} min  Age: {d}+", .{
+                        game.min_players,
+                        game.max_players,
+                        game.playing_time,
+                        game.min_age,
+                    });
+                    _ = try area.printAt(0, 5, .{}, "Rating: {d:.1}  Geek: {d:.1}  Rank: {d}  Weight: {d:.2}", .{
+                        game.rating,
+                        game.bayes_average,
+                        game.rank,
+                        game.weight,
+                    });
+
+                    var desc_area = area.child(.{ .col = 0, .row = 7, .width = area.size().width, .height = area.size().height -| 10 });
+                    drawDescriptionPreview(&desc_area, game.description);
+                }
+            },
+        }
+
+        _ = area.textAt(0, area.size().height -| 1, "b/Esc: back  m: menu  q: quit", .{ .dim = true });
     }
 
     fn submitToken(self: *App, ctx: *chasen.Ctx(Msg)) !void {
@@ -372,6 +450,7 @@ pub const App = struct {
         }
         self.hot_games.deinit(self.allocator.?);
         self.search.deinit(self.allocator.?);
+        self.game_detail.deinit(self.allocator.?);
     }
 
     fn showScreen(self: *App, screen: Screen, ctx: *chasen.Ctx(Msg)) !void {
@@ -379,6 +458,16 @@ pub const App = struct {
         if (screen == .hot_games) {
             try self.startHotGamesLoad(ctx);
         }
+    }
+
+    fn openHotGame(self: *App, index: usize, ctx: *chasen.Ctx(Msg)) !void {
+        if (index >= self.hot_games.games.len) return;
+        try self.startGameDetail(ctx, self.hot_games.games[index].id, .hot_games);
+    }
+
+    fn openSearchResult(self: *App, index: usize, ctx: *chasen.Ctx(Msg)) !void {
+        if (index >= self.search.results.len) return;
+        try self.startGameDetail(ctx, self.search.results[index].id, .search);
     }
 
     fn startHotGamesLoad(self: *App, ctx: *chasen.Ctx(Msg)) !void {
@@ -416,6 +505,7 @@ pub const App = struct {
         // validation or auth failure state.
         self.search_request_id +%= 1;
         const request_id = self.search_request_id;
+        self.search_focus = .input;
 
         if (query.len < 3) {
             self.search.setFailed("Search query must be at least 3 characters");
@@ -454,10 +544,61 @@ pub const App = struct {
         }
 
         switch (task_result.result) {
-            .ok => |results| try self.search.setLoaded(self.allocator.?, results),
+            .ok => |results| {
+                try self.search.setLoaded(self.allocator.?, results);
+                self.search_focus = if (self.search.results.len == 0) .input else .results;
+            },
             .failed => |message| self.search.setFailed(message),
         }
     }
+
+    fn startGameDetail(self: *App, ctx: *chasen.Ctx(Msg), game_id: u32, back_screen: Screen) !void {
+        self.detail_request_id +%= 1;
+        const request_id = self.detail_request_id;
+        self.detail_back_screen = back_screen;
+        self.screen = .game_detail;
+        self.game_detail.deinit(self.allocator.?);
+
+        const token = self.config.apiClientToken() orelse {
+            self.game_detail.setFailed("BGG API token is required");
+            return;
+        };
+
+        const task = try ctx.allocator().create(GameDetailTask);
+        errdefer ctx.allocator().destroy(task);
+        task.* = .{
+            .token = try ctx.allocator().dupe(u8, token),
+            .game_id = game_id,
+            .request_id = request_id,
+        };
+        errdefer ctx.allocator().free(task.token);
+
+        self.game_detail.setLoading();
+        ctx.spawnWith(task, GameDetailTask.run) catch |err| {
+            self.game_detail.setFailed("Could not start game detail task");
+            return err;
+        };
+    }
+
+    fn finishGameDetail(self: *App, task_result: GameDetailTaskResult) !void {
+        if (task_result.request_id != self.detail_request_id) {
+            switch (task_result.result) {
+                .ok => |games| bgg_xml.freeGames(self.allocator.?, games),
+                .failed => {},
+            }
+            return;
+        }
+
+        switch (task_result.result) {
+            .ok => |games| try self.game_detail.setLoaded(self.allocator.?, games),
+            .failed => |message| self.game_detail.setFailed(message),
+        }
+    }
+};
+
+const SearchFocus = enum {
+    input,
+    results,
 };
 
 const HotGamesState = struct {
@@ -571,6 +712,48 @@ const SearchTaskResult = struct {
     result: SearchResult,
 };
 
+const GameDetailState = struct {
+    load_state: LoadState = .idle,
+    games: []bgg_model.Game = &.{},
+
+    const LoadState = union(enum) {
+        idle,
+        loading,
+        loaded,
+        failed: []const u8,
+    };
+
+    fn setLoading(self: *GameDetailState) void {
+        self.load_state = .loading;
+    }
+
+    fn setFailed(self: *GameDetailState, message: []const u8) void {
+        self.load_state = .{ .failed = message };
+    }
+
+    fn setLoaded(self: *GameDetailState, allocator: std.mem.Allocator, games: []bgg_model.Game) !void {
+        self.deinit(allocator);
+        self.games = games;
+        self.load_state = .loaded;
+    }
+
+    fn deinit(self: *GameDetailState, allocator: std.mem.Allocator) void {
+        bgg_xml.freeGames(allocator, self.games);
+        self.games = &.{};
+        self.load_state = .idle;
+    }
+};
+
+const GameDetailResult = union(enum) {
+    ok: []bgg_model.Game,
+    failed: []const u8,
+};
+
+const GameDetailTaskResult = struct {
+    request_id: u64,
+    result: GameDetailResult,
+};
+
 // The task owns only copied request inputs. API response data is transferred
 // back to App through the result message and released with the app state.
 const HotGamesTask = struct {
@@ -603,6 +786,25 @@ const SearchTask = struct {
         return .{ .search_results_loaded = .{
             .request_id = task.request_id,
             .result = loadSearchResults(allocator, io, task.token, task.query) catch |err| .{ .failed = @errorName(err) },
+        } };
+    }
+};
+
+const GameDetailTask = struct {
+    token: []const u8,
+    game_id: u32,
+    request_id: u64,
+
+    fn run(ctx_ptr: *anyopaque, allocator: std.mem.Allocator, io: std.Io) App.Msg {
+        const task: *GameDetailTask = @ptrCast(@alignCast(ctx_ptr));
+        defer {
+            allocator.free(task.token);
+            allocator.destroy(task);
+        }
+
+        return .{ .game_detail_loaded = .{
+            .request_id = task.request_id,
+            .result = loadGameDetail(allocator, io, task.token, task.game_id) catch |err| .{ .failed = @errorName(err) },
         } };
     }
 };
@@ -646,6 +848,53 @@ fn loadSearchResults(allocator: std.mem.Allocator, io: std.Io, token: []const u8
             return .{ .ok = results };
         },
         .api_error => |err| return .{ .failed = apiErrorMessage(err) },
+    }
+}
+
+fn loadGameDetail(allocator: std.mem.Allocator, io: std.Io, token: []const u8, game_id: u32) !GameDetailResult {
+    var client = bgg_client.Client.init(allocator, io, .{ .token = token });
+    defer client.deinit();
+
+    const ids = [_]u32{game_id};
+    const path = try bgg_endpoint.thing(allocator, &ids);
+    defer allocator.free(path);
+
+    const result = try client.getPath(path, .generic);
+    switch (result) {
+        .ok => |response| {
+            defer response.deinit(allocator);
+            const games = bgg_xml.parseThingResponse(allocator, response.body) catch |parse_error| switch (parse_error) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => return .{ .failed = apiErrorMessage(bgg_error.classifyParseError(parse_error)) },
+            };
+            return .{ .ok = games };
+        },
+        .api_error => |err| return .{ .failed = apiErrorMessage(err) },
+    }
+}
+
+fn drawDescriptionPreview(surface: *chasen.Surface, description: []const u8) void {
+    const size = surface.size();
+    if (size.width == 0 or size.height == 0) return;
+
+    _ = surface.textAt(0, 0, "Description", .{ .bold = true });
+    if (description.len == 0) {
+        _ = surface.textAt(0, 2, "-", .{ .fg = .gray });
+        return;
+    }
+
+    var row: u16 = 2;
+    var line_start: usize = 0;
+    var index: usize = 0;
+    while (index <= description.len and row < size.height) : (index += 1) {
+        if (index == description.len or description[index] == '\n') {
+            const line = std.mem.trim(u8, description[line_start..index], " \t\r");
+            if (line.len > 0) {
+                _ = surface.textAt(0, row, line, .{});
+                row += 1;
+            }
+            line_start = index + 1;
+        }
     }
 }
 
@@ -742,6 +991,7 @@ fn screenTitle(screen: Screen) []const u8 {
         .main_menu => "main menu",
         .hot_games => "hot games",
         .search => "search",
+        .game_detail => "game detail",
         .collection => "collection",
         .settings => "settings",
     };
@@ -751,6 +1001,7 @@ fn statusRightHint(screen: Screen) []const u8 {
     return switch (screen) {
         .setup_token => "Esc: quit",
         .search => "Esc: menu",
+        .game_detail => "b/Esc: back  m: menu  q: quit",
         else => "m: menu  Esc/q: quit",
     };
 }
@@ -833,6 +1084,7 @@ test "screen titles match status labels" {
     try std.testing.expectEqualStrings("main menu", screenTitle(.main_menu));
     try std.testing.expectEqualStrings("hot games", screenTitle(.hot_games));
     try std.testing.expectEqualStrings("search", screenTitle(.search));
+    try std.testing.expectEqualStrings("game detail", screenTitle(.game_detail));
     try std.testing.expectEqualStrings("collection", screenTitle(.collection));
     try std.testing.expectEqualStrings("settings", screenTitle(.settings));
 }
@@ -840,6 +1092,7 @@ test "screen titles match status labels" {
 test "status right hint matches screen key handling" {
     try std.testing.expectEqualStrings("Esc: quit", statusRightHint(.setup_token));
     try std.testing.expectEqualStrings("Esc: menu", statusRightHint(.search));
+    try std.testing.expectEqualStrings("b/Esc: back  m: menu  q: quit", statusRightHint(.game_detail));
     try std.testing.expectEqualStrings("m: menu  Esc/q: quit", statusRightHint(.main_menu));
     try std.testing.expectEqualStrings("m: menu  Esc/q: quit", statusRightHint(.hot_games));
 }
@@ -903,6 +1156,48 @@ test "search screen escape returns to main menu" {
 
     const msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.escape } }).?;
     try std.testing.expectEqual(App.Msg{ .show_screen = .main_menu }, msg);
+}
+
+test "loaded search results receive activation before search input" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.allocator = std.testing.allocator;
+    app.screen = .search;
+    app.search_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "root" });
+    defer app.deinitOwnedState();
+
+    const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
+    results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+
+    try app.search.setLoaded(std.testing.allocator, results);
+    app.search_focus = .results;
+
+    const msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
+    try std.testing.expect(msg == .search_list);
+    try std.testing.expectEqual(ui.List.Msg{ .activate = 0 }, msg.search_list);
+}
+
+test "game detail escape returns to previous list screen" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.screen = .game_detail;
+    app.detail_back_screen = .search;
+
+    const msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.escape } }).?;
+    try std.testing.expectEqual(App.Msg{ .show_screen = .search }, msg);
+}
+
+test "game detail view hides cursor left by previous screen" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(90, 24);
+    defer ts.deinit();
+
+    ts.surface.showCursor(4, 4);
+    try std.testing.expect(ts.screen.cursor_vis);
+
+    try app.viewGameDetail(&ts.surface);
+
+    try std.testing.expect(!ts.screen.cursor_vis);
 }
 
 test "submit token stores owned token and enters main menu" {
@@ -1007,6 +1302,41 @@ test "search state owns labels for loaded results" {
     try std.testing.expectEqual(@as(usize, 2), state.list.items.len);
     try std.testing.expectEqualStrings("First", state.list.items[0]);
     try std.testing.expectEqualStrings("Second (2024)", state.list.items[1]);
+}
+
+test "successful search completion focuses results when present" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    app.search_request_id = 7;
+    const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
+    results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+
+    try app.finishSearch(.{
+        .request_id = 7,
+        .result = .{ .ok = results },
+    });
+
+    try std.testing.expectEqual(SearchFocus.results, app.search_focus);
+    try std.testing.expectEqual(@as(usize, 1), app.search.list.items.len);
+}
+
+test "game detail state owns loaded game result" {
+    const games = try std.testing.allocator.alloc(bgg_model.Game, 1);
+    games[0] = .{
+        .id = 13,
+        .name = try std.testing.allocator.dupe(u8, "CATAN"),
+        .description = try std.testing.allocator.dupe(u8, "Trade, build, settle."),
+    };
+
+    var state: GameDetailState = .{};
+    try state.setLoaded(std.testing.allocator, games);
+    defer state.deinit(std.testing.allocator);
+
+    try std.testing.expect(state.load_state == .loaded);
+    try std.testing.expectEqual(@as(usize, 1), state.games.len);
+    try std.testing.expectEqualStrings("CATAN", state.games[0].name);
 }
 
 test "outdated search results do not replace current search state" {
