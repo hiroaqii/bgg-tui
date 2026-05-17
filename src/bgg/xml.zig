@@ -303,7 +303,9 @@ fn parseSearchItem(allocator: Allocator, reader: *xml_lib.Reader) !model.GameSea
     const id = try parseU32Attribute(reader, "id");
 
     var name: ?[]const u8 = null;
+    var fallback_name: ?[]const u8 = null;
     errdefer if (name) |value| allocator.free(value);
+    errdefer if (fallback_name) |value| allocator.free(value);
 
     var year_published: ?i32 = null;
 
@@ -315,9 +317,12 @@ fn parseSearchItem(allocator: Allocator, reader: *xml_lib.Reader) !model.GameSea
             .comment, .pi, .text, .cdata, .character_reference, .entity_reference => continue,
             .element_start => {
                 if (std.mem.eql(u8, reader.elementName(), "name")) {
-                    if (isAttributeValue(reader, "type", "primary")) {
+                    const is_primary = isAttributeValue(reader, "type", "primary");
+                    if (is_primary) {
                         if (name) |old| allocator.free(old);
                         name = try dupeAttributeValue(allocator, reader, "value");
+                    } else if (fallback_name == null) {
+                        fallback_name = try dupeAttributeValue(allocator, reader, "value");
                     }
                     try reader.skipElement();
                 } else if (std.mem.eql(u8, reader.elementName(), "yearpublished")) {
@@ -329,9 +334,15 @@ fn parseSearchItem(allocator: Allocator, reader: *xml_lib.Reader) !model.GameSea
             },
             .element_end => {
                 if (std.mem.eql(u8, reader.elementName(), "item")) {
+                    const resolved_name = if (name) |primary| blk: {
+                        if (fallback_name) |fallback| allocator.free(fallback);
+                        break :blk primary;
+                    } else fallback_name orelse return ParseError.MissingPrimaryName;
+                    name = null;
+                    fallback_name = null;
                     return .{
                         .id = id,
-                        .name = name orelse return ParseError.MissingPrimaryName,
+                        .name = resolved_name,
                         .year_published = year_published,
                     };
                 }
@@ -1258,6 +1269,58 @@ test "parse search XML fixture" {
     try std.testing.expectEqual(@as(u32, 278), results[2].id);
     try std.testing.expectEqualStrings("Catan Card Game", results[2].name);
     try std.testing.expectEqual(@as(?i32, 1996), results[2].year_published);
+}
+
+test "parse search XML with escaped apostrophe in name attribute" {
+    const bytes =
+        \\<?xml version="1.0" encoding="utf-8"?>
+        \\<items total="1" termsofuse="https://boardgamegeek.com/xmlapi/termsofuse">
+        \\  <item type="boardgame" id="438388">
+        \\    <name type="primary" value="Paupers&#039; Ladder: The Rootwings"/>
+        \\  </item>
+        \\</items>
+    ;
+
+    const results = try parseSearchResponse(std.testing.allocator, bytes);
+    defer freeSearchResults(std.testing.allocator, results);
+
+    try std.testing.expectEqual(@as(usize, 1), results.len);
+    try std.testing.expectEqualStrings("Paupers' Ladder: The Rootwings", results[0].name);
+}
+
+test "parse search XML falls back to first name when primary name is missing" {
+    const bytes =
+        \\<?xml version="1.0" encoding="utf-8"?>
+        \\<items total="1" termsofuse="https://boardgamegeek.com/xmlapi/termsofuse">
+        \\  <item type="boardgame" id="6492">
+        \\    <name type="alternate" value="Rootbound"/>
+        \\  </item>
+        \\</items>
+    ;
+
+    const results = try parseSearchResponse(std.testing.allocator, bytes);
+    defer freeSearchResults(std.testing.allocator, results);
+
+    try std.testing.expectEqual(@as(usize, 1), results.len);
+    try std.testing.expectEqualStrings("Rootbound", results[0].name);
+}
+
+test "parse search XML prefers primary name over alternate name" {
+    const bytes =
+        \\<?xml version="1.0" encoding="utf-8"?>
+        \\<items total="1" termsofuse="https://boardgamegeek.com/xmlapi/termsofuse">
+        \\  <item type="boardgame" id="237182">
+        \\    <name type="alternate" value="Racine"/>
+        \\    <name type="primary" value="Root"/>
+        \\  </item>
+        \\</items>
+    ;
+
+    const results = try parseSearchResponse(std.testing.allocator, bytes);
+    defer freeSearchResults(std.testing.allocator, results);
+
+    try std.testing.expectEqual(@as(usize, 1), results.len);
+    try std.testing.expectEqualStrings("Root", results[0].name);
 }
 
 test "parse hot XML fixture" {
