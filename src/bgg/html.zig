@@ -4,6 +4,8 @@ const Allocator = std.mem.Allocator;
 
 pub const TextOptions = struct {
     quote_prefix: []const u8 = "> ",
+    wrap_width: ?usize = null,
+    linkify_urls: bool = false,
 };
 
 pub fn decodeEntities(allocator: Allocator, input: []const u8) ![]u8 {
@@ -41,7 +43,22 @@ pub fn toText(allocator: Allocator, input: []const u8, options: TextOptions) ![]
     defer renderer.deinit();
 
     try renderer.render(input);
-    return try renderer.toOwnedSlice();
+    var text = try renderer.toOwnedSlice();
+    errdefer allocator.free(text);
+
+    if (options.wrap_width) |width| {
+        const wrapped = try wrapText(allocator, text, width, options.quote_prefix);
+        allocator.free(text);
+        text = wrapped;
+    }
+
+    if (options.linkify_urls) {
+        const linkified = try linkifyUrls(allocator, text);
+        allocator.free(text);
+        text = linkified;
+    }
+
+    return text;
 }
 
 fn writeEntity(writer: *std.Io.Writer, entity: []const u8) !bool {
@@ -215,7 +232,10 @@ const TextRenderer = struct {
     pending_space: bool = false,
     newline_count: usize = 0,
     quote_depth: usize = 0,
-    active_href: ?[]const u8 = null,
+    div_depth: usize = 0,
+    quote_div_depths: [16]usize = undefined,
+    quote_div_depth_count: usize = 0,
+    active_link: ?LinkInfo = null,
 
     fn init(allocator: Allocator, options: TextOptions) TextRenderer {
         return .{
@@ -288,7 +308,9 @@ const TextRenderer = struct {
             try self.newline(1);
         } else if (equalsIgnoreCase(tag.name, "p")) {
             try self.newline(2);
-        } else if (equalsIgnoreCase(tag.name, "blockquote") or hasClass(tag.raw, "gg-markup-quote")) {
+        } else if (equalsIgnoreCase(tag.name, "div")) {
+            try self.handleDivTag(tag);
+        } else if (equalsIgnoreCase(tag.name, "blockquote") or equalsIgnoreCase(tag.name, "gg-markup-quote") or hasClass(tag.raw, "gg-markup-quote") or hasClass(tag.raw, "quote")) {
             if (tag.closing) {
                 if (self.quote_depth > 0) self.quote_depth -= 1;
                 try self.newline(2);
@@ -307,14 +329,47 @@ const TextRenderer = struct {
             }
         } else if (equalsIgnoreCase(tag.name, "a")) {
             if (tag.closing) {
-                if (self.active_href) |href| {
-                    try self.writeText(" (");
-                    try self.writeText(href);
-                    try self.writeText(")");
-                    self.active_href = null;
+                if (self.active_link) |link| {
+                    const link_text = self.out.written()[link.start..];
+                    if (linkTextIsUrlPrefix(link_text, link.href)) {
+                        self.out.shrinkRetainingCapacity(link.start);
+                        try self.writeText(link.href);
+                    } else {
+                        try self.writeText(" (");
+                        try self.writeText(link.href);
+                        try self.writeText(")");
+                    }
+                    self.active_link = null;
                 }
             } else {
-                self.active_href = findAttribute(tag.raw, "href");
+                if (findAttribute(tag.raw, "href")) |href| {
+                    self.active_link = .{
+                        .href = href,
+                        .start = self.out.written().len,
+                    };
+                }
+            }
+        }
+    }
+
+    fn handleDivTag(self: *TextRenderer, tag: Tag) !void {
+        if (tag.closing) {
+            if (self.quote_div_depth_count > 0 and self.quote_div_depths[self.quote_div_depth_count - 1] == self.div_depth) {
+                self.quote_div_depth_count -= 1;
+                if (self.quote_depth > 0) self.quote_depth -= 1;
+                try self.newline(2);
+            }
+            if (self.div_depth > 0) self.div_depth -= 1;
+            return;
+        }
+
+        self.div_depth += 1;
+        if (hasClass(tag.raw, "gg-markup-quote") or hasClass(tag.raw, "quote")) {
+            try self.newline(2);
+            self.quote_depth += 1;
+            if (self.quote_div_depth_count < self.quote_div_depths.len) {
+                self.quote_div_depths[self.quote_div_depth_count] = self.div_depth;
+                self.quote_div_depth_count += 1;
             }
         }
     }
@@ -371,6 +426,11 @@ const TextRenderer = struct {
             self.out.shrinkRetainingCapacity(written.len - 1);
         }
     }
+};
+
+const LinkInfo = struct {
+    href: []const u8,
+    start: usize,
 };
 
 const Tag = struct {
@@ -458,6 +518,208 @@ fn equalsIgnoreCase(a: []const u8, b: []const u8) bool {
     return std.ascii.eqlIgnoreCase(a, b);
 }
 
+fn linkTextIsUrlPrefix(link_text: []const u8, href: []const u8) bool {
+    const text = std.mem.trim(u8, link_text, " \t\r\n");
+    const without_ellipsis = if (std.mem.endsWith(u8, text, "...")) text[0 .. text.len - 3] else text;
+    return without_ellipsis.len > 0 and std.mem.startsWith(u8, href, without_ellipsis);
+}
+
+fn wrapText(allocator: Allocator, text: []const u8, width: usize, quote_prefix: []const u8) ![]u8 {
+    if (width == 0) return allocator.dupe(u8, "");
+
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    var first = true;
+    while (lines.next()) |line| {
+        if (!first) try out.writer.writeByte('\n');
+        first = false;
+        try writeWrappedLine(&out.writer, line, width, quote_prefix);
+    }
+
+    return try out.toOwnedSlice();
+}
+
+fn writeWrappedLine(writer: *std.Io.Writer, line: []const u8, width: usize, quote_prefix: []const u8) !void {
+    const prefix = quoteLinePrefix(line, quote_prefix);
+    const body = std.mem.trim(u8, line[prefix.len..], " \t");
+    if (body.len == 0) {
+        try writer.writeAll(prefix);
+        return;
+    }
+
+    var state = LineWrapState{
+        .writer = writer,
+        .width = width,
+        .prefix = prefix,
+    };
+
+    var index: usize = 0;
+    while (index < body.len) {
+        while (index < body.len and isInlineWhitespace(body[index])) : (index += 1) {}
+        if (index >= body.len) break;
+
+        const start = index;
+        while (index < body.len and !isInlineWhitespace(body[index])) : (index += 1) {}
+        try state.writeWord(body[start..index]);
+    }
+}
+
+const LineWrapState = struct {
+    writer: *std.Io.Writer,
+    width: usize,
+    prefix: []const u8,
+    line_started: bool = false,
+    line_width: usize = 0,
+
+    fn writeWord(self: *LineWrapState, word: []const u8) !void {
+        const word_width = displayWidth(word);
+        if (!self.line_started) {
+            try self.startLine();
+        } else if (self.line_width + 1 + word_width <= self.width) {
+            try self.writer.writeByte(' ');
+            self.line_width += 1;
+        } else {
+            try self.writer.writeByte('\n');
+            self.line_started = false;
+            try self.startLine();
+        }
+
+        if (word_width <= self.remainingWidth()) {
+            try self.writer.writeAll(word);
+            self.line_width += word_width;
+            return;
+        }
+
+        try self.writeLongWord(word);
+    }
+
+    fn startLine(self: *LineWrapState) !void {
+        try self.writer.writeAll(self.prefix);
+        self.line_width = displayWidth(self.prefix);
+        self.line_started = true;
+    }
+
+    fn remainingWidth(self: LineWrapState) usize {
+        if (self.line_width >= self.width) return 0;
+        return self.width - self.line_width;
+    }
+
+    fn writeLongWord(self: *LineWrapState, word: []const u8) !void {
+        var view = std.unicode.Utf8View.init(word) catch {
+            try self.writer.writeAll(word);
+            self.line_width += word.len;
+            return;
+        };
+        var iter = view.iterator();
+        while (iter.nextCodepointSlice()) |slice| {
+            const slice_width = displayWidth(slice);
+            if (self.line_width > displayWidth(self.prefix) and self.line_width + slice_width > self.width) {
+                try self.writer.writeByte('\n');
+                self.line_started = false;
+                try self.startLine();
+            }
+            try self.writer.writeAll(slice);
+            self.line_width += slice_width;
+        }
+    }
+};
+
+fn quoteLinePrefix(line: []const u8, quote_prefix: []const u8) []const u8 {
+    if (quote_prefix.len == 0) return "";
+
+    var end: usize = 0;
+    while (std.mem.startsWith(u8, line[end..], quote_prefix)) {
+        end += quote_prefix.len;
+        if (end >= line.len) break;
+    }
+    return line[0..end];
+}
+
+fn displayWidth(text: []const u8) usize {
+    const view = std.unicode.Utf8View.init(text) catch return text.len;
+    var iter = view.iterator();
+
+    var width: usize = 0;
+    while (iter.nextCodepoint()) |codepoint| {
+        width += codepointDisplayWidth(codepoint);
+    }
+    return width;
+}
+
+fn codepointDisplayWidth(codepoint: u21) usize {
+    if (codepoint == 0) return 0;
+    if (codepoint < 0x20 or (codepoint >= 0x7f and codepoint < 0xa0)) return 0;
+    if (codepoint >= 0x300 and codepoint <= 0x36f) return 0;
+    if (isWideCodepoint(codepoint)) return 2;
+    return 1;
+}
+
+fn isWideCodepoint(codepoint: u21) bool {
+    return (codepoint >= 0x1100 and codepoint <= 0x115f) or
+        (codepoint >= 0x2329 and codepoint <= 0x232a) or
+        (codepoint >= 0x2e80 and codepoint <= 0xa4cf) or
+        (codepoint >= 0xac00 and codepoint <= 0xd7a3) or
+        (codepoint >= 0xf900 and codepoint <= 0xfaff) or
+        (codepoint >= 0xfe10 and codepoint <= 0xfe19) or
+        (codepoint >= 0xfe30 and codepoint <= 0xfe6f) or
+        (codepoint >= 0xff00 and codepoint <= 0xff60) or
+        (codepoint >= 0xffe0 and codepoint <= 0xffe6);
+}
+
+fn isInlineWhitespace(byte: u8) bool {
+    return byte == ' ' or byte == '\t' or byte == '\r';
+}
+
+fn linkifyUrls(allocator: Allocator, text: []const u8) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+
+    var index: usize = 0;
+    while (index < text.len) {
+        const next_http = std.mem.indexOfPos(u8, text, index, "http://");
+        const next_https = std.mem.indexOfPos(u8, text, index, "https://");
+        const start = minOptionalIndex(next_http, next_https) orelse {
+            try out.writer.writeAll(text[index..]);
+            break;
+        };
+
+        try out.writer.writeAll(text[index..start]);
+        var end = start;
+        while (end < text.len and !std.ascii.isWhitespace(text[end]) and text[end] != ')') : (end += 1) {}
+        var url_end = end;
+        while (url_end > start and isTrailingUrlPunctuation(text[url_end - 1])) : (url_end -= 1) {}
+
+        const url = text[start..url_end];
+        try writeOsc8Link(&out.writer, url);
+        try out.writer.writeAll(text[url_end..end]);
+        index = end;
+    }
+
+    return try out.toOwnedSlice();
+}
+
+fn minOptionalIndex(a: ?usize, b: ?usize) ?usize {
+    if (a) |left| {
+        if (b) |right| return @min(left, right);
+        return left;
+    }
+    return b;
+}
+
+fn isTrailingUrlPunctuation(byte: u8) bool {
+    return byte == '.' or byte == ',' or byte == ';' or byte == ':' or byte == '!' or byte == '?';
+}
+
+fn writeOsc8Link(writer: *std.Io.Writer, url: []const u8) !void {
+    try writer.writeAll("\x1b]8;;");
+    try writer.writeAll(url);
+    try writer.writeAll("\x1b\\");
+    try writer.writeAll(url);
+    try writer.writeAll("\x1b]8;;\x1b\\");
+}
+
 test "decode named HTML entities" {
     const decoded = try decodeEntities(std.testing.allocator, "&amp; &apos; &quot; &lt;tag&gt; &nbsp;");
     defer std.testing.allocator.free(decoded);
@@ -534,4 +796,49 @@ test "skip script and style content" {
     defer std.testing.allocator.free(text);
 
     try std.testing.expectEqualStrings("Visible text", text);
+}
+
+test "avoid duplicating anchor href when link text is url" {
+    const text = try toText(
+        std.testing.allocator,
+        "<a href=\"https://example.com/very/long/path\">https://example.com/very/lon...</a>",
+        .{},
+    );
+    defer std.testing.allocator.free(text);
+
+    try std.testing.expectEqualStrings("https://example.com/very/long/path", text);
+}
+
+test "wrap html text while preserving quote prefix" {
+    const text = try toText(
+        std.testing.allocator,
+        "<blockquote>The quick brown fox jumps over the lazy dog</blockquote>",
+        .{ .quote_prefix = "| ", .wrap_width = 20 },
+    );
+    defer std.testing.allocator.free(text);
+
+    try std.testing.expectEqualStrings("| The quick brown\n| fox jumps over the\n| lazy dog", text);
+}
+
+test "linkify plain urls with osc8 hyperlinks" {
+    const text = try toText(
+        std.testing.allocator,
+        "Visit https://example.com.",
+        .{ .linkify_urls = true },
+    );
+    defer std.testing.allocator.free(text);
+
+    try std.testing.expect(std.mem.indexOf(u8, text, "\x1b]8;;https://example.com\x1b\\") != null);
+    try std.testing.expect(std.mem.endsWith(u8, text, "\x1b]8;;\x1b\\."));
+}
+
+test "convert bgg quote div format" {
+    const text = try toText(
+        std.testing.allocator,
+        "<div class='quote'><div class='quotetitle'><p><b>user wrote:</b></p></div><div class='quotebody'><i>quoted text</i></div></div>rest",
+        .{ .quote_prefix = "| " },
+    );
+    defer std.testing.allocator.free(text);
+
+    try std.testing.expectEqualStrings("| user wrote:\n\n| quoted text\n\nrest", text);
 }
