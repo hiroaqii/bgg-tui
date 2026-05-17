@@ -38,6 +38,22 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run bgg-tui");
     run_step.dependOn(&run_exe.step);
 
+    const live_check_exe = b.addExecutable(.{
+        .name = "bgg-tui-live-api-check",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/live_check.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "bgg_tui", .module = mod },
+            },
+        }),
+    });
+    const run_live_check = b.addRunArtifact(live_check_exe);
+
+    const live_check_step = b.step("check-live-api", "Run a manual BGG API check using the configured token");
+    live_check_step.dependOn(&run_live_check.step);
+
     const mod_tests = b.addTest(.{
         .root_module = mod,
     });

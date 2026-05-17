@@ -70,8 +70,8 @@ pub const Config = struct {
         if (!isOneOf(config.interface.color_theme, &.{ "default", "blue", "orange", "green" })) return error.InvalidColorTheme;
         if (!isOneOf(config.interface.transition, &.{ "none", "fade", "glitch", "dissolve", "sweep", "lines", "lines-cross", "random" })) return error.InvalidTransition;
         if (!isOneOf(config.interface.selection, &.{ "none", "wave", "blink", "glitch" })) return error.InvalidSelection;
-        if (!isOneOf(config.interface.list_density, &.{ "compact", "normal", "comfortable" })) return error.InvalidListDensity;
-        if (!isOneOf(config.interface.date_format, &.{ "yyyy-mm-dd", "yyyy/mm/dd", "relative" })) return error.InvalidDateFormat;
+        if (!isOneOf(config.interface.list_density, &.{ "compact", "normal", "comfortable", "relaxed" })) return error.InvalidListDensity;
+        if (!isOneOf(config.interface.date_format, &.{ "yyyy-mm-dd", "yyyy/mm/dd", "relative", "YYYY-MM-DD" })) return error.InvalidDateFormat;
         if (!isOneOf(config.interface.border_style, &.{ "none", "rounded", "thick", "double", "block" })) return error.InvalidBorderStyle;
     }
 };
@@ -611,9 +611,15 @@ test "config validates setting ranges and string option values" {
     var config = Config.defaults();
     try config.validate();
 
+    config.interface.list_density = "relaxed";
+    config.interface.date_format = "YYYY-MM-DD";
+    try config.validate();
+
     config.display.list_width = 19;
     try std.testing.expectError(error.InvalidWidth, config.validate());
     config.display.list_width = 40;
+    config.interface.list_density = "normal";
+    config.interface.date_format = "yyyy-mm-dd";
 
     config.interface.transition = "zoom";
     try std.testing.expectError(error.InvalidTransition, config.validate());

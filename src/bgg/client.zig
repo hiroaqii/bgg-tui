@@ -45,10 +45,10 @@ pub const Client = struct {
     http: std.http.Client,
     options: Options,
 
-    pub fn init(allocator: Allocator, options: Options) Client {
+    pub fn init(allocator: Allocator, io: std.Io, options: Options) Client {
         return .{
             .allocator = allocator,
-            .http = .{ .allocator = allocator },
+            .http = .{ .allocator = allocator, .io = io },
             .options = options,
         };
     }
@@ -65,18 +65,13 @@ pub const Client = struct {
         const url = try client.buildUrl(path);
         defer client.allocator.free(url);
 
-        // Authorization is a privileged header so std.http strips it if a
-        // redirect crosses to another host.
         var auth_value: ?[]u8 = null;
         defer if (auth_value) |value| client.allocator.free(value);
 
         const token = client.options.token orelse return .{ .api_error = missingTokenError() };
         if (token.len == 0) return .{ .api_error = missingTokenError() };
 
-        var headers_buf: [1]std.http.Header = undefined;
         auth_value = try authorizationValue(client.allocator, token);
-        headers_buf[0] = .{ .name = "authorization", .value = auth_value.? };
-        const privileged_headers: []const std.http.Header = headers_buf[0..1];
 
         var attempt: u8 = 0;
         while (true) : (attempt += 1) {
@@ -85,7 +80,9 @@ pub const Client = struct {
             };
 
             var request = client.http.request(.GET, uri, .{
-                .privileged_headers = privileged_headers,
+                .headers = .{
+                    .authorization = .{ .override = auth_value.? },
+                },
             }) catch |request_error| {
                 return .{ .api_error = .{ .network = .{ .message = @errorName(request_error) } } };
             };
@@ -107,7 +104,10 @@ pub const Client = struct {
             // is still in progress. Other endpoints treat it as a normal 2xx.
             if (shouldRetryStatus(status, attempt, client.options.retry, endpoint_kind)) {
                 discardResponseBody(&http_response);
-                std.Thread.sleep(retryDelayMs(attempt, client.options.retry, retry_after_seconds) * std.time.ns_per_ms);
+                const delay_ms = retryDelayMs(attempt, client.options.retry, retry_after_seconds);
+                std.Io.sleep(client.http.io, .fromMilliseconds(@intCast(delay_ms)), .awake) catch |sleep_error| {
+                    return .{ .api_error = .{ .network = .{ .message = @errorName(sleep_error) } } };
+                };
                 continue;
             }
 

@@ -50,6 +50,12 @@ Run the current development scaffold:
 zig build run
 ```
 
+Run the manual live API check with the configured token:
+
+```bash
+zig build check-live-api
+```
+
 ## Getting Started
 
 bgg-tui requires a BGG API bearer token. You need to register for API access on BoardGameGeek before using the app.
