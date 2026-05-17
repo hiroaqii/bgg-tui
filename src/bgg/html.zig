@@ -2,6 +2,10 @@ const std = @import("std");
 
 const Allocator = std.mem.Allocator;
 
+pub const TextOptions = struct {
+    quote_prefix: []const u8 = "> ",
+};
+
 pub fn decodeEntities(allocator: Allocator, input: []const u8) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(allocator);
     errdefer out.deinit();
@@ -30,6 +34,14 @@ pub fn decodeEntities(allocator: Allocator, input: []const u8) ![]u8 {
     }
 
     return try out.toOwnedSlice();
+}
+
+pub fn toText(allocator: Allocator, input: []const u8, options: TextOptions) ![]u8 {
+    var renderer = TextRenderer.init(allocator, options);
+    defer renderer.deinit();
+
+    try renderer.render(input);
+    return try renderer.toOwnedSlice();
 }
 
 fn writeEntity(writer: *std.Io.Writer, entity: []const u8) !bool {
@@ -196,6 +208,256 @@ fn writeCodepoint(writer: *std.Io.Writer, codepoint: u21) !void {
     try writer.writeAll(buffer[0..len]);
 }
 
+const TextRenderer = struct {
+    out: std.Io.Writer.Allocating,
+    options: TextOptions,
+    at_line_start: bool = true,
+    pending_space: bool = false,
+    newline_count: usize = 0,
+    quote_depth: usize = 0,
+    active_href: ?[]const u8 = null,
+
+    fn init(allocator: Allocator, options: TextOptions) TextRenderer {
+        return .{
+            .out = .init(allocator),
+            .options = options,
+        };
+    }
+
+    fn deinit(self: *TextRenderer) void {
+        self.out.deinit();
+    }
+
+    fn toOwnedSlice(self: *TextRenderer) ![]u8 {
+        return try self.out.toOwnedSlice();
+    }
+
+    fn render(self: *TextRenderer, input: []const u8) !void {
+        var index: usize = 0;
+        while (index < input.len) {
+            if (input[index] != '<') {
+                try self.writeTextUntilTag(input, &index);
+                continue;
+            }
+
+            const end = std.mem.indexOfScalarPos(u8, input, index, '>') orelse {
+                try self.writeTextByte(input[index]);
+                index += 1;
+                continue;
+            };
+
+            const raw_tag = std.mem.trim(u8, input[index + 1 .. end], " \t\r\n");
+            index = end + 1;
+            if (raw_tag.len == 0 or raw_tag[0] == '!') continue;
+
+            const tag = parseTag(raw_tag);
+            if (tag.name.len == 0) continue;
+
+            if (!tag.closing and (equalsIgnoreCase(tag.name, "script") or equalsIgnoreCase(tag.name, "style"))) {
+                index = skipRawElement(input, index, tag.name);
+                continue;
+            }
+
+            try self.handleTag(tag);
+        }
+
+        self.trimTrailingWhitespace();
+    }
+
+    fn writeTextUntilTag(self: *TextRenderer, input: []const u8, index: *usize) !void {
+        while (index.* < input.len and input[index.*] != '<') {
+            if (input[index.*] == '&') {
+                const semicolon = std.mem.indexOfScalarPos(u8, input, index.*, ';');
+                if (semicolon) |end| {
+                    if (try writeEntity(&self.out.writer, input[index.* + 1 .. end])) {
+                        self.at_line_start = false;
+                        self.newline_count = 0;
+                        index.* = end + 1;
+                        continue;
+                    }
+                }
+            }
+
+            try self.writeTextByte(input[index.*]);
+            index.* += 1;
+        }
+    }
+
+    fn handleTag(self: *TextRenderer, tag: Tag) !void {
+        if (equalsIgnoreCase(tag.name, "br")) {
+            try self.newline(1);
+        } else if (equalsIgnoreCase(tag.name, "p")) {
+            try self.newline(2);
+        } else if (equalsIgnoreCase(tag.name, "blockquote") or hasClass(tag.raw, "gg-markup-quote")) {
+            if (tag.closing) {
+                if (self.quote_depth > 0) self.quote_depth -= 1;
+                try self.newline(2);
+            } else {
+                try self.newline(2);
+                self.quote_depth += 1;
+            }
+        } else if (equalsIgnoreCase(tag.name, "ul") or equalsIgnoreCase(tag.name, "ol")) {
+            try self.newline(1);
+        } else if (equalsIgnoreCase(tag.name, "li")) {
+            if (tag.closing) {
+                try self.newline(1);
+            } else {
+                try self.newline(1);
+                try self.writeText("- ");
+            }
+        } else if (equalsIgnoreCase(tag.name, "a")) {
+            if (tag.closing) {
+                if (self.active_href) |href| {
+                    try self.writeText(" (");
+                    try self.writeText(href);
+                    try self.writeText(")");
+                    self.active_href = null;
+                }
+            } else {
+                self.active_href = findAttribute(tag.raw, "href");
+            }
+        }
+    }
+
+    fn writeText(self: *TextRenderer, text: []const u8) !void {
+        for (text) |byte| {
+            try self.writeTextByte(byte);
+        }
+    }
+
+    fn writeTextByte(self: *TextRenderer, byte: u8) !void {
+        if (byte == '\r') return;
+        if (byte == '\n') {
+            try self.newline(1);
+            return;
+        }
+        if (std.ascii.isWhitespace(byte)) {
+            self.pending_space = !self.at_line_start;
+            return;
+        }
+
+        try self.writeLinePrefixIfNeeded();
+        if (self.pending_space) {
+            try self.out.writer.writeByte(' ');
+            self.pending_space = false;
+        }
+        try self.out.writer.writeByte(byte);
+        self.at_line_start = false;
+        self.newline_count = 0;
+    }
+
+    fn newline(self: *TextRenderer, count: usize) !void {
+        self.pending_space = false;
+        while (self.newline_count < count and self.out.written().len > 0) {
+            try self.out.writer.writeByte('\n');
+            self.newline_count += 1;
+        }
+        self.at_line_start = true;
+    }
+
+    fn writeLinePrefixIfNeeded(self: *TextRenderer) !void {
+        if (!self.at_line_start or self.quote_depth == 0) return;
+        for (0..self.quote_depth) |_| {
+            try self.out.writer.writeAll(self.options.quote_prefix);
+        }
+        self.at_line_start = false;
+    }
+
+    fn trimTrailingWhitespace(self: *TextRenderer) void {
+        while (self.out.written().len > 0) {
+            const written = self.out.written();
+            const last = written[written.len - 1];
+            if (last != ' ' and last != '\n' and last != '\t') break;
+            self.out.shrinkRetainingCapacity(written.len - 1);
+        }
+    }
+};
+
+const Tag = struct {
+    raw: []const u8,
+    name: []const u8,
+    closing: bool,
+};
+
+fn parseTag(raw: []const u8) Tag {
+    var body = raw;
+    var closing = false;
+    if (body.len > 0 and body[0] == '/') {
+        closing = true;
+        body = std.mem.trim(u8, body[1..], " \t\r\n");
+    }
+
+    var end: usize = 0;
+    while (end < body.len and !std.ascii.isWhitespace(body[end]) and body[end] != '/') : (end += 1) {}
+
+    return .{
+        .raw = body,
+        .name = body[0..end],
+        .closing = closing,
+    };
+}
+
+fn skipRawElement(input: []const u8, start: usize, name: []const u8) usize {
+    var index = start;
+    while (index < input.len) {
+        const tag_start = std.mem.indexOfScalarPos(u8, input, index, '<') orelse return input.len;
+        const tag_end = std.mem.indexOfScalarPos(u8, input, tag_start, '>') orelse return input.len;
+        const tag = parseTag(std.mem.trim(u8, input[tag_start + 1 .. tag_end], " \t\r\n"));
+        if (tag.closing and equalsIgnoreCase(tag.name, name)) return tag_end + 1;
+        index = tag_end + 1;
+    }
+    return input.len;
+}
+
+fn hasClass(raw: []const u8, class_name: []const u8) bool {
+    const class_value = findAttribute(raw, "class") orelse return false;
+    var parts = std.mem.tokenizeAny(u8, class_value, " \t\r\n");
+    while (parts.next()) |part| {
+        if (std.mem.eql(u8, part, class_name)) return true;
+    }
+    return false;
+}
+
+fn findAttribute(raw: []const u8, name: []const u8) ?[]const u8 {
+    var index: usize = 0;
+    while (index < raw.len) {
+        while (index < raw.len and !std.ascii.isWhitespace(raw[index])) : (index += 1) {}
+        while (index < raw.len and std.ascii.isWhitespace(raw[index])) : (index += 1) {}
+        if (index >= raw.len) return null;
+
+        const key_start = index;
+        while (index < raw.len and raw[index] != '=' and !std.ascii.isWhitespace(raw[index]) and raw[index] != '/') : (index += 1) {}
+        const key = raw[key_start..index];
+        while (index < raw.len and std.ascii.isWhitespace(raw[index])) : (index += 1) {}
+        if (index >= raw.len or raw[index] != '=') continue;
+        index += 1;
+        while (index < raw.len and std.ascii.isWhitespace(raw[index])) : (index += 1) {}
+        if (index >= raw.len) return null;
+
+        const quote = raw[index];
+        const value_start = if (quote == '"' or quote == '\'') index + 1 else index;
+        const value_end = if (quote == '"' or quote == '\'')
+            std.mem.indexOfScalarPos(u8, raw, value_start, quote) orelse raw.len
+        else
+            findUnquotedAttributeEnd(raw, value_start);
+        index = @min(value_end + 1, raw.len);
+
+        if (equalsIgnoreCase(key, name)) return raw[value_start..value_end];
+    }
+
+    return null;
+}
+
+fn findUnquotedAttributeEnd(raw: []const u8, start: usize) usize {
+    var end = start;
+    while (end < raw.len and !std.ascii.isWhitespace(raw[end]) and raw[end] != '/') : (end += 1) {}
+    return end;
+}
+
+fn equalsIgnoreCase(a: []const u8, b: []const u8) bool {
+    return std.ascii.eqlIgnoreCase(a, b);
+}
+
 test "decode named HTML entities" {
     const decoded = try decodeEntities(std.testing.allocator, "&amp; &apos; &quot; &lt;tag&gt; &nbsp;");
     defer std.testing.allocator.free(decoded);
@@ -232,4 +494,44 @@ test "preserve unknown entities" {
     defer std.testing.allocator.free(decoded);
 
     try std.testing.expectEqualStrings("A &unknown; entity", decoded);
+}
+
+test "convert paragraphs and line breaks to text" {
+    const text = try toText(std.testing.allocator, "<p>First&nbsp;line<br>Second line</p><p>Next</p>", .{});
+    defer std.testing.allocator.free(text);
+
+    try std.testing.expectEqualStrings("First line\nSecond line\n\nNext", text);
+}
+
+test "convert blockquote and BGG quote markup to quoted text" {
+    const text = try toText(
+        std.testing.allocator,
+        "<blockquote>Quoted<br>line</blockquote><div class=\"gg-markup-quote\">BGG quote</div>",
+        .{},
+    );
+    defer std.testing.allocator.free(text);
+
+    try std.testing.expectEqualStrings("> Quoted\n> line\n\n> BGG quote", text);
+}
+
+test "convert lists and links to readable text" {
+    const text = try toText(
+        std.testing.allocator,
+        "<ul><li>One</li><li><a href=\"https://example.test/game\">Two</a></li></ul>",
+        .{},
+    );
+    defer std.testing.allocator.free(text);
+
+    try std.testing.expectEqualStrings("- One\n- Two (https://example.test/game)", text);
+}
+
+test "skip script and style content" {
+    const text = try toText(
+        std.testing.allocator,
+        "Visible<script>alert('x')</script><style>.x{}</style> text",
+        .{},
+    );
+    defer std.testing.allocator.free(text);
+
+    try std.testing.expectEqualStrings("Visible text", text);
 }
