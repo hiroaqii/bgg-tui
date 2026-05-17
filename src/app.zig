@@ -507,12 +507,12 @@ pub const App = struct {
         self.search_focus = .input;
 
         if (query.len < 3) {
-            self.search.setFailed("Search query must be at least 3 characters");
+            self.search.setFailed(self.allocator.?, "Search query must be at least 3 characters");
             return;
         }
 
         const token = self.config.apiClientToken() orelse {
-            self.search.setFailed("BGG API token is required");
+            self.search.setFailed(self.allocator.?, "BGG API token is required");
             return;
         };
 
@@ -526,9 +526,9 @@ pub const App = struct {
         errdefer ctx.allocator().free(task.token);
         errdefer ctx.allocator().free(task.query);
 
-        self.search.setLoading();
+        self.search.setLoading(self.allocator.?);
         ctx.spawnWith(task, SearchTask.run) catch |err| {
-            self.search.setFailed("Could not start search task");
+            self.search.setFailed(self.allocator.?, "Could not start search task");
             return err;
         };
     }
@@ -547,7 +547,7 @@ pub const App = struct {
                 try self.search.setLoaded(self.allocator.?, results);
                 self.search_focus = if (self.search.results.len == 0) .input else .results;
             },
-            .failed => |message| self.search.setFailed(message),
+            .failed => |message| self.search.setFailed(self.allocator.?, message),
         }
     }
 
@@ -680,16 +680,18 @@ const SearchState = struct {
         failed: []const u8,
     };
 
-    fn setLoading(self: *SearchState) void {
+    fn setLoading(self: *SearchState, allocator: std.mem.Allocator) void {
+        self.clearResults(allocator);
         self.load_state = .loading;
     }
 
-    fn setFailed(self: *SearchState, message: []const u8) void {
+    fn setFailed(self: *SearchState, allocator: std.mem.Allocator, message: []const u8) void {
+        self.clearResults(allocator);
         self.load_state = .{ .failed = message };
     }
 
     fn setLoaded(self: *SearchState, allocator: std.mem.Allocator, results: []bgg_model.GameSearchResult) !void {
-        self.deinit(allocator);
+        self.clearResults(allocator);
         self.results = results;
         self.labels = try buildSearchResultLabels(allocator, results);
         self.list = ui.List.init(.{ .items = self.labels });
@@ -706,12 +708,16 @@ const SearchState = struct {
     }
 
     fn deinit(self: *SearchState, allocator: std.mem.Allocator) void {
+        self.clearResults(allocator);
+        self.load_state = .idle;
+    }
+
+    fn clearResults(self: *SearchState, allocator: std.mem.Allocator) void {
         freeSearchResultLabels(allocator, self.labels);
         bgg_xml.freeSearchResults(allocator, self.results);
         self.labels = &.{};
         self.results = &.{};
         self.list = ui.List.init(.{});
-        self.load_state = .idle;
     }
 };
 
@@ -1338,6 +1344,43 @@ test "successful search completion focuses results when present" {
 
     try std.testing.expectEqual(SearchFocus.results, app.search_focus);
     try std.testing.expectEqual(@as(usize, 1), app.search.list.items.len);
+}
+
+test "failed search completion clears previous loaded results" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
+    results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Old Result") };
+    try app.search.setLoaded(std.testing.allocator, results);
+
+    app.search_request_id = 3;
+    try app.finishSearch(.{
+        .request_id = 3,
+        .result = .{ .failed = "rate limited" },
+    });
+
+    try std.testing.expect(app.search.load_state == .failed);
+    try std.testing.expectEqual(@as(usize, 0), app.search.results.len);
+    try std.testing.expectEqual(@as(usize, 0), app.search.labels.len);
+    try std.testing.expectEqual(@as(usize, 0), app.search.list.items.len);
+}
+
+test "search loading clears previous loaded results" {
+    const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
+    results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Old Result") };
+
+    var state: SearchState = .{};
+    try state.setLoaded(std.testing.allocator, results);
+    defer state.deinit(std.testing.allocator);
+
+    state.setLoading(std.testing.allocator);
+
+    try std.testing.expect(state.load_state == .loading);
+    try std.testing.expectEqual(@as(usize, 0), state.results.len);
+    try std.testing.expectEqual(@as(usize, 0), state.labels.len);
+    try std.testing.expectEqual(@as(usize, 0), state.list.items.len);
 }
 
 test "game detail state owns loaded game result" {
