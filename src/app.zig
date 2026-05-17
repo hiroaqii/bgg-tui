@@ -8,13 +8,13 @@ const bgg_error = @import("bgg/error.zig");
 const bgg_model = @import("bgg/model.zig");
 const bgg_xml = @import("bgg/xml.zig");
 const config_mod = @import("config.zig");
+const list_view = @import("list_view.zig");
 
 // Keep top-level screens centered until a screen needs its own full-page layout.
 const main_menu_size = chasen.Size{ .width = 48, .height = 12 };
 const setup_token_size = chasen.Size{ .width = 56, .height = 9 };
 const placeholder_size = chasen.Size{ .width = 56, .height = 6 };
-const hot_list_size = chasen.Size{ .width = 72, .height = 18 };
-const search_size = chasen.Size{ .width = 72, .height = 18 };
+const list_screen_max_size = chasen.Size{ .width = 72, .height = 34 };
 const detail_size = chasen.Size{ .width = 78, .height = 20 };
 
 const menu_items = [_]ui.Menu.Item{
@@ -249,8 +249,8 @@ pub const App = struct {
         switch (self.screen) {
             .setup_token => self.viewSetupToken(sfc),
             .main_menu => try self.viewMainMenu(sfc),
-            .hot_games => self.viewHotGames(sfc),
-            .search => self.viewSearch(sfc),
+            .hot_games => try self.viewHotGames(sfc),
+            .search => try self.viewSearch(sfc),
             .game_detail => try self.viewGameDetail(sfc),
             .collection => self.viewPlaceholder(sfc, "Collection", "Collection loading is planned after the MVP list flow."),
             .settings => self.viewPlaceholder(sfc, "Settings", "Minimum settings screen is pending."),
@@ -298,8 +298,8 @@ pub const App = struct {
         _ = area.textAt(0, 4, self.footerHint(), .{ .dim = true });
     }
 
-    fn viewHotGames(self: *const App, sfc: *chasen.Surface) void {
-        var area = centeredSurface(sfc, hot_list_size);
+    fn viewHotGames(self: *const App, sfc: *chasen.Surface) !void {
+        var area = constrainedListSurface(sfc);
         _ = area.textAt(0, 0, "Hot Games", .{ .bold = true, .fg = .{ .index = 14 } });
 
         switch (self.hot_games.load_state) {
@@ -320,9 +320,10 @@ pub const App = struct {
                         .width = area.size().width,
                         .height = area.size().height -| 4,
                     });
-                    self.hot_games.list.view(&list_area, .{
+                    list_view.viewList(&self.hot_games.list, &list_area, .{
                         .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
                     });
+                    try self.drawListPosition(&area, &self.hot_games.list, list_area.size().height);
                 }
             },
         }
@@ -330,8 +331,8 @@ pub const App = struct {
         _ = area.textAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
     }
 
-    fn viewSearch(self: *const App, sfc: *chasen.Surface) void {
-        var area = centeredSurface(sfc, search_size);
+    fn viewSearch(self: *const App, sfc: *chasen.Surface) !void {
+        var area = constrainedListSurface(sfc);
         _ = area.textAt(0, 0, "Search Games", .{ .bold = true, .fg = .{ .index = 14 } });
 
         if (self.search_input) |*input| {
@@ -360,10 +361,11 @@ pub const App = struct {
                         .width = area.size().width,
                         .height = area.size().height -| 6,
                     });
-                    self.search.list.view(&list_area, .{
+                    list_view.viewList(&self.search.list, &list_area, .{
                         .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
                         .show_cursor = self.search_focus == .results,
                     });
+                    try self.drawListPosition(&area, &self.search.list, list_area.size().height);
                 }
             },
         }
@@ -592,6 +594,16 @@ pub const App = struct {
             .ok => |games| try self.game_detail.setLoaded(self.allocator.?, games),
             .failed => |message| self.game_detail.setFailed(message),
         }
+    }
+
+    fn drawListPosition(self: *const App, surface: *chasen.Surface, list: *const ui.List, visible_height: u16) !void {
+        _ = self;
+        const item_count = list.items.len;
+        if (item_count == 0 or visible_height == 0) return;
+
+        const range = list_view.visibleRange(item_count, list.focusedIndex(), visible_height);
+        const text = try list_view.positionText(surface.frameAllocator(), range, item_count);
+        _ = surface.textAt(0, surface.size().height -| 2, text, .{ .dim = true });
     }
 
     fn footerHint(self: *const App) []const u8 {
@@ -987,6 +999,14 @@ fn freeHotGameLabels(allocator: std.mem.Allocator, labels: []const []const u8) v
 // the terminal is smaller than the requested block.
 fn centeredSurface(surface: *chasen.Surface, size: chasen.Size) chasen.Surface {
     return surface.child(ui.layout.center(surfaceRect(surface), size));
+}
+
+fn constrainedListSurface(surface: *chasen.Surface) chasen.Surface {
+    const size = surface.size();
+    return surface.child(ui.layout.center(surfaceRect(surface), .{
+        .width = @min(size.width, list_screen_max_size.width),
+        .height = @min(size.height, list_screen_max_size.height),
+    }));
 }
 
 fn surfaceRect(surface: *const chasen.Surface) chasen.Rect {
@@ -1456,4 +1476,26 @@ test "surfaceRect creates a root-relative rectangle" {
         .width = 80,
         .height = 24,
     }, surfaceRect(&ts.surface));
+}
+
+test "constrained list surface clamps to max size" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(120, 40);
+    defer ts.deinit();
+
+    const area = constrainedListSurface(&ts.surface);
+
+    try std.testing.expectEqual(list_screen_max_size.width, area.size().width);
+    try std.testing.expectEqual(list_screen_max_size.height, area.size().height);
+}
+
+test "constrained list surface shrinks for small terminals" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(40, 12);
+    defer ts.deinit();
+
+    const area = constrainedListSurface(&ts.surface);
+
+    try std.testing.expectEqual(@as(u16, 40), area.size().width);
+    try std.testing.expectEqual(@as(u16, 12), area.size().height);
 }
