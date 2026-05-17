@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const model = @import("bgg/model.zig");
+
 pub const DateFormat = enum {
     yyyy_mm_dd,
     yyyy_slash_mm_slash_dd,
@@ -176,6 +178,75 @@ pub fn writeOptionalRank(writer: *std.Io.Writer, rank: u32) std.Io.Writer.Error!
     try writeUnsignedGrouped(writer, rank);
 }
 
+pub fn writeGameStats(writer: *std.Io.Writer, game: model.Game) std.Io.Writer.Error!void {
+    try writer.writeAll("Rating ");
+    try writeOptionalRating(writer, game.rating);
+    try writer.writeAll(" | Geek ");
+    try writeOptionalRating(writer, game.bayes_average);
+    try writer.writeAll(" | Rank ");
+    try writeOptionalRank(writer, game.rank);
+    try writer.writeAll(" | Weight ");
+    try writeOptionalWeight(writer, game.weight);
+}
+
+pub fn writePlayerSummary(writer: *std.Io.Writer, game: model.Game) std.Io.Writer.Error!void {
+    if (game.min_players == 0 and game.max_players == 0) {
+        try writer.writeByte('-');
+    } else if (game.min_players == game.max_players) {
+        try writer.print("{d} players", .{game.min_players});
+    } else {
+        try writer.print("{d}-{d} players", .{ game.min_players, game.max_players });
+    }
+
+    if (game.playing_time > 0) {
+        try writer.print(" | {d} min", .{game.playing_time});
+    }
+    if (game.min_age > 0) {
+        try writer.print(" | age {d}+", .{game.min_age});
+    }
+}
+
+pub fn writePlayerCountPollSummary(writer: *std.Io.Writer, poll: model.PlayerCountPoll) std.Io.Writer.Error!void {
+    var wrote = false;
+    if (poll.best_with) |best_with| {
+        if (best_with.len > 0) {
+            try writer.writeAll(best_with);
+            wrote = true;
+        }
+    }
+    if (poll.recommended_with) |recommended_with| {
+        if (recommended_with.len > 0) {
+            if (wrote) try writer.writeAll(" | ");
+            try writer.writeAll(recommended_with);
+            wrote = true;
+        }
+    }
+    if (poll.total_votes > 0) {
+        if (wrote) try writer.writeAll(" | ");
+        try writeUnsignedGrouped(writer, poll.total_votes);
+        try writer.writeAll(" votes");
+        wrote = true;
+    }
+    if (!wrote) try writer.writeByte('-');
+}
+
+pub fn writeCollectionStatuses(writer: *std.Io.Writer, item: model.CollectionItem) std.Io.Writer.Error!void {
+    var count: usize = 0;
+    try writeStatusIf(writer, &count, item.owned, "Owned");
+    try writeStatusIf(writer, &count, item.prev_owned, "Prev owned");
+    try writeStatusIf(writer, &count, item.for_trade, "For trade");
+    try writeStatusIf(writer, &count, item.want, "Want");
+    try writeStatusIf(writer, &count, item.want_to_play, "Want to play");
+    try writeStatusIf(writer, &count, item.want_to_buy, "Want to buy");
+    try writeStatusIf(writer, &count, item.wishlist, "Wishlist");
+    try writeStatusIf(writer, &count, item.preordered, "Preordered");
+    if (count == 0) try writer.writeByte('-');
+}
+
+pub fn writeBggGameUrl(writer: *std.Io.Writer, game_id: u32) std.Io.Writer.Error!void {
+    try writer.print("https://boardgamegeek.com/boardgame/{d}", .{game_id});
+}
+
 pub fn dateFormatFromConfig(value: []const u8) DateFormatError!DateFormat {
     if (std.mem.eql(u8, value, "yyyy-mm-dd") or std.mem.eql(u8, value, "YYYY-MM-DD")) return .yyyy_mm_dd;
     if (std.mem.eql(u8, value, "yyyy/mm/dd")) return .yyyy_slash_mm_slash_dd;
@@ -279,6 +350,13 @@ fn daysFromCivil(date: Date) i64 {
     const doy = @divFloor(153 * month_prime + 2, 5) + day - 1;
     const doe = yoe * 365 + @divFloor(yoe, 4) - @divFloor(yoe, 100) + doy;
     return era * 146097 + doe - 719468;
+}
+
+fn writeStatusIf(writer: *std.Io.Writer, count: *usize, enabled: bool, label: []const u8) std.Io.Writer.Error!void {
+    if (!enabled) return;
+    if (count.* != 0) try writer.writeAll(", ");
+    try writer.writeAll(label);
+    count.* += 1;
 }
 
 fn writeFitting(writer: *std.Io.Writer, text: []const u8, max_width: usize) std.Io.Writer.Error!void {
@@ -486,6 +564,69 @@ test "format optional rank values" {
     try expectFormatted("-", writeOptionalRank, .{@as(u32, 0)});
     try expectFormatted("#389", writeOptionalRank, .{@as(u32, 389)});
     try expectFormatted("#1,234", writeOptionalRank, .{@as(u32, 1_234)});
+}
+
+test "format game stats summary" {
+    const game = model.Game{
+        .id = 13,
+        .name = "CATAN",
+        .rating = 7.145,
+        .bayes_average = 7.012,
+        .rank = 389,
+        .weight = 2.321,
+    };
+
+    try expectFormatted("Rating 7.1 | Geek 7.0 | Rank #389 | Weight 2.32", writeGameStats, .{game});
+}
+
+test "format missing game stats as dashes" {
+    const game = model.Game{ .id = 1, .name = "Unranked" };
+
+    try expectFormatted("Rating - | Geek - | Rank - | Weight -", writeGameStats, .{game});
+}
+
+test "format player summary" {
+    try expectFormatted(
+        "3-4 players | 120 min | age 10+",
+        writePlayerSummary,
+        .{model.Game{ .id = 13, .name = "CATAN", .min_players = 3, .max_players = 4, .playing_time = 120, .min_age = 10 }},
+    );
+    try expectFormatted(
+        "2 players",
+        writePlayerSummary,
+        .{model.Game{ .id = 1, .name = "Duel", .min_players = 2, .max_players = 2 }},
+    );
+    try expectFormatted(
+        "-",
+        writePlayerSummary,
+        .{model.Game{ .id = 2, .name = "Unknown" }},
+    );
+}
+
+test "format player count poll summary" {
+    try expectFormatted(
+        "Best with 4 players | Recommended with 3-4 players | 2,551 votes",
+        writePlayerCountPollSummary,
+        .{model.PlayerCountPoll{
+            .total_votes = 2_551,
+            .best_with = "Best with 4 players",
+            .recommended_with = "Recommended with 3-4 players",
+        }},
+    );
+    try expectFormatted("-", writePlayerCountPollSummary, .{model.PlayerCountPoll{}});
+}
+
+test "format collection statuses" {
+    try expectFormatted(
+        "Owned, Want to play, Wishlist",
+        writeCollectionStatuses,
+        .{model.CollectionItem{ .id = 13, .name = "CATAN", .owned = true, .want_to_play = true, .wishlist = true }},
+    );
+    try expectFormatted("-", writeCollectionStatuses, .{model.CollectionItem{ .id = 1, .name = "No Status" }});
+}
+
+test "format bgg game url" {
+    try expectFormatted("https://boardgamegeek.com/boardgame/13", writeBggGameUrl, .{@as(u32, 13)});
 }
 
 test "calculate display width for ascii and common wide text" {
