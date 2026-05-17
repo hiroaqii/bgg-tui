@@ -17,6 +17,11 @@ const placeholder_size = chasen.Size{ .width = 56, .height = 6 };
 const list_screen_max_size = chasen.Size{ .width = 72, .height = 34 };
 const detail_size = chasen.Size{ .width = 78, .height = 20 };
 
+// List screens follow the Go version's vertical rhythm:
+// row 0 title, row 1 blank, row 2 position, row 3 blank, row 4 list body.
+const list_position_row: u16 = 2;
+const list_body_row: u16 = 4;
+
 const menu_items = [_]ui.Menu.Item{
     .{ .label = "Hot Games", .shortcut = "h" },
     .{ .label = "Search Games", .shortcut = "/" },
@@ -319,14 +324,14 @@ pub const App = struct {
                 } else {
                     var list_area = area.child(.{
                         .col = 0,
-                        .row = 2,
+                        .row = list_body_row,
                         .width = area.size().width,
-                        .height = area.size().height -| 4,
+                        .height = area.size().height -| (list_body_row + 1),
                     });
                     list_view.viewListWithDensity(&self.hot_games.list, &list_area, .{
                         .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
                     }, self.listDensity());
-                    try self.drawListPosition(&area, &self.hot_games.list, list_area.size().height, self.listDensity());
+                    try self.drawListPosition(&area, &self.hot_games.list);
                 }
             },
         }
@@ -383,14 +388,14 @@ pub const App = struct {
                 } else {
                     var list_area = area.child(.{
                         .col = 0,
-                        .row = 2,
+                        .row = list_body_row,
                         .width = area.size().width,
-                        .height = area.size().height -| 4,
+                        .height = area.size().height -| (list_body_row + 1),
                     });
                     list_view.viewListWithDensity(&self.search.list, &list_area, .{
                         .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
                     }, self.listDensity());
-                    try self.drawListPosition(&area, &self.search.list, list_area.size().height, self.listDensity());
+                    try self.drawListPosition(&area, &self.search.list);
                 }
             },
         }
@@ -632,14 +637,13 @@ pub const App = struct {
         }
     }
 
-    fn drawListPosition(self: *const App, surface: *chasen.Surface, list: *const ui.List, visible_height: u16, density: list_view.Density) !void {
+    fn drawListPosition(self: *const App, surface: *chasen.Surface, list: *const ui.List) !void {
         _ = self;
         const item_count = list.items.len;
-        if (item_count == 0 or visible_height == 0) return;
+        if (item_count == 0 or surface.size().height < 2) return;
 
-        const range = list_view.visibleRange(item_count, list.focusedIndex(), list_view.visibleItemCapacity(visible_height, density));
-        const text = try list_view.positionText(surface.frameAllocator(), range, item_count);
-        _ = surface.textAt(0, surface.size().height -| 2, text, .{ .dim = true });
+        const text = try list_view.focusedPositionText(surface.frameAllocator(), list.focusedIndex(), item_count);
+        _ = surface.textAt(0, list_position_row, text, .{ .dim = true });
     }
 
     fn listDensity(self: *const App) list_view.Density {

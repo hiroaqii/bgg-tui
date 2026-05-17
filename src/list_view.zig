@@ -99,6 +99,11 @@ pub fn positionText(allocator: std.mem.Allocator, range: Range, item_count: usiz
     return try std.fmt.allocPrint(allocator, "{d}-{d}/{d}", .{ range.start + 1, range.end, item_count });
 }
 
+pub fn focusedPositionText(allocator: std.mem.Allocator, focused_index: usize, item_count: usize) ![]u8 {
+    if (item_count == 0) return try std.fmt.allocPrint(allocator, "0/0", .{});
+    return try std.fmt.allocPrint(allocator, "{d}/{d}", .{ @min(focused_index, item_count - 1) + 1, item_count });
+}
+
 fn itemStyle(opts: ui.List.ViewOptions, focused: bool, selected: bool) chasen.TextStyle {
     if (focused and selected) return opts.focused_selected_style;
     if (focused) return opts.focused_style;
@@ -127,6 +132,23 @@ test "position text handles empty visible range" {
     defer std.testing.allocator.free(text);
 
     try std.testing.expectEqualStrings("0/20", text);
+}
+
+test "focused position text uses one-based focused index" {
+    const text = try focusedPositionText(std.testing.allocator, 2, 50);
+    defer std.testing.allocator.free(text);
+
+    try std.testing.expectEqualStrings("3/50", text);
+}
+
+test "focused position text handles empty and out-of-range focus" {
+    const empty = try focusedPositionText(std.testing.allocator, 0, 0);
+    defer std.testing.allocator.free(empty);
+    try std.testing.expectEqualStrings("0/0", empty);
+
+    const clamped = try focusedPositionText(std.testing.allocator, 99, 3);
+    defer std.testing.allocator.free(clamped);
+    try std.testing.expectEqualStrings("3/3", clamped);
 }
 
 test "density parses config values" {
