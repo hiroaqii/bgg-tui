@@ -29,6 +29,7 @@ pub const Screen = enum {
     main_menu,
     hot_games,
     search,
+    search_results,
     game_detail,
     collection,
     settings,
@@ -45,7 +46,6 @@ pub const App = struct {
     hot_games: HotGamesState = .{},
     search: SearchState = .{},
     search_request_id: u64 = 0,
-    search_focus: SearchFocus = .input,
     game_detail: GameDetailState = .{},
     detail_request_id: u64 = 0,
     detail_back_screen: Screen = .main_menu,
@@ -108,21 +108,16 @@ pub const App = struct {
                     try self.startSearch(ctx);
                 } else if (self.search_input) |*input| {
                     try input.update(input_msg);
-                    self.search_focus = .input;
                 }
             },
             .search_paste => |text| {
                 if (self.search_input) |*input| {
                     try insertPastedText(input, text);
-                    self.search_focus = .input;
                 }
             },
             .search_results_loaded => |result| try self.finishSearch(result),
             .search_list => |list_msg| switch (list_msg) {
-                .move_prev, .move_next => {
-                    self.search_focus = .results;
-                    self.search.update(list_msg);
-                },
+                .move_prev, .move_next => self.search.update(list_msg),
                 .activate => |index| try self.openSearchResult(index, ctx),
             },
             .game_detail_loaded => |result| try self.finishGameDetail(result),
@@ -198,15 +193,22 @@ pub const App = struct {
                 .paste => |text| return .{ .search_paste = text },
                 else => {},
             }
-            if (self.search_focus == .results) {
-                if (self.search.handleEvent(event)) |msg| return .{ .search_list = msg };
-            }
             if (self.search_input) |*input| {
                 if (input.handleEvent(event)) |msg| return .{ .search_input = msg };
             }
-            if (self.search_focus == .input) {
-                if (self.search.handleEvent(event)) |msg| return .{ .search_list = msg };
+            return null;
+        }
+
+        if (self.screen == .search_results) {
+            switch (event) {
+                .key_press => |key| {
+                    if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'b') return .{ .show_screen = .search };
+                    if (key.codepoint == 'm') return .{ .show_screen = .main_menu };
+                    if (key.codepoint == 'q') return .quit;
+                },
+                else => {},
             }
+            if (self.search.handleEvent(event)) |msg| return .{ .search_list = msg };
             return null;
         }
 
@@ -251,6 +253,7 @@ pub const App = struct {
             .main_menu => try self.viewMainMenu(sfc),
             .hot_games => try self.viewHotGames(sfc),
             .search => try self.viewSearch(sfc),
+            .search_results => try self.viewSearchResults(sfc),
             .game_detail => try self.viewGameDetail(sfc),
             .collection => self.viewPlaceholder(sfc, "Collection", "Collection loading is planned after the MVP list flow."),
             .settings => self.viewPlaceholder(sfc, "Settings", "Minimum settings screen is pending."),
@@ -337,7 +340,7 @@ pub const App = struct {
 
         if (self.search_input) |*input| {
             var input_area = area.child(.{ .col = 0, .row = 2, .width = @min(area.size().width, 48), .height = 1 });
-            input.view(&input_area, .{ .show_cursor = self.search_focus == .input });
+            input.view(&input_area, .{});
         }
 
         switch (self.search.load_state) {
@@ -345,25 +348,47 @@ pub const App = struct {
                 _ = area.textAt(0, 4, "Enter at least 3 characters and press Enter.", .{ .fg = .gray });
             },
             .loading => {
-                _ = area.textAt(0, 4, "Searching BoardGameGeek...", .{ .fg = .gray });
+                _ = area.textAt(0, 4, "Search request is running...", .{ .fg = .gray });
             },
             .failed => |message| {
                 _ = area.textAt(0, 4, "Could not search games.", .{ .fg = .{ .index = 9 } });
                 _ = area.textAt(0, 6, message, .{ .fg = .gray });
             },
             .loaded => {
+                _ = area.textAt(0, 4, "Press Enter to run a new search.", .{ .fg = .gray });
+            },
+        }
+
+        _ = area.textAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
+    }
+
+    fn viewSearchResults(self: *const App, sfc: *chasen.Surface) !void {
+        var area = constrainedListSurface(sfc);
+        _ = area.textAt(0, 0, "Search Results", .{ .bold = true, .fg = .{ .index = 14 } });
+
+        switch (self.search.load_state) {
+            .idle => {
+                _ = area.textAt(0, 2, "No search has been run.", .{ .fg = .gray });
+            },
+            .loading => {
+                _ = area.textAt(0, 2, "Searching BoardGameGeek...", .{ .fg = .gray });
+            },
+            .failed => |message| {
+                _ = area.textAt(0, 2, "Could not search games.", .{ .fg = .{ .index = 9 } });
+                _ = area.textAt(0, 4, message, .{ .fg = .gray });
+            },
+            .loaded => {
                 if (self.search.list.items.len == 0) {
-                    _ = area.textAt(0, 4, "No games matched the current query.", .{ .fg = .gray });
+                    _ = area.textAt(0, 2, "No games matched the current query.", .{ .fg = .gray });
                 } else {
                     var list_area = area.child(.{
                         .col = 0,
-                        .row = 4,
+                        .row = 2,
                         .width = area.size().width,
-                        .height = area.size().height -| 6,
+                        .height = area.size().height -| 4,
                     });
                     list_view.viewList(&self.search.list, &list_area, .{
                         .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
-                        .show_cursor = self.search_focus == .results,
                     });
                     try self.drawListPosition(&area, &self.search.list, list_area.size().height);
                 }
@@ -460,7 +485,7 @@ pub const App = struct {
         if (screen == .hot_games) {
             try self.startHotGamesLoad(ctx);
         }
-        if (screen == .search and previous_screen != .game_detail) {
+        if (screen == .search and previous_screen != .search_results) {
             try self.resetSearchScreen();
         }
     }
@@ -470,7 +495,6 @@ pub const App = struct {
             try input.update(.clear);
         }
         self.search_request_id +%= 1;
-        self.search_focus = .input;
         self.search.deinit(self.allocator.?);
     }
 
@@ -481,7 +505,7 @@ pub const App = struct {
 
     fn openSearchResult(self: *App, index: usize, ctx: *chasen.Ctx(Msg)) !void {
         if (index >= self.search.results.len) return;
-        try self.startGameDetail(ctx, self.search.results[index].id, .search);
+        try self.startGameDetail(ctx, self.search.results[index].id, .search_results);
     }
 
     fn startHotGamesLoad(self: *App, ctx: *chasen.Ctx(Msg)) !void {
@@ -519,7 +543,6 @@ pub const App = struct {
         // validation or auth failure state.
         self.search_request_id +%= 1;
         const request_id = self.search_request_id;
-        self.search_focus = .input;
 
         if (query.len < 3) {
             self.search.setFailed(self.allocator.?, "Search query must be at least 3 characters");
@@ -541,6 +564,7 @@ pub const App = struct {
         errdefer ctx.allocator().free(task.token);
         errdefer ctx.allocator().free(task.query);
 
+        self.screen = .search_results;
         self.search.setLoading(self.allocator.?);
         ctx.spawnWith(task, SearchTask.run) catch |err| {
             self.search.setFailed(self.allocator.?, "Could not start search task");
@@ -560,7 +584,6 @@ pub const App = struct {
         switch (task_result.result) {
             .ok => |results| {
                 try self.search.setLoaded(self.allocator.?, results);
-                self.search_focus = if (self.search.results.len == 0) .input else .results;
             },
             .failed => |message| self.search.setFailed(self.allocator.?, message),
         }
@@ -624,19 +647,12 @@ pub const App = struct {
             .setup_token => setupTokenSubmitHint(self.config_path),
             .main_menu => "Up/Down: move  Enter: open  h, /, c, s: shortcuts  Esc/q: quit",
             .hot_games => "Up/Down: move  Enter: detail  m: menu  Esc/q: quit",
-            .search => if (self.search_focus == .results)
-                "Up/Down: move  Enter: detail  Esc: menu"
-            else
-                "Enter: search  Up/Down: results  Esc: menu",
+            .search => "Enter: search  Esc: menu",
+            .search_results => "Up/Down: move  Enter: detail  b/Esc: search  m: menu  q: quit",
             .game_detail => "b/Esc: back  m: menu  q: quit",
             .collection, .settings => "m: menu  Esc/q: quit",
         };
     }
-};
-
-const SearchFocus = enum {
-    input,
-    results,
 };
 
 const HotGamesState = struct {
@@ -1043,6 +1059,7 @@ fn screenTitle(screen: Screen) []const u8 {
         .main_menu => "main menu",
         .hot_games => "hot games",
         .search => "search",
+        .search_results => "search results",
         .game_detail => "game detail",
         .collection => "collection",
         .settings => "settings",
@@ -1127,6 +1144,7 @@ test "screen titles match status labels" {
     try std.testing.expectEqualStrings("main menu", screenTitle(.main_menu));
     try std.testing.expectEqualStrings("hot games", screenTitle(.hot_games));
     try std.testing.expectEqualStrings("search", screenTitle(.search));
+    try std.testing.expectEqualStrings("search results", screenTitle(.search_results));
     try std.testing.expectEqualStrings("game detail", screenTitle(.game_detail));
     try std.testing.expectEqualStrings("collection", screenTitle(.collection));
     try std.testing.expectEqualStrings("settings", screenTitle(.settings));
@@ -1142,10 +1160,10 @@ test "footer hint matches screen key handling" {
     try std.testing.expectEqualStrings("Up/Down: move  Enter: detail  m: menu  Esc/q: quit", app.footerHint());
 
     app.screen = .search;
-    app.search_focus = .input;
-    try std.testing.expectEqualStrings("Enter: search  Up/Down: results  Esc: menu", app.footerHint());
-    app.search_focus = .results;
-    try std.testing.expectEqualStrings("Up/Down: move  Enter: detail  Esc: menu", app.footerHint());
+    try std.testing.expectEqualStrings("Enter: search  Esc: menu", app.footerHint());
+
+    app.screen = .search_results;
+    try std.testing.expectEqualStrings("Up/Down: move  Enter: detail  b/Esc: search  m: menu  q: quit", app.footerHint());
 
     app.screen = .game_detail;
     try std.testing.expectEqualStrings("b/Esc: back  m: menu  q: quit", app.footerHint());
@@ -1225,7 +1243,6 @@ test "showing search from non-detail screen resets previous query and results" {
     const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
     results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
     try app.search.setLoaded(std.testing.allocator, results);
-    app.search_focus = .results;
     app.search_request_id = 7;
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
@@ -1235,21 +1252,19 @@ test "showing search from non-detail screen resets previous query and results" {
     try std.testing.expectEqualStrings("", app.search_input.?.text());
     try std.testing.expect(app.search.load_state == .idle);
     try std.testing.expectEqual(@as(usize, 0), app.search.results.len);
-    try std.testing.expectEqual(SearchFocus.input, app.search_focus);
     try std.testing.expectEqual(@as(u64, 8), app.search_request_id);
 }
 
-test "showing search from detail preserves previous query and results" {
+test "showing search from search results preserves previous query and results" {
     var app = App.create(.{ .api = .{ .token = "token" } }, .{});
     app.allocator = std.testing.allocator;
-    app.screen = .game_detail;
+    app.screen = .search_results;
     app.search_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "root" });
     defer app.deinitOwnedState();
 
     const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
     results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
     try app.search.setLoaded(std.testing.allocator, results);
-    app.search_focus = .results;
     app.search_request_id = 7;
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
@@ -1259,14 +1274,13 @@ test "showing search from detail preserves previous query and results" {
     try std.testing.expectEqualStrings("root", app.search_input.?.text());
     try std.testing.expect(app.search.load_state == .loaded);
     try std.testing.expectEqual(@as(usize, 1), app.search.results.len);
-    try std.testing.expectEqual(SearchFocus.results, app.search_focus);
     try std.testing.expectEqual(@as(u64, 7), app.search_request_id);
 }
 
-test "loaded search results receive activation before search input" {
+test "loaded search results receive activation on search results screen" {
     var app = App.create(.{ .api = .{ .token = "token" } }, .{});
     app.allocator = std.testing.allocator;
-    app.screen = .search;
+    app.screen = .search_results;
     app.search_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "root" });
     defer app.deinitOwnedState();
 
@@ -1274,20 +1288,27 @@ test "loaded search results receive activation before search input" {
     results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
 
     try app.search.setLoaded(std.testing.allocator, results);
-    app.search_focus = .results;
 
     const msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
     try std.testing.expect(msg == .search_list);
     try std.testing.expectEqual(ui.List.Msg{ .activate = 0 }, msg.search_list);
 }
 
-test "game detail escape returns to previous list screen" {
+test "search results escape returns to search input screen" {
     var app = App.create(.{ .api = .{ .token = "token" } }, .{});
-    app.screen = .game_detail;
-    app.detail_back_screen = .search;
+    app.screen = .search_results;
 
     const msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.escape } }).?;
     try std.testing.expectEqual(App.Msg{ .show_screen = .search }, msg);
+}
+
+test "game detail escape returns to previous list screen" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.screen = .game_detail;
+    app.detail_back_screen = .search_results;
+
+    const msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.escape } }).?;
+    try std.testing.expectEqual(App.Msg{ .show_screen = .search_results }, msg);
 }
 
 test "game detail view hides cursor left by previous screen" {
@@ -1409,7 +1430,7 @@ test "search state owns labels for loaded results" {
     try std.testing.expectEqualStrings("Second (2024)", state.list.items[1]);
 }
 
-test "successful search completion focuses results when present" {
+test "successful search completion loads result list" {
     var app = App.create(.{ .api = .{ .token = "token" } }, .{});
     app.allocator = std.testing.allocator;
     defer app.deinitOwnedState();
@@ -1423,7 +1444,6 @@ test "successful search completion focuses results when present" {
         .result = .{ .ok = results },
     });
 
-    try std.testing.expectEqual(SearchFocus.results, app.search_focus);
     try std.testing.expectEqual(@as(usize, 1), app.search.list.items.len);
 }
 
