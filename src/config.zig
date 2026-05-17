@@ -6,10 +6,13 @@ pub const primary_token_env = "BGG_TUI_API_TOKEN";
 pub const fallback_token_env = "BGG_API_TOKEN";
 pub const app_dir_name = "bgg-tui";
 pub const config_file_name = "config.toml";
+pub const max_config_bytes = 256 * 1024;
 
 pub const PathError = std.mem.Allocator.Error || error{
     MissingConfigDirectory,
 };
+
+pub const LoadError = std.Io.Dir.ReadFileAllocError || ParseError;
 
 pub const ParseError = error{
     InvalidLine,
@@ -42,6 +45,16 @@ pub const Config = struct {
 
     pub fn apiClientToken(config: Config) ?[]const u8 {
         return nonEmptyTrimmed(config.api.token);
+    }
+};
+
+pub const LoadedConfig = struct {
+    config: Config,
+    source_bytes: ?[]u8 = null,
+
+    pub fn deinit(loaded: *LoadedConfig, allocator: std.mem.Allocator) void {
+        if (loaded.source_bytes) |bytes| allocator.free(bytes);
+        loaded.* = undefined;
     }
 };
 
@@ -87,6 +100,18 @@ pub const Interface = struct {
     date_format: []const u8 = "yyyy-mm-dd",
     border_style: []const u8 = "rounded",
 };
+
+/// Loads config from disk when present, then applies environment overrides.
+/// Missing files are not fatal because first launch is expected to start from
+/// defaults before the setup/settings screens save a config file.
+pub fn loadConfig(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    path: []const u8,
+    env: *const std.process.Environ.Map,
+) LoadError!LoadedConfig {
+    return try loadConfigFromDir(allocator, io, .cwd(), path, env);
+}
 
 /// Parses the fixed bgg-tui config schema from TOML-like input.
 /// String values are borrowed from `input`; callers must keep the input buffer
@@ -139,6 +164,34 @@ pub fn tokenFromEnvironment(env: *const std.process.Environ.Map) ?[]const u8 {
         if (nonEmptyTrimmed(value)) |token| return token;
     }
     return null;
+}
+
+fn loadConfigFromDir(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    dir: std.Io.Dir,
+    path: []const u8,
+    env: *const std.process.Environ.Map,
+) LoadError!LoadedConfig {
+    const bytes = dir.readFileAlloc(io, path, allocator, .limited(max_config_bytes)) catch |err| switch (err) {
+        error.FileNotFound => return .{ .config = Config.fromEnvironment(env) },
+        else => |e| return e,
+    };
+    errdefer allocator.free(bytes);
+
+    var config = try parseToml(bytes);
+    applyEnvironmentOverrides(&config, env);
+
+    return .{
+        .config = config,
+        .source_bytes = bytes,
+    };
+}
+
+fn applyEnvironmentOverrides(config: *Config, env: *const std.process.Environ.Map) void {
+    if (tokenFromEnvironment(env)) |token| {
+        config.api.token = token;
+    }
 }
 
 fn resolveConfigPathForOs(
@@ -354,6 +407,49 @@ test "config parser rejects unknown keys and escaped strings" {
         \\[api]
         \\token = "token\n"
     ));
+}
+
+test "config load falls back to defaults and environment token when file is missing" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put(primary_token_env, "token-from-env");
+
+    var loaded = try loadConfigFromDir(std.testing.allocator, std.testing.io, tmp.dir, "missing.toml", &env);
+    defer loaded.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(?[]u8, null), loaded.source_bytes);
+    try std.testing.expectEqualStrings("token-from-env", loaded.config.apiClientToken().?);
+    try std.testing.expectEqual(ImageProtocol.auto, loaded.config.display.image_protocol);
+}
+
+test "config load parses file and lets environment token override file token" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "config.toml",
+        .data =
+        \\[api]
+        \\token = "token-from-file"
+        \\
+        \\[display]
+        \\image_protocol = "off"
+        ,
+    });
+
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put(primary_token_env, "token-from-env");
+
+    var loaded = try loadConfigFromDir(std.testing.allocator, std.testing.io, tmp.dir, "config.toml", &env);
+    defer loaded.deinit(std.testing.allocator);
+
+    try std.testing.expect(loaded.source_bytes != null);
+    try std.testing.expectEqualStrings("token-from-env", loaded.config.apiClientToken().?);
+    try std.testing.expectEqual(ImageProtocol.off, loaded.config.display.image_protocol);
 }
 
 test "config path uses explicit override when set" {
