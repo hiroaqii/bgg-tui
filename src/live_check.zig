@@ -5,6 +5,7 @@ const LiveCheckError = error{
     MissingConfigDirectory,
     MissingApiToken,
     ApiRequestFailed,
+    ApiParseFailed,
     EmptyHotList,
 };
 
@@ -42,7 +43,14 @@ pub fn main(init: std.process.Init) !void {
     };
     defer response.deinit(allocator);
 
-    const games = try bgg_tui.bgg.xml.parseHotResponse(allocator, response.body);
+    const games = bgg_tui.bgg.xml.parseHotResponse(allocator, response.body) catch |parse_error| switch (parse_error) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => {
+            const err = bgg_tui.bgg.err.classifyParseError(parse_error);
+            std.debug.print("BGG live API check failed: {s}: {s}\n", .{ @tagName(err.kind()), err.parse.message });
+            return LiveCheckError.ApiParseFailed;
+        },
+    };
     defer bgg_tui.bgg.xml.freeHotGames(allocator, games);
 
     if (games.len == 0) return LiveCheckError.EmptyHotList;
