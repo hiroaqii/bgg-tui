@@ -4,10 +4,14 @@ const endpoint = @import("endpoint.zig");
 const api_error = @import("error.zig");
 
 const Allocator = std.mem.Allocator;
+const default_request_timeout_ms: u64 = 30_000;
 
 pub const Options = struct {
     base_url: []const u8 = endpoint.base_url,
     token: ?[]const u8 = null,
+    /// Total wall-clock timeout for one API call, including retries.
+    /// Set to `null` to disable the app-level timeout wrapper.
+    request_timeout_ms: ?u64 = default_request_timeout_ms,
     // Prevents accidental unbounded allocation when BGG returns an unexpectedly
     // large response body.
     max_response_bytes: usize = 8 * 1024 * 1024,
@@ -40,6 +44,11 @@ pub const RequestResult = union(enum) {
     api_error: api_error.ApiError,
 };
 
+const TimeoutSelectResult = union(enum) {
+    request: anyerror!RequestResult,
+    timeout: anyerror!void,
+};
+
 pub const Client = struct {
     allocator: Allocator,
     http: std.http.Client,
@@ -62,6 +71,39 @@ pub const Client = struct {
     }
 
     pub fn getPath(client: *Client, path: []const u8, endpoint_kind: EndpointKind) !RequestResult {
+        if (client.options.request_timeout_ms) |timeout_ms| {
+            return client.getPathWithTimeout(path, endpoint_kind, timeout_ms);
+        }
+
+        return client.getPathWithoutTimeout(path, endpoint_kind);
+    }
+
+    fn getPathWithTimeout(client: *Client, path: []const u8, endpoint_kind: EndpointKind, timeout_ms: u64) !RequestResult {
+        var buffer: [2]TimeoutSelectResult = undefined;
+        var select: std.Io.Select(TimeoutSelectResult) = .init(client.http.io, &buffer);
+
+        select.async(.request, getPathWithoutTimeoutWorker, .{ client, path, endpoint_kind });
+        select.async(.timeout, timeoutWorker, .{ client.http.io, timeout_ms });
+
+        const result = try select.await();
+        switch (result) {
+            .request => |request_result| {
+                select.cancelDiscard();
+                return request_result;
+            },
+            .timeout => |timeout_result| {
+                timeout_result catch |err| switch (err) {
+                    error.Canceled => return .{ .api_error = requestTimeoutError() },
+                    else => |e| return .{ .api_error = .{ .network = .{ .message = @errorName(e) } } },
+                };
+
+                drainCanceledRequest(client, &select);
+                return .{ .api_error = requestTimeoutError() };
+            },
+        }
+    }
+
+    fn getPathWithoutTimeout(client: *Client, path: []const u8, endpoint_kind: EndpointKind) !RequestResult {
         const url = try client.buildUrl(path);
         defer client.allocator.free(url);
 
@@ -143,6 +185,39 @@ pub const Client = struct {
         }
     }
 };
+
+fn getPathWithoutTimeoutWorker(client: *Client, path: []const u8, endpoint_kind: EndpointKind) anyerror!RequestResult {
+    return client.getPathWithoutTimeout(path, endpoint_kind);
+}
+
+fn timeoutWorker(io: std.Io, timeout_ms: u64) anyerror!void {
+    try std.Io.sleep(io, timeoutDuration(timeout_ms), .awake);
+}
+
+fn drainCanceledRequest(client: *Client, select: *std.Io.Select(TimeoutSelectResult)) void {
+    var remaining = select.cancel();
+    while (remaining) |result| : (remaining = select.cancel()) {
+        switch (result) {
+            .request => |request_result| {
+                const resolved = request_result catch continue;
+                switch (resolved) {
+                    .ok => |response| response.deinit(client.allocator),
+                    .api_error => {},
+                }
+            },
+            .timeout => {},
+        }
+    }
+}
+
+fn requestTimeoutError() api_error.ApiError {
+    return .{ .network = .{ .message = "BGG API request timed out" } };
+}
+
+fn timeoutDuration(timeout_ms: u64) std.Io.Duration {
+    const max_i64_as_u64: u64 = @intCast(std.math.maxInt(i64));
+    return .fromMilliseconds(@intCast(@min(timeout_ms, max_i64_as_u64)));
+}
 
 /// Joins an absolute base URL and an API path without producing duplicate or
 /// missing slashes.
@@ -309,6 +384,18 @@ test "client retry delay uses retry-after when available and otherwise backs off
     try std.testing.expectEqual(@as(u64, 2_000), retryDelayMs(4, options, null));
     try std.testing.expectEqual(@as(u64, 2_000), retryDelayMs(0, options, 10));
     try std.testing.expectEqual(@as(u64, 2_000), retryDelayMs(0, options, std.math.maxInt(u64)));
+}
+
+test "client timeout duration clamps to supported duration range" {
+    try std.testing.expectEqual(@as(i64, 1_500), timeoutDuration(1_500).toMilliseconds());
+    try std.testing.expectEqual(std.math.maxInt(i64), timeoutDuration(std.math.maxInt(u64)).toMilliseconds());
+}
+
+test "client timeout classification is a network api error" {
+    const err = requestTimeoutError();
+
+    try std.testing.expectEqual(api_error.ErrorKind.network, err.kind());
+    try std.testing.expectEqualStrings("BGG API request timed out", err.network.message);
 }
 
 test "client parses numeric Retry-After header values" {
