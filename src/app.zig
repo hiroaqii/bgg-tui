@@ -4,6 +4,10 @@ const ui = @import("chasen_ui");
 
 const config_mod = @import("config.zig");
 
+// Keep top-level screens centered until a screen needs its own full-page layout.
+const main_menu_size = chasen.Size{ .width = 48, .height = 12 };
+const placeholder_size = chasen.Size{ .width = 56, .height = 6 };
+
 const menu_items = [_]ui.Menu.Item{
     .{ .label = "Hot Games", .shortcut = "h" },
     .{ .label = "Search Games", .shortcut = "/" },
@@ -55,6 +59,7 @@ pub const App = struct {
         const size = sfc.size();
         if (size.width == 0 or size.height == 0) return;
 
+        // Reserve the last row for global status; screens render inside the panel body.
         const status_row = if (size.height > 0) size.height - 1 else 0;
         var shell_area = sfc.child(.{
             .col = 0,
@@ -87,6 +92,7 @@ pub const App = struct {
     pub fn handleEvent(self: *const App, event: chasen.Event) ?Msg {
         switch (event) {
             .key_press => |key| {
+                // Global shortcuts get first chance before screen-local handlers.
                 if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'q') return .quit;
                 if (key.codepoint == 'm') return .{ .show_screen = .main_menu };
                 if (key.codepoint == 'h') return .{ .show_screen = .hot_games };
@@ -98,6 +104,7 @@ pub const App = struct {
         }
 
         if (self.screen == .main_menu) {
+            // Menu owns only cursor movement and activation; App maps activation to screens.
             if (self.menu.handleEvent(event)) |msg| return .{ .menu = msg };
         }
         return null;
@@ -114,31 +121,44 @@ pub const App = struct {
     }
 
     fn viewMainMenu(self: *const App, sfc: *chasen.Surface) !void {
+        var area = centeredSurface(sfc, main_menu_size);
         const token_status = if (self.config.apiClientToken() == null) "missing" else "configured";
-        _ = sfc.textAt(0, 0, "Main menu", .{ .bold = true });
-        _ = try sfc.printAt(0, 2, .{ .fg = .gray }, "BGG API token: {s}", .{token_status});
+        _ = area.textAt(0, 0, "Main menu", .{ .bold = true });
+        _ = try area.printAt(0, 2, .{ .fg = .gray }, "BGG API token: {s}", .{token_status});
 
-        var menu_area = sfc.child(.{
+        var menu_area = area.child(.{
             .col = 0,
             .row = 4,
-            .width = @min(sfc.size().width, 36),
-            .height = @min(sfc.size().height -| 4, @as(u16, menu_items.len)),
+            .width = @min(area.size().width, 36),
+            .height = @min(area.size().height -| 4, @as(u16, menu_items.len)),
         });
         self.menu.view(&menu_area, .{
             .shortcut_col = 24,
             .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
         });
 
-        _ = sfc.textAt(0, 10, "Use Up/Down and Enter, or h, /, c, s shortcuts.", .{ .dim = true });
+        _ = area.textAt(0, 10, "Use Up/Down and Enter, or h, /, c, s shortcuts.", .{ .dim = true });
     }
 
     fn viewPlaceholder(self: *const App, sfc: *chasen.Surface, title: []const u8, message: []const u8) void {
         _ = self;
-        _ = sfc.textAt(0, 0, title, .{ .bold = true, .fg = .{ .index = 14 } });
-        _ = sfc.textAt(0, 2, message, .{ .fg = .gray });
-        _ = sfc.textAt(0, 4, "m: menu  Esc/q: quit", .{ .dim = true });
+        var area = centeredSurface(sfc, placeholder_size);
+        _ = area.textAt(0, 0, title, .{ .bold = true, .fg = .{ .index = 14 } });
+        _ = area.textAt(0, 2, message, .{ .fg = .gray });
+        _ = area.textAt(0, 4, "m: menu  Esc/q: quit", .{ .dim = true });
     }
 };
+
+// App screens receive a local surface. `ui.layout.center` handles clamping when
+// the terminal is smaller than the requested block.
+fn centeredSurface(surface: *chasen.Surface, size: chasen.Size) chasen.Surface {
+    return surface.child(ui.layout.center(surfaceRect(surface), size));
+}
+
+fn surfaceRect(surface: *const chasen.Surface) chasen.Rect {
+    const size = surface.size();
+    return .{ .col = 0, .row = 0, .width = size.width, .height = size.height };
+}
 
 fn screenForMenuIndex(index: usize) ?Screen {
     return switch (index) {
@@ -181,4 +201,17 @@ test "screen titles match status labels" {
     try std.testing.expectEqualStrings("search", screenTitle(.search));
     try std.testing.expectEqualStrings("collection", screenTitle(.collection));
     try std.testing.expectEqualStrings("settings", screenTitle(.settings));
+}
+
+test "surfaceRect creates a root-relative rectangle" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(80, 24);
+    defer ts.deinit();
+
+    try std.testing.expectEqual(chasen.Rect{
+        .col = 0,
+        .row = 0,
+        .width = 80,
+        .height = 24,
+    }, surfaceRect(&ts.surface));
 }
