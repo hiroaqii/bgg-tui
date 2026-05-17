@@ -69,6 +69,9 @@ checks.
 
 Configuration file is created on first launch in your OS's default config directory (`bgg-tui/config.toml`). You can check the exact path in the Settings screen. Settings can also be changed from the Settings screen within the app.
 
+During development, `BGG_TUI_CONFIG_PATH` can be used to point the scaffold at a
+specific config file path.
+
 | Section | Key | Description |
 |---------|-----|-------------|
 | `interface` | `color_theme` | Color theme |

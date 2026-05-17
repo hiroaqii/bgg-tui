@@ -1,7 +1,15 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
+pub const config_path_env = "BGG_TUI_CONFIG_PATH";
 pub const primary_token_env = "BGG_TUI_API_TOKEN";
 pub const fallback_token_env = "BGG_API_TOKEN";
+pub const app_dir_name = "bgg-tui";
+pub const config_file_name = "config.toml";
+
+pub const PathError = std.mem.Allocator.Error || error{
+    MissingConfigDirectory,
+};
 
 pub const Config = struct {
     api: Api = .{},
@@ -67,6 +75,13 @@ pub const Interface = struct {
     border_style: []const u8 = "rounded",
 };
 
+/// Resolves the config file path without creating directories or files.
+/// Explicit `BGG_TUI_CONFIG_PATH` wins; otherwise the path follows the host OS
+/// config directory convention.
+pub fn resolveConfigPath(allocator: std.mem.Allocator, env: *const std.process.Environ.Map) PathError![]u8 {
+    return try resolveConfigPathForOs(allocator, env, builtin.os.tag);
+}
+
 /// Reads the token from environment variables only. TOML loading will populate
 /// the same `Config.api.token` field later, before the live API check runs.
 pub fn tokenFromEnvironment(env: *const std.process.Environ.Map) ?[]const u8 {
@@ -79,11 +94,105 @@ pub fn tokenFromEnvironment(env: *const std.process.Environ.Map) ?[]const u8 {
     return null;
 }
 
+fn resolveConfigPathForOs(
+    allocator: std.mem.Allocator,
+    env: *const std.process.Environ.Map,
+    os_tag: std.Target.Os.Tag,
+) PathError![]u8 {
+    if (env.get(config_path_env)) |value| {
+        if (nonEmptyTrimmed(value)) |path| return try allocator.dupe(u8, path);
+    }
+
+    return switch (os_tag) {
+        .windows => {
+            if (env.get("APPDATA")) |value| {
+                if (nonEmptyTrimmed(value)) |dir| return try joinConfigPath(allocator, dir);
+            }
+            if (env.get("LOCALAPPDATA")) |value| {
+                if (nonEmptyTrimmed(value)) |dir| return try joinConfigPath(allocator, dir);
+            }
+            return error.MissingConfigDirectory;
+        },
+        .macos => {
+            const home = nonEmptyTrimmed(env.get("HOME")) orelse return error.MissingConfigDirectory;
+            const app_support = try std.fs.path.join(allocator, &.{ home, "Library", "Application Support" });
+            defer allocator.free(app_support);
+            return try joinConfigPath(allocator, app_support);
+        },
+        else => {
+            if (env.get("XDG_CONFIG_HOME")) |value| {
+                if (nonEmptyTrimmed(value)) |dir| return try joinConfigPath(allocator, dir);
+            }
+            const home = nonEmptyTrimmed(env.get("HOME")) orelse return error.MissingConfigDirectory;
+            const config_dir = try std.fs.path.join(allocator, &.{ home, ".config" });
+            defer allocator.free(config_dir);
+            return try joinConfigPath(allocator, config_dir);
+        },
+    };
+}
+
+fn joinConfigPath(allocator: std.mem.Allocator, config_root: []const u8) ![]u8 {
+    return try std.fs.path.join(allocator, &.{ config_root, app_dir_name, config_file_name });
+}
+
 fn nonEmptyTrimmed(value: ?[]const u8) ?[]const u8 {
     const raw = value orelse return null;
     const trimmed = std.mem.trim(u8, raw, " \t\r\n");
     if (trimmed.len == 0) return null;
     return trimmed;
+}
+
+test "config path uses explicit override when set" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put(config_path_env, " /tmp/custom-bgg.toml ");
+    try env.put("XDG_CONFIG_HOME", "/tmp/xdg");
+
+    const path = try resolveConfigPathForOs(std.testing.allocator, &env, .linux);
+    defer std.testing.allocator.free(path);
+
+    try std.testing.expectEqualStrings("/tmp/custom-bgg.toml", path);
+}
+
+test "config path uses XDG config home on unix-like systems" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("XDG_CONFIG_HOME", "/tmp/xdg");
+    try env.put("HOME", "/tmp/home");
+
+    const path = try resolveConfigPathForOs(std.testing.allocator, &env, .linux);
+    defer std.testing.allocator.free(path);
+
+    try std.testing.expectEqualStrings("/tmp/xdg/bgg-tui/config.toml", path);
+}
+
+test "config path falls back to HOME config directory on unix-like systems" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("HOME", "/tmp/home");
+
+    const path = try resolveConfigPathForOs(std.testing.allocator, &env, .linux);
+    defer std.testing.allocator.free(path);
+
+    try std.testing.expectEqualStrings("/tmp/home/.config/bgg-tui/config.toml", path);
+}
+
+test "config path uses macOS application support directory" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put("HOME", "/Users/tester");
+
+    const path = try resolveConfigPathForOs(std.testing.allocator, &env, .macos);
+    defer std.testing.allocator.free(path);
+
+    try std.testing.expectEqualStrings("/Users/tester/Library/Application Support/bgg-tui/config.toml", path);
+}
+
+test "config path errors when no config directory source exists" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    try std.testing.expectError(error.MissingConfigDirectory, resolveConfigPathForOs(std.testing.allocator, &env, .linux));
 }
 
 test "config defaults keep token unset and stable display values" {
