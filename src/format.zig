@@ -17,6 +17,12 @@ pub const DateFormatError = error{
     InvalidDateFormat,
 };
 
+pub const WrapOptions = struct {
+    width: usize,
+    first_indent: []const u8 = "",
+    subsequent_indent: []const u8 = "",
+};
+
 pub fn displayWidth(text: []const u8) usize {
     const view = std.unicode.Utf8View.init(text) catch return text.len;
     var iter = view.iterator();
@@ -43,6 +49,77 @@ pub fn writeTruncated(writer: *std.Io.Writer, text: []const u8, max_width: usize
 
     try writeFitting(writer, text, max_width - ellipsis_width);
     try writer.writeAll(ellipsis);
+}
+
+pub fn writeWrapped(writer: *std.Io.Writer, text: []const u8, options: WrapOptions) std.Io.Writer.Error!void {
+    if (options.width == 0) return;
+
+    var state = WrapState{
+        .writer = writer,
+        .width = options.width,
+        .first_indent = options.first_indent,
+        .subsequent_indent = options.subsequent_indent,
+    };
+
+    var index: usize = 0;
+    while (index < text.len) {
+        const byte = text[index];
+        if (byte == '\n') {
+            try state.newline();
+            index += 1;
+            continue;
+        }
+        if (isInlineWhitespace(byte)) {
+            index += 1;
+            continue;
+        }
+
+        const start = index;
+        while (index < text.len and text[index] != '\n' and !isInlineWhitespace(text[index])) {
+            index += 1;
+        }
+        try state.writeWord(text[start..index]);
+    }
+}
+
+pub fn writeLabeledWrapped(writer: *std.Io.Writer, label: []const u8, text: []const u8, width: usize) std.Io.Writer.Error!void {
+    if (width == 0) return;
+
+    const prefix_width = displayWidth(label) + 2;
+    try writer.writeAll(label);
+    try writer.writeAll(": ");
+
+    var state = WrapState{
+        .writer = writer,
+        .width = width,
+        .first_indent = "",
+        .subsequent_indent = "",
+        .line_started = true,
+        .line_width = prefix_width,
+        .current_indent_width = prefix_width,
+        .first_line = false,
+        .continuation_spaces = prefix_width,
+    };
+
+    var index: usize = 0;
+    while (index < text.len) {
+        const byte = text[index];
+        if (byte == '\n') {
+            try state.newline();
+            index += 1;
+            continue;
+        }
+        if (isInlineWhitespace(byte)) {
+            index += 1;
+            continue;
+        }
+
+        const start = index;
+        while (index < text.len and text[index] != '\n' and !isInlineWhitespace(text[index])) {
+            index += 1;
+        }
+        try state.writeWord(text[start..index]);
+    }
 }
 
 pub fn writeUnsigned(writer: *std.Io.Writer, value: u64) std.Io.Writer.Error!void {
@@ -225,6 +302,120 @@ fn writeFitting(writer: *std.Io.Writer, text: []const u8, max_width: usize) std.
     try writer.writeAll(text[0..end_index]);
 }
 
+const WrapState = struct {
+    writer: *std.Io.Writer,
+    width: usize,
+    first_indent: []const u8,
+    subsequent_indent: []const u8,
+    line_started: bool = false,
+    line_width: usize = 0,
+    current_indent_width: usize = 0,
+    first_line: bool = true,
+    continuation_spaces: usize = 0,
+
+    fn writeWord(state: *WrapState, word: []const u8) std.Io.Writer.Error!void {
+        if (!state.line_started) try state.startLine();
+
+        const word_width = displayWidth(word);
+        if (state.line_width > state.current_indent_width and state.line_width + 1 + word_width <= state.width) {
+            try state.writer.writeByte(' ');
+            state.line_width += 1;
+            try state.writer.writeAll(word);
+            state.line_width += word_width;
+            return;
+        }
+
+        if (state.line_width > state.current_indent_width) {
+            try state.newline();
+            try state.startLine();
+        }
+
+        if (state.line_width + word_width <= state.width) {
+            try state.writer.writeAll(word);
+            state.line_width += word_width;
+            return;
+        }
+
+        try state.writeLongWord(word);
+    }
+
+    fn writeLongWord(state: *WrapState, word: []const u8) std.Io.Writer.Error!void {
+        var rest = word;
+        while (rest.len > 0) {
+            if (!state.line_started) try state.startLine();
+            const available = if (state.width > state.line_width) state.width - state.line_width else 0;
+            const fitting = fittingPrefix(rest, available);
+            const take_len = if (fitting.byte_len > 0) fitting.byte_len else firstCodepointLen(rest);
+
+            try state.writer.writeAll(rest[0..take_len]);
+            state.line_width += if (fitting.byte_len > 0) fitting.width else displayWidth(rest[0..take_len]);
+            rest = rest[take_len..];
+
+            if (rest.len > 0) {
+                try state.newline();
+            }
+        }
+    }
+
+    fn startLine(state: *WrapState) std.Io.Writer.Error!void {
+        const use_first_indent = state.first_line;
+        const indent = if (use_first_indent) state.first_indent else state.subsequent_indent;
+        try state.writer.writeAll(indent);
+        state.line_width = displayWidth(indent);
+        if (!use_first_indent and indent.len == 0 and state.continuation_spaces > 0) {
+            try writeSpaces(state.writer, state.continuation_spaces);
+            state.line_width = state.continuation_spaces;
+        }
+        state.current_indent_width = state.line_width;
+        state.line_started = true;
+        state.first_line = false;
+    }
+
+    fn newline(state: *WrapState) std.Io.Writer.Error!void {
+        try state.writer.writeByte('\n');
+        state.line_started = false;
+        state.line_width = 0;
+        state.current_indent_width = 0;
+    }
+};
+
+fn isInlineWhitespace(byte: u8) bool {
+    return byte == ' ' or byte == '\t' or byte == '\r';
+}
+
+fn writeSpaces(writer: *std.Io.Writer, count: usize) std.Io.Writer.Error!void {
+    for (0..count) |_| {
+        try writer.writeByte(' ');
+    }
+}
+
+fn firstCodepointLen(text: []const u8) usize {
+    if (text.len == 0) return 0;
+    const len = std.unicode.utf8ByteSequenceLength(text[0]) catch return 1;
+    return @min(@as(usize, len), text.len);
+}
+
+fn fittingPrefix(text: []const u8, max_width: usize) struct { byte_len: usize, width: usize } {
+    const view = std.unicode.Utf8View.init(text) catch return .{
+        .byte_len = @min(text.len, max_width),
+        .width = @min(text.len, max_width),
+    };
+    var iter = view.iterator();
+
+    var used_width: usize = 0;
+    var end_index: usize = 0;
+    while (iter.nextCodepointSlice()) |slice| {
+        const codepoint = std.unicode.utf8Decode(slice) catch unreachable;
+        const width = codepointDisplayWidth(codepoint);
+        if (used_width + width > max_width) break;
+
+        used_width += width;
+        end_index = iter.i;
+    }
+
+    return .{ .byte_len = end_index, .width = used_width };
+}
+
 fn codepointDisplayWidth(codepoint: u21) usize {
     if (codepoint == 0) return 0;
     if (codepoint < 0x20 or (codepoint >= 0x7f and codepoint < 0xa0)) return 0;
@@ -314,6 +505,45 @@ test "truncate text by display width" {
 test "truncate wide text without splitting utf-8 codepoints" {
     try expectFormatted("あ...", writeTruncated, .{ "あいう", @as(usize, 5), "..." });
     try expectFormatted("...", writeTruncated, .{ "あいう", @as(usize, 4), "..." });
+}
+
+test "wrap text by display width" {
+    try expectFormatted(
+        "Teach rules\nbefore setup",
+        writeWrapped,
+        .{ "Teach rules before setup", WrapOptions{ .width = 12 } },
+    );
+    try expectFormatted(
+        "  Teach\n  rules",
+        writeWrapped,
+        .{ "Teach rules", WrapOptions{ .width = 8, .first_indent = "  ", .subsequent_indent = "  " } },
+    );
+    try expectFormatted(
+        "short\n\nnext",
+        writeWrapped,
+        .{ "short\n\nnext", WrapOptions{ .width = 20 } },
+    );
+}
+
+test "wrap long words without splitting utf-8 codepoints" {
+    try expectFormatted(
+        "super\ncalif\nragil\nistic",
+        writeWrapped,
+        .{ "supercalifragilistic", WrapOptions{ .width = 5 } },
+    );
+    try expectFormatted(
+        "あい\nう",
+        writeWrapped,
+        .{ "あいう", WrapOptions{ .width = 4 } },
+    );
+}
+
+test "wrap labeled text with aligned continuation lines" {
+    try expectFormatted(
+        "Players: 2-4\n         best",
+        writeLabeledWrapped,
+        .{ "Players", "2-4 best", @as(usize, 14) },
+    );
 }
 
 test "parse date format config values" {
