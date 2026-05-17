@@ -27,30 +27,37 @@ pub const Screen = enum {
 
 pub const App = struct {
     config: config_mod.Config,
+    config_path: ?[]const u8 = null,
     screen: Screen,
     allocator: ?std.mem.Allocator = null,
-    setup_token_input: ?ui.TextInput = null,
+    setup_token_input: ?ui.PasswordInput = null,
     owned_token: ?[]u8 = null,
     menu: ui.Menu = ui.Menu.init(.{ .items = &menu_items }),
     shell: ui.Panel = ui.Panel.init(.{}),
 
     pub const Msg = union(enum) {
-        setup_token_input: ui.TextInput.Msg,
+        setup_token_input: ui.PasswordInput.Msg,
+        setup_token_paste: []const u8,
         menu: ui.Menu.Msg,
         show_screen: Screen,
         quit,
     };
 
-    pub fn create(config: config_mod.Config) App {
+    pub const Options = struct {
+        config_path: ?[]const u8 = null,
+    };
+
+    pub fn create(config: config_mod.Config, options: Options) App {
         return .{
             .config = config,
+            .config_path = options.config_path,
             .screen = if (config.apiClientToken() == null) .setup_token else .main_menu,
         };
     }
 
     pub fn init(self: *App, ctx: *chasen.Ctx(Msg)) !void {
         self.allocator = ctx.allocator();
-        self.setup_token_input = try ui.TextInput.init(ctx.allocator(), .{
+        self.setup_token_input = try ui.PasswordInput.init(ctx.allocator(), .{
             .placeholder = "Paste BGG API token",
         });
     }
@@ -59,9 +66,14 @@ pub const App = struct {
         switch (msg) {
             .setup_token_input => |input_msg| {
                 if (input_msg == .submit) {
-                    try self.submitToken();
+                    try self.submitToken(ctx);
                 } else if (self.setup_token_input) |*input| {
                     try input.update(input_msg);
+                }
+            },
+            .setup_token_paste => |text| {
+                if (self.setup_token_input) |*input| {
+                    try insertPastedToken(input, text);
                 }
             },
             .menu => |menu_msg| switch (menu_msg) {
@@ -114,6 +126,7 @@ pub const App = struct {
         if (self.screen == .setup_token) {
             switch (event) {
                 .key_press => |key| if (key.matches(chasen.Key.escape, .{})) return .quit,
+                .paste => |text| return .{ .setup_token_paste = text },
                 else => {},
             }
             if (self.setup_token_input) |*input| {
@@ -164,7 +177,7 @@ pub const App = struct {
             input.view(&input_area, .{});
         }
 
-        _ = area.textAt(0, 7, "Enter: use token for this session  Esc: quit", .{ .dim = true });
+        _ = area.textAt(0, 7, setupTokenSubmitHint(self.config_path), .{ .dim = true });
     }
 
     fn viewMainMenu(self: *const App, sfc: *chasen.Surface) !void {
@@ -195,7 +208,7 @@ pub const App = struct {
         _ = area.textAt(0, 4, "m: menu  Esc/q: quit", .{ .dim = true });
     }
 
-    fn submitToken(self: *App) !void {
+    fn submitToken(self: *App, ctx: *chasen.Ctx(Msg)) !void {
         const input = if (self.setup_token_input) |*input| input else return;
         const token = std.mem.trim(u8, input.text(), " \t\r\n");
         if (token.len == 0) return;
@@ -203,6 +216,11 @@ pub const App = struct {
         if (self.owned_token) |old| self.allocator.?.free(old);
         self.owned_token = try self.allocator.?.dupe(u8, token);
         self.config.api.token = self.owned_token;
+        // Persist only after the token is owned by App so config can safely
+        // borrow the value for both this session and TOML serialization.
+        if (self.config_path) |path| {
+            try config_mod.saveConfig(ctx.allocator(), ctx.io(), path, self.config);
+        }
         try input.update(.clear);
         self.screen = .main_menu;
     }
@@ -258,15 +276,46 @@ fn statusRightHint(screen: Screen) []const u8 {
     };
 }
 
+fn insertPastedToken(input: *ui.PasswordInput, text: []const u8) !void {
+    var index: usize = 0;
+    while (index < text.len) {
+        const len = std.unicode.utf8ByteSequenceLength(text[index]) catch {
+            index += 1;
+            continue;
+        };
+        if (index + len > text.len) break;
+
+        const codepoint = std.unicode.utf8Decode(text[index .. index + len]) catch {
+            index += len;
+            continue;
+        };
+        if (isPasteCodepoint(codepoint)) {
+            try input.update(.{ .insert = codepoint });
+        }
+        index += len;
+    }
+}
+
+fn isPasteCodepoint(codepoint: u21) bool {
+    return codepoint >= 0x20 and codepoint != 0x7f and !(codepoint >= 0x80 and codepoint <= 0x9f);
+}
+
+fn setupTokenSubmitHint(config_path: ?[]const u8) []const u8 {
+    return if (config_path == null)
+        "Enter: use token for this session  Esc: quit"
+    else
+        "Enter: save token and continue  Esc: quit";
+}
+
 test "app initializes with main menu screen" {
-    const app = App.create(.{ .api = .{ .token = "token" } });
+    const app = App.create(.{ .api = .{ .token = "token" } }, .{});
 
     try std.testing.expectEqual(Screen.main_menu, app.screen);
     try std.testing.expectEqualStrings("token", app.config.apiClientToken().?);
 }
 
 test "app starts on setup token screen without configured token" {
-    const app = App.create(.{});
+    const app = App.create(.{}, .{});
 
     try std.testing.expectEqual(Screen.setup_token, app.screen);
     try std.testing.expectEqual(@as(?[]const u8, null), app.config.apiClientToken());
@@ -295,17 +344,71 @@ test "status right hint matches screen key handling" {
     try std.testing.expectEqualStrings("m: menu  Esc/q: quit", statusRightHint(.hot_games));
 }
 
-test "submit token stores owned token and enters main menu" {
-    var app = App.create(.{});
+test "setup token submit hint reflects save availability" {
+    try std.testing.expectEqualStrings(
+        "Enter: use token for this session  Esc: quit",
+        setupTokenSubmitHint(null),
+    );
+    try std.testing.expectEqualStrings(
+        "Enter: save token and continue  Esc: quit",
+        setupTokenSubmitHint("/tmp/bgg-tui/config.toml"),
+    );
+}
+
+test "setup token paste inserts printable token text" {
+    var input = try ui.PasswordInput.init(std.testing.allocator, .{});
+    defer input.deinit();
+
+    try insertPastedToken(&input, " tok-123\n\tあ ");
+
+    try std.testing.expectEqualStrings(" tok-123あ ", input.text());
+}
+
+test "setup token screen maps paste to paste message" {
+    var app = App.create(.{}, .{});
     app.allocator = std.testing.allocator;
-    app.setup_token_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "  test-token  " });
+    app.setup_token_input = try ui.PasswordInput.init(std.testing.allocator, .{});
     defer app.deinitOwnedState();
 
-    try app.submitToken();
+    const msg = app.handleEvent(.{ .paste = "token" }).?;
+    try std.testing.expect(msg == .setup_token_paste);
+    try std.testing.expectEqualStrings("token", msg.setup_token_paste);
+}
+
+test "submit token stores owned token and enters main menu" {
+    var app = App.create(.{}, .{});
+    app.allocator = std.testing.allocator;
+    app.setup_token_input = try ui.PasswordInput.init(std.testing.allocator, .{ .value = "  test-token  " });
+    defer app.deinitOwnedState();
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.submitToken(&tc.ctx);
 
     try std.testing.expectEqual(Screen.main_menu, app.screen);
     try std.testing.expectEqualStrings("test-token", app.config.apiClientToken().?);
     try std.testing.expectEqualStrings("", app.setup_token_input.?.text());
+}
+
+test "submit token saves config when path is available" {
+    const path = ".zig-cache/test-bgg-tui-app-config/config.toml";
+
+    var app = App.create(.{}, .{ .config_path = path });
+    app.allocator = std.testing.allocator;
+    app.setup_token_input = try ui.PasswordInput.init(std.testing.allocator, .{ .value = "saved-token" });
+    defer app.deinitOwnedState();
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{
+        .ctx = .{ ._allocator = std.testing.allocator, ._io = std.testing.io },
+    };
+    try app.submitToken(&tc.ctx);
+
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    var loaded = try config_mod.loadConfig(std.testing.allocator, std.testing.io, path, &env);
+    defer loaded.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("saved-token", loaded.config.apiClientToken().?);
 }
 
 test "surfaceRect creates a root-relative rectangle" {

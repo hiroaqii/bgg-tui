@@ -14,5 +14,5 @@ pub fn main(init: std.process.Init) !void {
         bgg_tui.config.LoadedConfig{ .config = bgg_tui.config.Config.fromEnvironment(init.environ_map) };
     const config = loaded_config.config;
 
-    try chasen.run(init, bgg_tui.app.App.create(config));
+    try chasen.run(init, bgg_tui.app.App.create(config, .{ .config_path = config_path }));
 }
