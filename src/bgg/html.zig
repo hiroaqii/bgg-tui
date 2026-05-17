@@ -2,12 +2,20 @@ const std = @import("std");
 
 const Allocator = std.mem.Allocator;
 
+/// Options for converting BGG HTML-ish text into terminal-friendly text.
 pub const TextOptions = struct {
+    /// Prefix written at the beginning of each quoted line.
     quote_prefix: []const u8 = "> ",
+    /// Optional terminal cell width for post-conversion wrapping.
     wrap_width: ?usize = null,
+    /// When true, plain `http://` and `https://` URLs are wrapped with OSC 8 hyperlinks.
     linkify_urls: bool = false,
 };
 
+/// Decodes the HTML entity subset seen in BGG XML text fields.
+///
+/// Unknown entities are preserved literally so the caller does not lose text
+/// when BGG returns an entity this table does not know yet.
 pub fn decodeEntities(allocator: Allocator, input: []const u8) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(allocator);
     errdefer out.deinit();
@@ -38,6 +46,11 @@ pub fn decodeEntities(allocator: Allocator, input: []const u8) ![]u8 {
     return try out.toOwnedSlice();
 }
 
+/// Converts BGG HTML-ish text into readable plain text for TUI display.
+///
+/// The converter is intentionally not a full HTML parser. It recognizes the tags
+/// BGG uses in descriptions and forum posts, then runs optional wrapping before
+/// optional OSC 8 linkification so escape sequences do not affect width math.
 pub fn toText(allocator: Allocator, input: []const u8, options: TextOptions) ![]u8 {
     var renderer = TextRenderer.init(allocator, options);
     defer renderer.deinit();
@@ -233,6 +246,9 @@ const TextRenderer = struct {
     newline_count: usize = 0,
     quote_depth: usize = 0,
     div_depth: usize = 0,
+    // BGG quote markup is usually a quote div containing title/body child divs.
+    // Track only the div depths that opened quote mode so nested non-quote divs
+    // do not accidentally end the quote block.
     quote_div_depths: [16]usize = undefined,
     quote_div_depth_count: usize = 0,
     active_link: ?LinkInfo = null,
@@ -252,6 +268,8 @@ const TextRenderer = struct {
         return try self.out.toOwnedSlice();
     }
 
+    // Runs a lightweight tag scanner over BGG's HTML-ish fragments. Malformed or
+    // unknown tags are skipped best-effort; visible text is kept whenever possible.
     fn render(self: *TextRenderer, input: []const u8) !void {
         var index: usize = 0;
         while (index < input.len) {
@@ -284,6 +302,8 @@ const TextRenderer = struct {
         self.trimTrailingWhitespace();
     }
 
+    // Text nodes decode entities inline so `toText` and `decodeEntities` share
+    // the same entity table without allocating an intermediate decoded string.
     fn writeTextUntilTag(self: *TextRenderer, input: []const u8, index: *usize) !void {
         while (index.* < input.len and input[index.*] != '<') {
             if (input[index.*] == '&') {
@@ -303,6 +323,8 @@ const TextRenderer = struct {
         }
     }
 
+    // Converts the small subset of tags that materially changes plain-text
+    // layout. Formatting-only tags such as b/i/span are intentionally ignored.
     fn handleTag(self: *TextRenderer, tag: Tag) !void {
         if (equalsIgnoreCase(tag.name, "br")) {
             try self.newline(1);
@@ -352,6 +374,8 @@ const TextRenderer = struct {
         }
     }
 
+    // Unlike blockquote tags, BGG quote divs wrap several child divs. A depth
+    // stack lets the outer quote div own quote mode across those children.
     fn handleDivTag(self: *TextRenderer, tag: Tag) !void {
         if (tag.closing) {
             if (self.quote_div_depth_count > 0 and self.quote_div_depths[self.quote_div_depth_count - 1] == self.div_depth) {
@@ -524,6 +548,8 @@ fn linkTextIsUrlPrefix(link_text: []const u8, href: []const u8) bool {
     return without_ellipsis.len > 0 and std.mem.startsWith(u8, href, without_ellipsis);
 }
 
+// Wrap after HTML conversion and before OSC 8 linkification. Quote prefixes are
+// treated as indentation and repeated on continuation lines.
 fn wrapText(allocator: Allocator, text: []const u8, width: usize, quote_prefix: []const u8) ![]u8 {
     if (width == 0) return allocator.dupe(u8, "");
 
@@ -712,6 +738,8 @@ fn isTrailingUrlPunctuation(byte: u8) bool {
     return byte == '.' or byte == ',' or byte == ';' or byte == ':' or byte == '!' or byte == '?';
 }
 
+// OSC 8 makes URLs clickable in supporting terminals while preserving the URL as
+// the visible text for terminals that understand the escape sequence.
 fn writeOsc8Link(writer: *std.Io.Writer, url: []const u8) !void {
     try writer.writeAll("\x1b]8;;");
     try writer.writeAll(url);
