@@ -174,7 +174,7 @@ pub const App = struct {
         const status = ui.StatusLine.init(.{
             .left = "bgg-tui",
             .center = screenTitle(self.screen),
-            .right = statusRightHint(self.screen),
+            .right = self.footerHint(),
         });
         status.view(&status_area, .{});
     }
@@ -288,15 +288,14 @@ pub const App = struct {
             .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
         });
 
-        _ = area.textAt(0, 10, "Use Up/Down and Enter, or h, /, c, s shortcuts.", .{ .dim = true });
+        _ = area.textAt(0, 10, self.footerHint(), .{ .dim = true });
     }
 
     fn viewPlaceholder(self: *const App, sfc: *chasen.Surface, title: []const u8, message: []const u8) void {
-        _ = self;
         var area = centeredSurface(sfc, placeholder_size);
         _ = area.textAt(0, 0, title, .{ .bold = true, .fg = .{ .index = 14 } });
         _ = area.textAt(0, 2, message, .{ .fg = .gray });
-        _ = area.textAt(0, 4, "m: menu  Esc/q: quit", .{ .dim = true });
+        _ = area.textAt(0, 4, self.footerHint(), .{ .dim = true });
     }
 
     fn viewHotGames(self: *const App, sfc: *chasen.Surface) void {
@@ -328,7 +327,7 @@ pub const App = struct {
             },
         }
 
-        _ = area.textAt(0, area.size().height -| 1, "Up/Down: move  m: menu  Esc/q: quit", .{ .dim = true });
+        _ = area.textAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
     }
 
     fn viewSearch(self: *const App, sfc: *chasen.Surface) void {
@@ -369,7 +368,7 @@ pub const App = struct {
             },
         }
 
-        _ = area.textAt(0, area.size().height -| 1, "Enter: search  Up/Down: move  Esc: menu", .{ .dim = true });
+        _ = area.textAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
     }
 
     fn viewGameDetail(self: *const App, sfc: *chasen.Surface) !void {
@@ -415,7 +414,7 @@ pub const App = struct {
             },
         }
 
-        _ = area.textAt(0, area.size().height -| 1, "b/Esc: back  m: menu  q: quit", .{ .dim = true });
+        _ = area.textAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
     }
 
     fn submitToken(self: *App, ctx: *chasen.Ctx(Msg)) !void {
@@ -593,6 +592,20 @@ pub const App = struct {
             .ok => |games| try self.game_detail.setLoaded(self.allocator.?, games),
             .failed => |message| self.game_detail.setFailed(message),
         }
+    }
+
+    fn footerHint(self: *const App) []const u8 {
+        return switch (self.screen) {
+            .setup_token => setupTokenSubmitHint(self.config_path),
+            .main_menu => "Up/Down: move  Enter: open  h, /, c, s: shortcuts  Esc/q: quit",
+            .hot_games => "Up/Down: move  Enter: detail  m: menu  Esc/q: quit",
+            .search => if (self.search_focus == .results)
+                "Up/Down: move  Enter: detail  Esc: menu"
+            else
+                "Enter: search  Up/Down: results  Esc: menu",
+            .game_detail => "b/Esc: back  m: menu  q: quit",
+            .collection, .settings => "m: menu  Esc/q: quit",
+        };
     }
 };
 
@@ -997,15 +1010,6 @@ fn screenTitle(screen: Screen) []const u8 {
     };
 }
 
-fn statusRightHint(screen: Screen) []const u8 {
-    return switch (screen) {
-        .setup_token => "Esc: quit",
-        .search => "Esc: menu",
-        .game_detail => "b/Esc: back  m: menu  q: quit",
-        else => "m: menu  Esc/q: quit",
-    };
-}
-
 fn insertPastedToken(input: *ui.PasswordInput, text: []const u8) !void {
     var index: usize = 0;
     while (index < text.len) {
@@ -1089,12 +1093,26 @@ test "screen titles match status labels" {
     try std.testing.expectEqualStrings("settings", screenTitle(.settings));
 }
 
-test "status right hint matches screen key handling" {
-    try std.testing.expectEqualStrings("Esc: quit", statusRightHint(.setup_token));
-    try std.testing.expectEqualStrings("Esc: menu", statusRightHint(.search));
-    try std.testing.expectEqualStrings("b/Esc: back  m: menu  q: quit", statusRightHint(.game_detail));
-    try std.testing.expectEqualStrings("m: menu  Esc/q: quit", statusRightHint(.main_menu));
-    try std.testing.expectEqualStrings("m: menu  Esc/q: quit", statusRightHint(.hot_games));
+test "footer hint matches screen key handling" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+
+    app.screen = .main_menu;
+    try std.testing.expectEqualStrings("Up/Down: move  Enter: open  h, /, c, s: shortcuts  Esc/q: quit", app.footerHint());
+
+    app.screen = .hot_games;
+    try std.testing.expectEqualStrings("Up/Down: move  Enter: detail  m: menu  Esc/q: quit", app.footerHint());
+
+    app.screen = .search;
+    app.search_focus = .input;
+    try std.testing.expectEqualStrings("Enter: search  Up/Down: results  Esc: menu", app.footerHint());
+    app.search_focus = .results;
+    try std.testing.expectEqualStrings("Up/Down: move  Enter: detail  Esc: menu", app.footerHint());
+
+    app.screen = .game_detail;
+    try std.testing.expectEqualStrings("b/Esc: back  m: menu  q: quit", app.footerHint());
+
+    app.screen = .collection;
+    try std.testing.expectEqualStrings("m: menu  Esc/q: quit", app.footerHint());
 }
 
 test "setup token submit hint reflects save availability" {
