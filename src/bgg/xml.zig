@@ -6,6 +6,11 @@ const model = @import("model.zig");
 
 const Allocator = std.mem.Allocator;
 
+/// Domain parse failures produced after the XML stream itself was readable.
+///
+/// Allocation and low-level XML reader errors are returned directly by the parse
+/// functions. Callers can use `bgg.err.classifyParseError` when they need to map
+/// these failures into API-level error reporting.
 pub const ParseError = error{
     MissingRequiredAttribute,
     MissingName,
@@ -14,6 +19,7 @@ pub const ParseError = error{
     UnexpectedElementEnd,
 };
 
+/// Fixture files kept from the Go implementation and reused by Zig parser tests.
 pub const Fixture = enum {
     search,
     hot,
@@ -36,6 +42,10 @@ pub const Fixture = enum {
     }
 };
 
+/// Parses the BGG search endpoint response.
+///
+/// Returned result names are allocator-owned. Release the slice with
+/// `freeSearchResults` using the same allocator.
 pub fn parseSearchResponse(allocator: Allocator, bytes: []const u8) ![]model.GameSearchResult {
     var static_reader: xml_lib.Reader.Static = .init(allocator, bytes, .{});
     defer static_reader.deinit();
@@ -66,6 +76,10 @@ pub fn parseSearchResponse(allocator: Allocator, bytes: []const u8) ![]model.Gam
     return results.toOwnedSlice(allocator);
 }
 
+/// Parses the BGG hot endpoint response.
+///
+/// Returned strings are allocator-owned. Release the slice with `freeHotGames`
+/// using the same allocator.
 pub fn parseHotResponse(allocator: Allocator, bytes: []const u8) ![]model.HotGame {
     var static_reader: xml_lib.Reader.Static = .init(allocator, bytes, .{});
     defer static_reader.deinit();
@@ -94,6 +108,10 @@ pub fn parseHotResponse(allocator: Allocator, bytes: []const u8) ![]model.HotGam
     return results.toOwnedSlice(allocator);
 }
 
+/// Parses the BGG thing endpoint response into detailed game models.
+///
+/// Text fields, link lists, and player poll strings are allocator-owned. Release
+/// the slice with `freeGames` using the same allocator.
 pub fn parseThingResponse(allocator: Allocator, bytes: []const u8) ![]model.Game {
     var static_reader: xml_lib.Reader.Static = .init(allocator, bytes, .{});
     defer static_reader.deinit();
@@ -122,6 +140,10 @@ pub fn parseThingResponse(allocator: Allocator, bytes: []const u8) ![]model.Game
     return games.toOwnedSlice(allocator);
 }
 
+/// Parses the BGG collection endpoint response.
+///
+/// Returned string fields are allocator-owned. Release the slice with
+/// `freeCollectionItems` using the same allocator.
 pub fn parseCollectionResponse(allocator: Allocator, bytes: []const u8) ![]model.CollectionItem {
     var static_reader: xml_lib.Reader.Static = .init(allocator, bytes, .{});
     defer static_reader.deinit();
@@ -150,6 +172,10 @@ pub fn parseCollectionResponse(allocator: Allocator, bytes: []const u8) ![]model
     return items.toOwnedSlice(allocator);
 }
 
+/// Parses a forum list response for one game.
+///
+/// Returned forum strings are allocator-owned. Release the slice with
+/// `freeForums` using the same allocator.
 pub fn parseForumListResponse(allocator: Allocator, bytes: []const u8) ![]model.Forum {
     var static_reader: xml_lib.Reader.Static = .init(allocator, bytes, .{});
     defer static_reader.deinit();
@@ -178,6 +204,11 @@ pub fn parseForumListResponse(allocator: Allocator, bytes: []const u8) ![]model.
     return forums.toOwnedSlice(allocator);
 }
 
+/// Parses a forum page response into thread summaries.
+///
+/// BGG forum responses do not carry the requested page in the XML payload, so
+/// the caller-provided `page` is copied into the returned model. Use
+/// `freeThreadList` to release the returned thread summary slice.
 pub fn parseForumResponse(allocator: Allocator, bytes: []const u8, page: u32) !model.ThreadList {
     var static_reader: xml_lib.Reader.Static = .init(allocator, bytes, .{});
     defer static_reader.deinit();
@@ -199,6 +230,11 @@ pub fn parseForumResponse(allocator: Allocator, bytes: []const u8, page: u32) !m
     }
 }
 
+/// Parses a thread response, including article bodies.
+///
+/// Article bodies are decoded for HTML entities but are still HTML-ish text until
+/// `bgg.html.toText` is applied by the display layer. Use `freeThread` to release
+/// the returned thread.
 pub fn parseThreadResponse(allocator: Allocator, bytes: []const u8) !model.Thread {
     var static_reader: xml_lib.Reader.Static = .init(allocator, bytes, .{});
     defer static_reader.deinit();
@@ -220,6 +256,7 @@ pub fn parseThreadResponse(allocator: Allocator, bytes: []const u8) !model.Threa
     }
 }
 
+/// Frees a search result slice returned by `parseSearchResponse`.
 pub fn freeSearchResults(allocator: Allocator, results: []model.GameSearchResult) void {
     for (results) |item| {
         allocator.free(item.name);
@@ -227,30 +264,36 @@ pub fn freeSearchResults(allocator: Allocator, results: []model.GameSearchResult
     allocator.free(results);
 }
 
+/// Frees a hot game slice returned by `parseHotResponse`.
 pub fn freeHotGames(allocator: Allocator, games: []model.HotGame) void {
     freeHotGameItems(allocator, games);
     allocator.free(games);
 }
 
+/// Frees a game slice returned by `parseThingResponse`.
 pub fn freeGames(allocator: Allocator, games: []model.Game) void {
     freeGameItems(allocator, games);
     allocator.free(games);
 }
 
+/// Frees a collection item slice returned by `parseCollectionResponse`.
 pub fn freeCollectionItems(allocator: Allocator, items: []model.CollectionItem) void {
     freeCollectionItemsOnly(allocator, items);
     allocator.free(items);
 }
 
+/// Frees a forum slice returned by `parseForumListResponse`.
 pub fn freeForums(allocator: Allocator, forums: []model.Forum) void {
     freeForumItems(allocator, forums);
     allocator.free(forums);
 }
 
+/// Frees a thread list returned by `parseForumResponse`.
 pub fn freeThreadList(allocator: Allocator, thread_list: model.ThreadList) void {
     freeThreadSummaries(allocator, thread_list.threads);
 }
 
+/// Frees a thread returned by `parseThreadResponse`.
 pub fn freeThread(allocator: Allocator, thread: model.Thread) void {
     allocator.free(thread.subject);
     freeArticles(allocator, thread.articles);
@@ -718,6 +761,10 @@ const GameBuilder = struct {
         builder.mechanics.deinit(builder.allocator);
     }
 
+    /// Transfers accumulated link arrays into the game.
+    ///
+    /// After success, the returned `model.Game` owns the slices and must be
+    /// released with `freeGame` / `freeGames`; the builder must not be used.
     fn finish(builder: *GameBuilder) !model.Game {
         errdefer builder.deinit();
         builder.game.designers = try builder.designers.toOwnedSlice(builder.allocator);
@@ -1142,6 +1189,9 @@ fn dupeAttributeValue(allocator: Allocator, reader: *xml_lib.Reader, name: []con
     return try reader.attributeValueAlloc(allocator, index);
 }
 
+// BGG often double-escapes rich text through XML, for example `&amp;#10;`.
+// The XML reader decodes the outer XML entity first; this helper decodes the
+// remaining HTML entity layer before storing description/body text in models.
 fn readDecodedElementText(allocator: Allocator, reader: *xml_lib.Reader) ![]u8 {
     const raw = try reader.readElementTextAlloc(allocator);
     defer allocator.free(raw);
