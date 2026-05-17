@@ -323,10 +323,10 @@ pub const App = struct {
                         .width = area.size().width,
                         .height = area.size().height -| 4,
                     });
-                    list_view.viewList(&self.hot_games.list, &list_area, .{
+                    list_view.viewListWithDensity(&self.hot_games.list, &list_area, .{
                         .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
-                    });
-                    try self.drawListPosition(&area, &self.hot_games.list, list_area.size().height);
+                    }, self.listDensity());
+                    try self.drawListPosition(&area, &self.hot_games.list, list_area.size().height, self.listDensity());
                 }
             },
         }
@@ -387,10 +387,10 @@ pub const App = struct {
                         .width = area.size().width,
                         .height = area.size().height -| 4,
                     });
-                    list_view.viewList(&self.search.list, &list_area, .{
+                    list_view.viewListWithDensity(&self.search.list, &list_area, .{
                         .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
-                    });
-                    try self.drawListPosition(&area, &self.search.list, list_area.size().height);
+                    }, self.listDensity());
+                    try self.drawListPosition(&area, &self.search.list, list_area.size().height, self.listDensity());
                 }
             },
         }
@@ -632,14 +632,18 @@ pub const App = struct {
         }
     }
 
-    fn drawListPosition(self: *const App, surface: *chasen.Surface, list: *const ui.List, visible_height: u16) !void {
+    fn drawListPosition(self: *const App, surface: *chasen.Surface, list: *const ui.List, visible_height: u16, density: list_view.Density) !void {
         _ = self;
         const item_count = list.items.len;
         if (item_count == 0 or visible_height == 0) return;
 
-        const range = list_view.visibleRange(item_count, list.focusedIndex(), visible_height);
+        const range = list_view.visibleRange(item_count, list.focusedIndex(), list_view.visibleItemCapacity(visible_height, density));
         const text = try list_view.positionText(surface.frameAllocator(), range, item_count);
         _ = surface.textAt(0, surface.size().height -| 2, text, .{ .dim = true });
+    }
+
+    fn listDensity(self: *const App) list_view.Density {
+        return list_view.Density.fromConfig(self.config.interface.list_density);
     }
 
     fn footerHint(self: *const App) []const u8 {
