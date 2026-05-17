@@ -13,6 +13,11 @@ pub const PathError = std.mem.Allocator.Error || error{
 };
 
 pub const LoadError = std.Io.Dir.ReadFileAllocError || ParseError;
+pub const SaveError = std.mem.Allocator.Error || std.Io.Dir.CreateDirPathError || std.Io.Dir.WriteFileError || error{
+    InvalidConfigPath,
+    UnsupportedStringValue,
+    WriteFailed,
+};
 
 pub const ParseError = error{
     InvalidLine,
@@ -100,6 +105,75 @@ pub const Interface = struct {
     date_format: []const u8 = "yyyy-mm-dd",
     border_style: []const u8 = "rounded",
 };
+
+pub fn formatToml(allocator: std.mem.Allocator, config: Config) SaveError![]u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+
+    try out.writer.writeAll(
+        \\[api]
+        \\token =
+    );
+    try out.writer.writeByte(' ');
+    try writeTomlString(&out.writer, config.api.token orelse "");
+    try out.writer.writeAll(
+        \\
+        \\
+        \\[display]
+        \\
+    );
+    try out.writer.print("show_images = {}\n", .{config.display.show_images});
+    try out.writer.writeAll("image_protocol = ");
+    try writeTomlString(&out.writer, @tagName(config.display.image_protocol));
+    try out.writer.print(
+        \\
+        \\list_width = {d}
+        \\thread_width = {d}
+        \\detail_width = {d}
+        \\
+        \\
+        \\[collection]
+        \\default_username =
+    , .{
+        config.display.list_width,
+        config.display.thread_width,
+        config.display.detail_width,
+    });
+    try out.writer.writeByte(' ');
+    try writeTomlString(&out.writer, config.collection.default_username orelse "");
+    try out.writer.writeAll("\nstatus_filter = ");
+    try writeTomlString(&out.writer, @tagName(config.collection.status_filter));
+    try out.writer.writeAll(
+        \\
+        \\
+        \\[interface]
+        \\color_theme =
+    );
+    try out.writer.writeByte(' ');
+    try writeTomlString(&out.writer, config.interface.color_theme);
+    try out.writer.writeAll("\ntransition = ");
+    try writeTomlString(&out.writer, config.interface.transition);
+    try out.writer.writeAll("\nselection = ");
+    try writeTomlString(&out.writer, config.interface.selection);
+    try out.writer.writeAll("\nlist_density = ");
+    try writeTomlString(&out.writer, config.interface.list_density);
+    try out.writer.writeAll("\ndate_format = ");
+    try writeTomlString(&out.writer, config.interface.date_format);
+    try out.writer.writeAll("\nborder_style = ");
+    try writeTomlString(&out.writer, config.interface.border_style);
+    try out.writer.writeByte('\n');
+
+    return try out.toOwnedSlice();
+}
+
+pub fn saveConfig(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    path: []const u8,
+    config: Config,
+) SaveError!void {
+    return try saveConfigToDir(allocator, io, .cwd(), path, config);
+}
 
 /// Loads config from disk when present, then applies environment overrides.
 /// Missing files are not fatal because first launch is expected to start from
@@ -194,6 +268,25 @@ fn applyEnvironmentOverrides(config: *Config, env: *const std.process.Environ.Ma
     }
 }
 
+fn saveConfigToDir(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    dir: std.Io.Dir,
+    path: []const u8,
+    config: Config,
+) SaveError!void {
+    if (std.fs.path.dirname(path)) |parent| {
+        if (parent.len > 0) try dir.createDirPath(io, parent);
+    } else if (std.fs.path.basename(path).len == 0) {
+        return error.InvalidConfigPath;
+    }
+
+    const bytes = try formatToml(allocator, config);
+    defer allocator.free(bytes);
+
+    try dir.writeFile(io, .{ .sub_path = path, .data = bytes });
+}
+
 fn resolveConfigPathForOs(
     allocator: std.mem.Allocator,
     env: *const std.process.Environ.Map,
@@ -233,6 +326,13 @@ fn resolveConfigPathForOs(
 
 fn joinConfigPath(allocator: std.mem.Allocator, config_root: []const u8) ![]u8 {
     return try std.fs.path.join(allocator, &.{ config_root, app_dir_name, config_file_name });
+}
+
+fn writeTomlString(writer: *std.Io.Writer, value: []const u8) SaveError!void {
+    if (std.mem.indexOfAny(u8, value, "\"\\\n\r") != null) return error.UnsupportedStringValue;
+    try writer.writeByte('"');
+    try writer.writeAll(value);
+    try writer.writeByte('"');
 }
 
 const Section = enum {
@@ -285,7 +385,7 @@ fn parseDisplayValue(display: *Display, key: []const u8, value: []const u8) Pars
 
 fn parseCollectionValue(collection: *Collection, key: []const u8, value: []const u8) ParseError!void {
     if (std.mem.eql(u8, key, "default_username")) {
-        collection.default_username = try parseString(value);
+        collection.default_username = nonEmptyTrimmed(try parseString(value));
     } else if (std.mem.eql(u8, key, "status_filter")) {
         collection.status_filter = try parseEnum(CollectionStatus, value);
     } else {
@@ -450,6 +550,46 @@ test "config load parses file and lets environment token override file token" {
     try std.testing.expect(loaded.source_bytes != null);
     try std.testing.expectEqualStrings("token-from-env", loaded.config.apiClientToken().?);
     try std.testing.expectEqual(ImageProtocol.off, loaded.config.display.image_protocol);
+}
+
+test "config formats and parses default config" {
+    const bytes = try formatToml(std.testing.allocator, Config.defaults());
+    defer std.testing.allocator.free(bytes);
+
+    const parsed = try parseToml(bytes);
+
+    try std.testing.expectEqual(@as(?[]const u8, null), parsed.apiClientToken());
+    try std.testing.expect(parsed.display.show_images);
+    try std.testing.expectEqual(ImageProtocol.auto, parsed.display.image_protocol);
+    try std.testing.expectEqual(@as(?[]const u8, null), parsed.collection.default_username);
+    try std.testing.expectEqual(CollectionStatus.own, parsed.collection.status_filter);
+}
+
+test "config save creates parent directories and writes toml" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var config = Config.defaults();
+    config.api.token = "token-to-save";
+    config.display.image_protocol = .off;
+
+    try saveConfigToDir(std.testing.allocator, std.testing.io, tmp.dir, "nested/config.toml", config);
+
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    var loaded = try loadConfigFromDir(std.testing.allocator, std.testing.io, tmp.dir, "nested/config.toml", &env);
+    defer loaded.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("token-to-save", loaded.config.apiClientToken().?);
+    try std.testing.expectEqual(ImageProtocol.off, loaded.config.display.image_protocol);
+}
+
+test "config save rejects unsupported string values" {
+    var config = Config.defaults();
+    config.api.token = "token\nwith-newline";
+
+    try std.testing.expectError(error.UnsupportedStringValue, formatToml(std.testing.allocator, config));
 }
 
 test "config path uses explicit override when set" {
