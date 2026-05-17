@@ -7,16 +7,27 @@ pub const fallback_token_env = "BGG_API_TOKEN";
 pub const app_dir_name = "bgg-tui";
 pub const config_file_name = "config.toml";
 pub const max_config_bytes = 256 * 1024;
+pub const broken_config_suffix = ".broken";
 
 pub const PathError = std.mem.Allocator.Error || error{
     MissingConfigDirectory,
 };
 
 pub const LoadError = std.Io.Dir.ReadFileAllocError || ParseError;
-pub const SaveError = std.mem.Allocator.Error || std.Io.Dir.CreateDirPathError || std.Io.Dir.WriteFileError || error{
+pub const SaveError = std.mem.Allocator.Error || std.Io.Dir.CreateDirPathError || std.Io.Dir.WriteFileError || ValidationError || error{
     InvalidConfigPath,
     UnsupportedStringValue,
     WriteFailed,
+};
+
+pub const ValidationError = error{
+    InvalidWidth,
+    InvalidColorTheme,
+    InvalidTransition,
+    InvalidSelection,
+    InvalidListDensity,
+    InvalidDateFormat,
+    InvalidBorderStyle,
 };
 
 pub const ParseError = error{
@@ -50,6 +61,18 @@ pub const Config = struct {
 
     pub fn apiClientToken(config: Config) ?[]const u8 {
         return nonEmptyTrimmed(config.api.token);
+    }
+
+    pub fn validate(config: Config) ValidationError!void {
+        try validateWidth(config.display.list_width);
+        try validateWidth(config.display.thread_width);
+        try validateWidth(config.display.detail_width);
+        if (!isOneOf(config.interface.color_theme, &.{ "default", "blue", "orange", "green" })) return error.InvalidColorTheme;
+        if (!isOneOf(config.interface.transition, &.{ "none", "fade", "glitch", "dissolve", "sweep", "lines", "lines-cross", "random" })) return error.InvalidTransition;
+        if (!isOneOf(config.interface.selection, &.{ "none", "wave", "blink", "glitch" })) return error.InvalidSelection;
+        if (!isOneOf(config.interface.list_density, &.{ "compact", "normal", "comfortable" })) return error.InvalidListDensity;
+        if (!isOneOf(config.interface.date_format, &.{ "yyyy-mm-dd", "yyyy/mm/dd", "relative" })) return error.InvalidDateFormat;
+        if (!isOneOf(config.interface.border_style, &.{ "none", "rounded", "thick", "double", "block" })) return error.InvalidBorderStyle;
     }
 };
 
@@ -107,6 +130,8 @@ pub const Interface = struct {
 };
 
 pub fn formatToml(allocator: std.mem.Allocator, config: Config) SaveError![]u8 {
+    try config.validate();
+
     var out: std.Io.Writer.Allocating = .init(allocator);
     errdefer out.deinit();
 
@@ -253,8 +278,15 @@ fn loadConfigFromDir(
     };
     errdefer allocator.free(bytes);
 
-    var config = try parseToml(bytes);
+    var config = parseToml(bytes) catch {
+        backupBrokenConfigToDir(allocator, io, dir, path, bytes) catch {};
+        return .{ .config = fallbackConfigFromBrokenBytes(bytes, env), .source_bytes = bytes };
+    };
     applyEnvironmentOverrides(&config, env);
+    config.validate() catch {
+        backupBrokenConfigToDir(allocator, io, dir, path, bytes) catch {};
+        return .{ .config = fallbackConfigFromBrokenBytes(bytes, env), .source_bytes = bytes };
+    };
 
     return .{
         .config = config,
@@ -285,6 +317,50 @@ fn saveConfigToDir(
     defer allocator.free(bytes);
 
     try dir.writeFile(io, .{ .sub_path = path, .data = bytes });
+}
+
+fn fallbackConfigFromBrokenBytes(bytes: []const u8, env: *const std.process.Environ.Map) Config {
+    var config = Config.fromEnvironment(env);
+    if (config.apiClientToken() == null) {
+        config.api.token = extractTokenBestEffort(bytes);
+    }
+    return config;
+}
+
+fn backupBrokenConfigToDir(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    dir: std.Io.Dir,
+    path: []const u8,
+    bytes: []const u8,
+) !void {
+    const backup_path = try std.fmt.allocPrint(allocator, "{s}{s}", .{ path, broken_config_suffix });
+    defer allocator.free(backup_path);
+    try dir.writeFile(io, .{ .sub_path = backup_path, .data = bytes });
+}
+
+fn extractTokenBestEffort(bytes: []const u8) ?[]const u8 {
+    var section: Section = .root;
+    var lines = std.mem.splitScalar(u8, bytes, '\n');
+    while (lines.next()) |raw_line| {
+        const line = trimWhitespaceAndComment(raw_line);
+        if (line.len == 0) continue;
+
+        if (line[0] == '[') {
+            section = parseSection(line) catch .root;
+            continue;
+        }
+        if (section != .api) continue;
+
+        const separator_index = std.mem.indexOfScalar(u8, line, '=') orelse continue;
+        const key = std.mem.trim(u8, line[0..separator_index], " \t\r");
+        if (!std.mem.eql(u8, key, "token")) continue;
+
+        const value = std.mem.trim(u8, line[separator_index + 1 ..], " \t\r");
+        const token = parseString(value) catch continue;
+        if (nonEmptyTrimmed(token)) |trimmed| return trimmed;
+    }
+    return null;
 }
 
 fn resolveConfigPathForOs(
@@ -388,6 +464,8 @@ fn parseCollectionValue(collection: *Collection, key: []const u8, value: []const
         collection.default_username = nonEmptyTrimmed(try parseString(value));
     } else if (std.mem.eql(u8, key, "status_filter")) {
         collection.status_filter = try parseEnum(CollectionStatus, value);
+    } else if (std.mem.eql(u8, key, "show_only_owned")) {
+        if (try parseBool(value)) collection.status_filter = .own;
     } else {
         return error.UnknownKey;
     }
@@ -438,6 +516,17 @@ fn nonEmptyTrimmed(value: ?[]const u8) ?[]const u8 {
     const trimmed = std.mem.trim(u8, raw, " \t\r\n");
     if (trimmed.len == 0) return null;
     return trimmed;
+}
+
+fn validateWidth(width: u16) ValidationError!void {
+    if (width < 20 or width > 240) return error.InvalidWidth;
+}
+
+fn isOneOf(value: []const u8, allowed: []const []const u8) bool {
+    for (allowed) |candidate| {
+        if (std.mem.eql(u8, value, candidate)) return true;
+    }
+    return false;
 }
 
 test "config parses toml values into typed schema" {
@@ -494,6 +583,15 @@ test "config parser preserves defaults for omitted values" {
     try std.testing.expectEqual(CollectionStatus.own, config.collection.status_filter);
 }
 
+test "config parser migrates deprecated show only owned option" {
+    const config = try parseToml(
+        \\[collection]
+        \\show_only_owned = true
+    );
+
+    try std.testing.expectEqual(CollectionStatus.own, config.collection.status_filter);
+}
+
 test "config parser rejects unknown keys and escaped strings" {
     try std.testing.expectError(error.UnknownKey, parseToml(
         \\[api]
@@ -507,6 +605,32 @@ test "config parser rejects unknown keys and escaped strings" {
         \\[api]
         \\token = "token\n"
     ));
+}
+
+test "config validates setting ranges and string option values" {
+    var config = Config.defaults();
+    try config.validate();
+
+    config.display.list_width = 19;
+    try std.testing.expectError(error.InvalidWidth, config.validate());
+    config.display.list_width = 40;
+
+    config.interface.transition = "zoom";
+    try std.testing.expectError(error.InvalidTransition, config.validate());
+}
+
+test "config validation accepts documented theme and border values" {
+    inline for (.{ "default", "blue", "orange", "green" }) |theme| {
+        var config = Config.defaults();
+        config.interface.color_theme = theme;
+        try config.validate();
+    }
+
+    inline for (.{ "none", "rounded", "thick", "double", "block" }) |border| {
+        var config = Config.defaults();
+        config.interface.border_style = border;
+        try config.validate();
+    }
 }
 
 test "config load falls back to defaults and environment token when file is missing" {
@@ -552,6 +676,66 @@ test "config load parses file and lets environment token override file token" {
     try std.testing.expectEqual(ImageProtocol.off, loaded.config.display.image_protocol);
 }
 
+test "config load backs up broken config and extracts token best effort" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const broken_bytes =
+        \\[api]
+        \\token = "token-from-broken-file"
+        \\
+        \\[display]
+        \\unknown = true
+    ;
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "config.toml",
+        .data = broken_bytes,
+    });
+
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    var loaded = try loadConfigFromDir(std.testing.allocator, std.testing.io, tmp.dir, "config.toml", &env);
+    defer loaded.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("token-from-broken-file", loaded.config.apiClientToken().?);
+    try std.testing.expectEqual(ImageProtocol.auto, loaded.config.display.image_protocol);
+
+    const backup = try tmp.dir.readFileAlloc(std.testing.io, "config.toml.broken", std.testing.allocator, .limited(max_config_bytes));
+    defer std.testing.allocator.free(backup);
+    try std.testing.expectEqualStrings(broken_bytes, backup);
+}
+
+test "config load backs up invalid settings and lets env token win" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "config.toml",
+        .data =
+        \\[api]
+        \\token = "token-from-invalid-file"
+        \\
+        \\[display]
+        \\list_width = 2
+        ,
+    });
+
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+    try env.put(primary_token_env, "token-from-env");
+
+    var loaded = try loadConfigFromDir(std.testing.allocator, std.testing.io, tmp.dir, "config.toml", &env);
+    defer loaded.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("token-from-env", loaded.config.apiClientToken().?);
+    try std.testing.expectEqual(@as(u16, 40), loaded.config.display.list_width);
+
+    const backup = try tmp.dir.readFileAlloc(std.testing.io, "config.toml.broken", std.testing.allocator, .limited(max_config_bytes));
+    defer std.testing.allocator.free(backup);
+    try std.testing.expect(std.mem.indexOf(u8, backup, "list_width = 2") != null);
+}
+
 test "config formats and parses default config" {
     const bytes = try formatToml(std.testing.allocator, Config.defaults());
     defer std.testing.allocator.free(bytes);
@@ -590,6 +774,10 @@ test "config save rejects unsupported string values" {
     config.api.token = "token\nwith-newline";
 
     try std.testing.expectError(error.UnsupportedStringValue, formatToml(std.testing.allocator, config));
+
+    config.api.token = null;
+    config.display.list_width = 8;
+    try std.testing.expectError(error.InvalidWidth, formatToml(std.testing.allocator, config));
 }
 
 test "config path uses explicit override when set" {
