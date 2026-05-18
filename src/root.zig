@@ -5,6 +5,7 @@ pub const app = @import("app.zig");
 pub const bgg = @import("bgg/root.zig");
 pub const config = @import("config.zig");
 pub const format = @import("format.zig");
+pub const list_filter = @import("list_filter.zig");
 pub const list_view = @import("list_view.zig");
 
 test {
@@ -12,5 +13,6 @@ test {
     _ = bgg;
     _ = config;
     _ = format;
+    _ = list_filter;
     _ = list_view;
 }
