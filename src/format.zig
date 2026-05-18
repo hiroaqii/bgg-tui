@@ -504,7 +504,8 @@ const WrapState = struct {
     }
 };
 
-fn isInlineWhitespace(byte: u8) bool {
+/// Returns true for inline whitespace collapsed by bgg-tui text wrapping.
+pub fn isInlineWhitespace(byte: u8) bool {
     return byte == ' ' or byte == '\t' or byte == '\r';
 }
 

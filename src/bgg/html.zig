@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const format = @import("../format.zig");
+
 const Allocator = std.mem.Allocator;
 
 /// Options for converting BGG HTML-ish text into terminal-friendly text.
@@ -583,11 +585,11 @@ fn writeWrappedLine(writer: *std.Io.Writer, line: []const u8, width: usize, quot
 
     var index: usize = 0;
     while (index < body.len) {
-        while (index < body.len and isInlineWhitespace(body[index])) : (index += 1) {}
+        while (index < body.len and format.isInlineWhitespace(body[index])) : (index += 1) {}
         if (index >= body.len) break;
 
         const start = index;
-        while (index < body.len and !isInlineWhitespace(body[index])) : (index += 1) {}
+        while (index < body.len and !format.isInlineWhitespace(body[index])) : (index += 1) {}
         try state.writeWord(body[start..index]);
     }
 }
@@ -600,7 +602,7 @@ const LineWrapState = struct {
     line_width: usize = 0,
 
     fn writeWord(self: *LineWrapState, word: []const u8) !void {
-        const word_width = displayWidth(word);
+        const word_width = format.displayWidth(word);
         if (!self.line_started) {
             try self.startLine();
         } else if (self.line_width + 1 + word_width <= self.width) {
@@ -623,7 +625,7 @@ const LineWrapState = struct {
 
     fn startLine(self: *LineWrapState) !void {
         try self.writer.writeAll(self.prefix);
-        self.line_width = displayWidth(self.prefix);
+        self.line_width = format.displayWidth(self.prefix);
         self.line_started = true;
     }
 
@@ -640,8 +642,8 @@ const LineWrapState = struct {
         };
         var iter = view.iterator();
         while (iter.nextCodepointSlice()) |slice| {
-            const slice_width = displayWidth(slice);
-            if (self.line_width > displayWidth(self.prefix) and self.line_width + slice_width > self.width) {
+            const slice_width = format.displayWidth(slice);
+            if (self.line_width > format.displayWidth(self.prefix) and self.line_width + slice_width > self.width) {
                 try self.writer.writeByte('\n');
                 self.line_started = false;
                 try self.startLine();
@@ -661,41 +663,6 @@ fn quoteLinePrefix(line: []const u8, quote_prefix: []const u8) []const u8 {
         if (end >= line.len) break;
     }
     return line[0..end];
-}
-
-fn displayWidth(text: []const u8) usize {
-    const view = std.unicode.Utf8View.init(text) catch return text.len;
-    var iter = view.iterator();
-
-    var width: usize = 0;
-    while (iter.nextCodepoint()) |codepoint| {
-        width += codepointDisplayWidth(codepoint);
-    }
-    return width;
-}
-
-fn codepointDisplayWidth(codepoint: u21) usize {
-    if (codepoint == 0) return 0;
-    if (codepoint < 0x20 or (codepoint >= 0x7f and codepoint < 0xa0)) return 0;
-    if (codepoint >= 0x300 and codepoint <= 0x36f) return 0;
-    if (isWideCodepoint(codepoint)) return 2;
-    return 1;
-}
-
-fn isWideCodepoint(codepoint: u21) bool {
-    return (codepoint >= 0x1100 and codepoint <= 0x115f) or
-        (codepoint >= 0x2329 and codepoint <= 0x232a) or
-        (codepoint >= 0x2e80 and codepoint <= 0xa4cf) or
-        (codepoint >= 0xac00 and codepoint <= 0xd7a3) or
-        (codepoint >= 0xf900 and codepoint <= 0xfaff) or
-        (codepoint >= 0xfe10 and codepoint <= 0xfe19) or
-        (codepoint >= 0xfe30 and codepoint <= 0xfe6f) or
-        (codepoint >= 0xff00 and codepoint <= 0xff60) or
-        (codepoint >= 0xffe0 and codepoint <= 0xffe6);
-}
-
-fn isInlineWhitespace(byte: u8) bool {
-    return byte == ' ' or byte == '\t' or byte == '\r';
 }
 
 fn linkifyUrls(allocator: Allocator, text: []const u8) ![]u8 {
