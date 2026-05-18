@@ -8,6 +8,7 @@ const bgg_error = @import("bgg/error.zig");
 const bgg_model = @import("bgg/model.zig");
 const bgg_xml = @import("bgg/xml.zig");
 const config_mod = @import("config.zig");
+const list_filter = @import("list_filter.zig");
 const list_view = @import("list_view.zig");
 
 // Keep top-level screens centered until a screen needs its own full-page layout.
@@ -21,6 +22,8 @@ const detail_size = chasen.Size{ .width = 78, .height = 20 };
 // row 0 title, row 1 blank, row 2 position, row 3 blank, row 4 list body.
 const list_position_row: u16 = 2;
 const list_body_row: u16 = 4;
+const list_filter_row: u16 = 4;
+const list_filtered_body_row: u16 = 6;
 
 const menu_items = [_]ui.Menu.Item{
     .{ .label = "Hot Games", .shortcut = "h" },
@@ -46,6 +49,7 @@ pub const App = struct {
     screen: Screen,
     allocator: ?std.mem.Allocator = null,
     setup_token_input: ?ui.PasswordInput = null,
+    hot_filter_input: ?ui.TextInput = null,
     search_input: ?ui.TextInput = null,
     owned_token: ?[]u8 = null,
     hot_games: HotGamesState = .{},
@@ -60,6 +64,10 @@ pub const App = struct {
     pub const Msg = union(enum) {
         setup_token_input: ui.PasswordInput.Msg,
         setup_token_paste: []const u8,
+        hot_filter_start,
+        hot_filter_input: ui.TextInput.Msg,
+        hot_filter_paste: []const u8,
+        hot_filter_clear,
         search_input: ui.TextInput.Msg,
         search_paste: []const u8,
         search_results_loaded: SearchTaskResult,
@@ -89,6 +97,9 @@ pub const App = struct {
         self.setup_token_input = try ui.PasswordInput.init(ctx.allocator(), .{
             .placeholder = "Paste BGG API token",
         });
+        self.hot_filter_input = try ui.TextInput.init(ctx.allocator(), .{
+            .placeholder = "Filter hot games",
+        });
         self.search_input = try ui.TextInput.init(ctx.allocator(), .{
             .placeholder = "Search board games",
         });
@@ -108,6 +119,20 @@ pub const App = struct {
                     try insertPastedToken(input, text);
                 }
             },
+            .hot_filter_start => try self.startHotFilter(),
+            .hot_filter_input => |input_msg| {
+                if (input_msg != .submit) {
+                    if (self.hot_filter_input) |*input| try input.update(input_msg);
+                    try self.applyHotFilter();
+                }
+            },
+            .hot_filter_paste => |text| {
+                if (self.hot_filter_input) |*input| {
+                    try insertPastedText(input, text);
+                    try self.applyHotFilter();
+                }
+            },
+            .hot_filter_clear => try self.clearHotFilter(),
             .search_input => |input_msg| {
                 if (input_msg == .submit) {
                     try self.startSearch(ctx);
@@ -134,7 +159,9 @@ pub const App = struct {
             },
             .hot_list => |list_msg| switch (list_msg) {
                 .move_prev, .move_next => self.hot_games.update(list_msg),
-                .activate => |index| try self.openHotGame(index, ctx),
+                .activate => |index| {
+                    if (self.hot_games.sourceIndex(index)) |source_index| try self.openHotGame(source_index, ctx);
+                },
             },
             .hot_games_loaded => |result| try self.finishHotGamesLoad(result),
             .show_screen => |screen| try self.showScreen(screen, ctx),
@@ -229,6 +256,31 @@ pub const App = struct {
             return null;
         }
 
+        if (self.screen == .hot_games) {
+            switch (event) {
+                .key_press => |key| {
+                    if (self.hot_games.filter_active) {
+                        if (key.matches(chasen.Key.escape, .{})) return .hot_filter_clear;
+                        if (key.matches(chasen.Key.enter, .{})) {
+                            if (self.hot_games.handleEvent(event)) |msg| return .{ .hot_list = msg };
+                            return null;
+                        }
+                    } else if (key.codepoint == '/') {
+                        return .hot_filter_start;
+                    }
+                },
+                .paste => |text| if (self.hot_games.filter_active) return .{ .hot_filter_paste = text },
+                else => {},
+            }
+            if (self.hot_games.filter_active) {
+                if (self.hot_filter_input) |*input| {
+                    if (input.handleEvent(event)) |msg| return .{ .hot_filter_input = msg };
+                }
+            }
+            if (self.hot_games.handleEvent(event)) |msg| return .{ .hot_list = msg };
+            return null;
+        }
+
         switch (event) {
             .key_press => |key| {
                 // Global shortcuts get first chance before screen-local handlers.
@@ -245,9 +297,6 @@ pub const App = struct {
         if (self.screen == .main_menu) {
             // Menu owns only cursor movement and activation; App maps activation to screens.
             if (self.menu.handleEvent(event)) |msg| return .{ .menu = msg };
-        }
-        if (self.screen == .hot_games) {
-            if (self.hot_games.handleEvent(event)) |msg| return .{ .hot_list = msg };
         }
         return null;
     }
@@ -321,17 +370,23 @@ pub const App = struct {
             .loaded => {
                 if (self.hot_games.list.items.len == 0) {
                     _ = area.textAt(0, 2, "No hot games returned by BGG.", .{ .fg = .gray });
+                } else if (self.hot_games.filter_active and self.hot_games.filter.labels.len == 0) {
+                    try self.drawHotFilterInput(&area);
+                    _ = area.textAt(0, 6, "No hot games match the filter.", .{ .fg = .gray });
                 } else {
+                    const body_row = if (self.hot_games.filter_active) list_filtered_body_row else list_body_row;
+                    if (self.hot_games.filter_active) try self.drawHotFilterInput(&area);
+                    const list = self.hot_games.activeList();
                     var list_area = area.child(.{
                         .col = 0,
-                        .row = list_body_row,
+                        .row = body_row,
                         .width = area.size().width,
-                        .height = area.size().height -| (list_body_row + 1),
+                        .height = area.size().height -| (body_row + 1),
                     });
-                    list_view.viewListWithDensity(&self.hot_games.list, &list_area, .{
+                    list_view.viewListWithDensity(list, &list_area, .{
                         .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
                     }, self.listDensity());
-                    try self.drawListPosition(&area, &self.hot_games.list);
+                    try self.drawListPosition(&area, list);
                 }
             },
         }
@@ -471,6 +526,10 @@ pub const App = struct {
             input.deinit();
             self.setup_token_input = null;
         }
+        if (self.hot_filter_input) |*input| {
+            input.deinit();
+            self.hot_filter_input = null;
+        }
         if (self.search_input) |*input| {
             input.deinit();
             self.search_input = null;
@@ -482,6 +541,21 @@ pub const App = struct {
         self.hot_games.deinit(self.allocator.?);
         self.search.deinit(self.allocator.?);
         self.game_detail.deinit(self.allocator.?);
+    }
+
+    fn startHotFilter(self: *App) !void {
+        if (self.hot_filter_input) |*input| try input.update(.clear);
+        try self.hot_games.applyFilter(self.allocator.?, "");
+    }
+
+    fn applyHotFilter(self: *App) !void {
+        const input = if (self.hot_filter_input) |*input| input else return;
+        try self.hot_games.applyFilter(self.allocator.?, input.text());
+    }
+
+    fn clearHotFilter(self: *App) !void {
+        if (self.hot_filter_input) |*input| try input.update(.clear);
+        self.hot_games.clearFilter(self.allocator.?);
     }
 
     fn showScreen(self: *App, screen: Screen, ctx: *chasen.Ctx(Msg)) !void {
@@ -646,6 +720,19 @@ pub const App = struct {
         _ = surface.textAt(0, list_position_row, text, .{ .dim = true });
     }
 
+    fn drawHotFilterInput(self: *const App, surface: *chasen.Surface) !void {
+        _ = surface.textAt(0, list_filter_row, "Filter:", .{ .dim = true });
+        if (self.hot_filter_input) |*input| {
+            var input_area = surface.child(.{
+                .col = 8,
+                .row = list_filter_row,
+                .width = surface.size().width -| 8,
+                .height = 1,
+            });
+            input.view(&input_area, .{});
+        }
+    }
+
     fn listDensity(self: *const App) list_view.Density {
         return list_view.Density.fromConfig(self.config.interface.list_density);
     }
@@ -654,7 +741,10 @@ pub const App = struct {
         return switch (self.screen) {
             .setup_token => setupTokenSubmitHint(self.config_path),
             .main_menu => "Up/Down: move  Enter: open  h, /, c, s: shortcuts  Esc/q: quit",
-            .hot_games => "Up/Down: move  Enter: detail  m: menu  Esc/q: quit",
+            .hot_games => if (self.hot_games.filter_active)
+                "Type: filter  Up/Down: move  Enter: detail  Esc: clear"
+            else
+                "Up/Down: move  Enter: detail  /: filter  m: menu  Esc/q: quit",
             .search => "Enter: search  Esc: menu",
             .search_results => "Up/Down: move  Enter: detail  b/Esc: search  m: menu  q: quit",
             .game_detail => "b/Esc: back  m: menu  q: quit",
@@ -668,6 +758,8 @@ const HotGamesState = struct {
     games: []bgg_model.HotGame = &.{},
     labels: []const []const u8 = &.{},
     list: ui.List = ui.List.init(.{}),
+    filter: list_filter.FilterState = .{},
+    filter_active: bool = false,
 
     const LoadState = union(enum) {
         idle,
@@ -693,20 +785,47 @@ const HotGamesState = struct {
     }
 
     fn update(self: *HotGamesState, msg: ui.List.Msg) void {
-        self.list.update(msg);
+        if (self.filter_active) {
+            self.filter.update(msg);
+        } else {
+            self.list.update(msg);
+        }
     }
 
     fn handleEvent(self: *const HotGamesState, event: chasen.Event) ?ui.List.Msg {
         if (self.load_state != .loaded) return null;
+        if (self.filter_active) return self.filter.handleEvent(event);
         return self.list.handleEvent(event);
     }
 
+    fn activeList(self: *const HotGamesState) *const ui.List {
+        return if (self.filter_active) &self.filter.list else &self.list;
+    }
+
+    fn sourceIndex(self: *const HotGamesState, visible_index: usize) ?usize {
+        if (self.filter_active) return self.filter.sourceIndex(visible_index);
+        if (visible_index >= self.games.len) return null;
+        return visible_index;
+    }
+
+    fn applyFilter(self: *HotGamesState, allocator: std.mem.Allocator, query: []const u8) !void {
+        try self.filter.apply(allocator, self.labels, query);
+        self.filter_active = true;
+    }
+
+    fn clearFilter(self: *HotGamesState, allocator: std.mem.Allocator) void {
+        self.filter.deinit(allocator);
+        self.filter_active = false;
+    }
+
     fn deinit(self: *HotGamesState, allocator: std.mem.Allocator) void {
+        self.filter.deinit(allocator);
         freeHotGameLabels(allocator, self.labels);
         bgg_xml.freeHotGames(allocator, self.games);
         self.labels = &.{};
         self.games = &.{};
         self.list = ui.List.init(.{});
+        self.filter_active = false;
         self.load_state = .idle;
     }
 };
@@ -1165,7 +1284,10 @@ test "footer hint matches screen key handling" {
     try std.testing.expectEqualStrings("Up/Down: move  Enter: open  h, /, c, s: shortcuts  Esc/q: quit", app.footerHint());
 
     app.screen = .hot_games;
-    try std.testing.expectEqualStrings("Up/Down: move  Enter: detail  m: menu  Esc/q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down: move  Enter: detail  /: filter  m: menu  Esc/q: quit", app.footerHint());
+    app.hot_games.filter_active = true;
+    try std.testing.expectEqualStrings("Type: filter  Up/Down: move  Enter: detail  Esc: clear", app.footerHint());
+    app.hot_games.filter_active = false;
 
     app.screen = .search;
     try std.testing.expectEqualStrings("Enter: search  Esc: menu", app.footerHint());
@@ -1403,6 +1525,33 @@ test "hot games state owns labels for loaded games" {
     try std.testing.expectEqual(@as(usize, 2), state.list.items.len);
     try std.testing.expectEqualStrings("# 1  First", state.list.items[0]);
     try std.testing.expectEqualStrings("# 2  Second (2024)", state.list.items[1]);
+}
+
+test "hot games filter maps visible focus back to source index" {
+    const games = try std.testing.allocator.alloc(bgg_model.HotGame, 3);
+    games[0] = .{ .id = 1, .rank = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+    games[1] = .{ .id = 2, .rank = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia") };
+    games[2] = .{ .id = 3, .rank = 3, .name = try std.testing.allocator.dupe(u8, "CATAN") };
+
+    var state: HotGamesState = .{};
+    try state.setLoaded(std.testing.allocator, games);
+    defer state.deinit(std.testing.allocator);
+
+    try state.applyFilter(std.testing.allocator, "ca");
+    state.update(.move_next);
+
+    try std.testing.expect(state.filter_active);
+    try std.testing.expectEqual(@as(usize, 2), state.filter.labels.len);
+    try std.testing.expectEqual(@as(usize, 2), state.sourceIndex(state.activeList().focusedIndex()).?);
+}
+
+test "hot games slash starts filter before global search shortcut" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.screen = .hot_games;
+
+    const msg = app.handleEvent(.{ .key_press = .{ .codepoint = '/' } }).?;
+
+    try std.testing.expect(msg == .hot_filter_start);
 }
 
 test "search result labels include optional year" {
