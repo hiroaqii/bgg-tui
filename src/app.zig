@@ -8,6 +8,7 @@ const bgg_error = @import("bgg/error.zig");
 const bgg_model = @import("bgg/model.zig");
 const bgg_xml = @import("bgg/xml.zig");
 const config_mod = @import("config.zig");
+const format = @import("format.zig");
 const list_filter = @import("list_filter.zig");
 const list_view = @import("list_view.zig");
 
@@ -540,20 +541,20 @@ pub const App = struct {
                         _ = area.textAt(0, 2, game.name, .{ .bold = true });
                     }
 
-                    _ = try area.printAt(0, 4, .{}, "Players: {d}-{d}  Time: {d} min  Age: {d}+", .{
-                        game.min_players,
-                        game.max_players,
-                        game.playing_time,
-                        game.min_age,
-                    });
-                    _ = try area.printAt(0, 5, .{}, "Rating: {d:.1}  Geek: {d:.1}  Rank: {d}  Weight: {d:.2}", .{
-                        game.rating,
-                        game.bayes_average,
-                        game.rank,
-                        game.weight,
-                    });
+                    const frame = area.frameAllocator();
+                    _ = area.textAt(0, 4, try formatText(frame, format.writePlayerSummary, .{game}), .{});
+                    _ = area.textAt(0, 5, try formatText(frame, format.writeGameStats, .{game}), .{});
+                    if (game.player_count_poll) |poll| {
+                        _ = area.textAt(0, 6, try labeledFormattedText(frame, "Poll", format.writePlayerCountPollSummary, .{poll}), .{ .fg = .gray });
+                    }
 
-                    var desc_area = area.child(.{ .col = 0, .row = 7, .width = area.size().width, .height = area.size().height -| 10 });
+                    try drawListLine(&area, 7, "Designers", game.designers);
+                    try drawListLine(&area, 8, "Artists", game.artists);
+                    try drawListLine(&area, 9, "Publishers", game.publishers);
+                    try drawListLine(&area, 10, "Categories", game.categories);
+                    try drawListLine(&area, 11, "Mechanics", game.mechanics);
+
+                    var desc_area = area.child(.{ .col = 0, .row = 13, .width = area.size().width, .height = area.size().height -| 16 });
                     drawDescriptionPreview(&desc_area, game.description);
                 }
             },
@@ -1383,6 +1384,46 @@ fn drawDescriptionPreview(surface: *chasen.Surface, description: []const u8) voi
     }
 }
 
+fn drawListLine(surface: *chasen.Surface, row: u16, label: []const u8, values: []const []const u8) !void {
+    if (row >= surface.size().height) return;
+    const text = try listLineText(surface.frameAllocator(), label, values);
+    _ = surface.textAt(0, row, text, .{ .fg = .gray });
+}
+
+fn listLineText(allocator: std.mem.Allocator, label: []const u8, values: []const []const u8) ![]const u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+
+    try out.writer.print("{s}: ", .{label});
+    if (values.len == 0) {
+        try out.writer.writeByte('-');
+    } else {
+        for (values, 0..) |value, index| {
+            if (index > 0) try out.writer.writeAll(", ");
+            try out.writer.writeAll(value);
+        }
+    }
+
+    return try out.toOwnedSlice();
+}
+
+fn formatText(allocator: std.mem.Allocator, write_fn: anytype, args: anytype) ![]const u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+
+    try @call(.auto, write_fn, .{&out.writer} ++ args);
+    return try out.toOwnedSlice();
+}
+
+fn labeledFormattedText(allocator: std.mem.Allocator, label: []const u8, write_fn: anytype, args: anytype) ![]const u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+
+    try out.writer.print("{s}: ", .{label});
+    try @call(.auto, write_fn, .{&out.writer} ++ args);
+    return try out.toOwnedSlice();
+}
+
 fn apiErrorMessage(err: bgg_error.ApiError) []const u8 {
     return switch (err) {
         .auth => |auth| auth.message,
@@ -1660,6 +1701,21 @@ test "search paste inserts printable query text" {
     try insertPastedText(&input, "Catan\n\tDuel");
 
     try std.testing.expectEqualStrings("CatanDuel", input.text());
+}
+
+test "detail list line text joins metadata values" {
+    const values = [_][]const u8{ "Klaus Teuber", "Tanja Donner" };
+    const text = try listLineText(std.testing.allocator, "Designers", &values);
+    defer std.testing.allocator.free(text);
+
+    try std.testing.expectEqualStrings("Designers: Klaus Teuber, Tanja Donner", text);
+}
+
+test "detail list line text uses dash for missing metadata" {
+    const text = try listLineText(std.testing.allocator, "Mechanics", &.{});
+    defer std.testing.allocator.free(text);
+
+    try std.testing.expectEqualStrings("Mechanics: -", text);
 }
 
 test "search query shorter than three characters fails before spawning task" {
