@@ -75,11 +75,13 @@ pub const App = struct {
         search_filter_input: ui.TextInput.Msg,
         search_filter_paste: []const u8,
         search_filter_clear,
+        search_sort_toggle,
         search_results_loaded: SearchTaskResult,
         search_list: ui.List.Msg,
         game_detail_loaded: GameDetailTaskResult,
         menu: ui.Menu.Msg,
         hot_list: ui.List.Msg,
+        hot_sort_toggle,
         hot_games_loaded: HotGamesResult,
         show_screen: Screen,
         quit,
@@ -167,6 +169,7 @@ pub const App = struct {
                 }
             },
             .search_filter_clear => try self.clearSearchFilter(),
+            .search_sort_toggle => try self.toggleSearchSort(),
             .search_results_loaded => |result| try self.finishSearch(result),
             .search_list => |list_msg| switch (list_msg) {
                 .move_prev, .move_next => self.search.update(list_msg),
@@ -187,6 +190,7 @@ pub const App = struct {
                     if (self.hot_games.sourceIndex(index)) |source_index| try self.openHotGame(source_index, ctx);
                 },
             },
+            .hot_sort_toggle => try self.toggleHotSort(),
             .hot_games_loaded => |result| try self.finishHotGamesLoad(result),
             .show_screen => |screen| try self.showScreen(screen, ctx),
             .quit => {
@@ -270,6 +274,7 @@ pub const App = struct {
                     } else {
                         if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'b') return .{ .show_screen = .search };
                         if (key.codepoint == 'm') return .{ .show_screen = .main_menu };
+                        if (key.codepoint == 's') return .search_sort_toggle;
                         if (key.codepoint == 'q') return .quit;
                     }
                 },
@@ -317,6 +322,8 @@ pub const App = struct {
                 return null;
             } else if (event == .key_press and event.key_press.codepoint == '/') {
                 return .hot_filter_start;
+            } else if (event == .key_press and event.key_press.codepoint == 's') {
+                return .hot_sort_toggle;
             }
         }
 
@@ -399,7 +406,7 @@ pub const App = struct {
 
     fn viewHotGames(self: *const App, sfc: *chasen.Surface) !void {
         var area = constrainedListSurface(sfc);
-        _ = area.textAt(0, 0, "Hot Games", .{ .bold = true, .fg = .{ .index = 14 } });
+        _ = try area.printAt(0, 0, .{ .bold = true, .fg = .{ .index = 14 } }, "Hot Games ({s})", .{self.hot_games.sort_mode.label(.hot_games)});
 
         switch (self.hot_games.load_state) {
             .idle, .loading => {
@@ -429,6 +436,7 @@ pub const App = struct {
                         .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
                     }, self.listDensity());
                     try self.drawListPosition(&area, list);
+                    self.drawSortMode(&area, self.hot_games.sort_mode.label(.hot_games));
                 }
             },
         }
@@ -466,7 +474,7 @@ pub const App = struct {
 
     fn viewSearchResults(self: *const App, sfc: *chasen.Surface) !void {
         var area = constrainedListSurface(sfc);
-        _ = area.textAt(0, 0, "Search Results", .{ .bold = true, .fg = .{ .index = 14 } });
+        _ = try area.printAt(0, 0, .{ .bold = true, .fg = .{ .index = 14 } }, "Search Results ({s})", .{self.search.sort_mode.label(.search_results)});
 
         switch (self.search.load_state) {
             .idle => {
@@ -500,6 +508,7 @@ pub const App = struct {
                         .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
                     }, self.listDensity());
                     try self.drawListPosition(&area, list);
+                    self.drawSortMode(&area, self.search.sort_mode.label(.search_results));
                 }
             },
         }
@@ -611,6 +620,10 @@ pub const App = struct {
         self.hot_games.clearFilter(self.allocator.?);
     }
 
+    fn toggleHotSort(self: *App) !void {
+        try self.hot_games.toggleSort(self.allocator.?);
+    }
+
     fn startSearchFilter(self: *App) !void {
         if (self.search_filter_input) |*input| try input.update(.clear);
         try self.search.applyFilter(self.allocator.?, "");
@@ -624,6 +637,10 @@ pub const App = struct {
     fn clearSearchFilter(self: *App) !void {
         if (self.search_filter_input) |*input| try input.update(.clear);
         self.search.clearFilter(self.allocator.?);
+    }
+
+    fn toggleSearchSort(self: *App) !void {
+        try self.search.toggleSort(self.allocator.?);
     }
 
     fn showScreen(self: *App, screen: Screen, ctx: *chasen.Ctx(Msg)) !void {
@@ -788,6 +805,12 @@ pub const App = struct {
         _ = surface.textAt(0, list_position_row, text, .{ .dim = true });
     }
 
+    fn drawSortMode(self: *const App, surface: *chasen.Surface, label: []const u8) void {
+        _ = self;
+        if (surface.size().width <= 12 or surface.size().height <= list_position_row) return;
+        _ = surface.textAt(10, list_position_row, label, .{ .dim = true });
+    }
+
     fn drawEmptyState(self: *const App, surface: *chasen.Surface, row: u16, title: []const u8, message: []const u8) void {
         surface.hideCursor();
         self.drawGuidance(surface, row, title, message);
@@ -836,12 +859,12 @@ pub const App = struct {
             .hot_games => if (self.hot_games.filter_active)
                 "Type: filter  Up/Down: move  Enter: detail  Esc: clear"
             else
-                "Up/Down: move  Enter: detail  /: filter  m: menu  Esc/q: quit",
+                "Up/Down: move  Enter: detail  /: filter  s: sort  m: menu  Esc/q: quit",
             .search => "Enter: search  Esc: menu",
             .search_results => if (self.search.filter_active)
                 "Type: filter  Up/Down: move  Enter: detail  Esc: clear  b: search"
             else
-                "Up/Down: move  Enter: detail  /: filter  b/Esc: search  m: menu  q: quit",
+                "Up/Down: move  Enter: detail  /: filter  s: sort  b/Esc: search  m: menu  q: quit",
             .game_detail => "b/Esc: back  m: menu  q: quit",
             .collection, .settings => "m: menu  Esc/q: quit",
         };
@@ -853,6 +876,10 @@ const HotGamesState = struct {
     games: []bgg_model.HotGame = &.{},
     labels: []const []const u8 = &.{},
     list: ui.List = ui.List.init(.{}),
+    sort_mode: ListSortMode = .source,
+    sorted_source_indexes: []usize = &.{},
+    sorted_labels: []const []const u8 = &.{},
+    sorted_list: ui.List = ui.List.init(.{}),
     filter: list_filter.FilterState = .{},
     filter_active: bool = false,
 
@@ -882,6 +909,8 @@ const HotGamesState = struct {
     fn update(self: *HotGamesState, msg: ui.List.Msg) void {
         if (self.filter_active) {
             self.filter.update(msg);
+        } else if (self.sort_mode != .source) {
+            self.sorted_list.update(msg);
         } else {
             self.list.update(msg);
         }
@@ -890,21 +919,32 @@ const HotGamesState = struct {
     fn handleEvent(self: *const HotGamesState, event: chasen.Event) ?ui.List.Msg {
         if (self.load_state != .loaded) return null;
         if (self.filter_active) return self.filter.handleEvent(event);
+        if (self.sort_mode != .source) return self.sorted_list.handleEvent(event);
         return self.list.handleEvent(event);
     }
 
     fn activeList(self: *const HotGamesState) *const ui.List {
-        return if (self.filter_active) &self.filter.list else &self.list;
+        if (self.filter_active) return &self.filter.list;
+        if (self.sort_mode != .source) return &self.sorted_list;
+        return &self.list;
     }
 
     fn sourceIndex(self: *const HotGamesState, visible_index: usize) ?usize {
         if (self.filter_active) return self.filter.sourceIndex(visible_index);
+        if (self.sort_mode != .source) {
+            if (visible_index >= self.sorted_source_indexes.len) return null;
+            return self.sorted_source_indexes[visible_index];
+        }
         if (visible_index >= self.games.len) return null;
         return visible_index;
     }
 
     fn applyFilter(self: *HotGamesState, allocator: std.mem.Allocator, query: []const u8) !void {
-        try self.filter.apply(allocator, self.labels, query);
+        if (self.sort_mode == .source) {
+            try self.filter.apply(allocator, self.labels, query);
+        } else {
+            try self.filter.applyWithSourceIndexes(allocator, self.sorted_labels, self.sorted_source_indexes, query);
+        }
         self.filter_active = true;
     }
 
@@ -913,13 +953,60 @@ const HotGamesState = struct {
         self.filter_active = false;
     }
 
+    fn toggleSort(self: *HotGamesState, allocator: std.mem.Allocator) !void {
+        if (self.load_state != .loaded) return;
+
+        const next_mode = self.sort_mode.next();
+        if (next_mode != .source) {
+            try self.rebuildSortedList(allocator, next_mode);
+        } else {
+            self.freeSortedList(allocator);
+        }
+
+        self.sort_mode = next_mode;
+        self.filter.deinit(allocator);
+        self.filter_active = false;
+    }
+
+    fn rebuildSortedList(self: *HotGamesState, allocator: std.mem.Allocator, mode: ListSortMode) !void {
+        const indexes = try allocator.alloc(usize, self.games.len);
+        errdefer allocator.free(indexes);
+        for (indexes, 0..) |*index, value| index.* = value;
+
+        switch (mode) {
+            .source => {},
+            .name_asc => std.mem.sort(usize, indexes, self.games, hotGameNameLessThan),
+        }
+
+        const labels = try allocator.alloc([]const u8, indexes.len);
+        errdefer allocator.free(labels);
+        for (indexes, 0..) |source_index, display_index| {
+            labels[display_index] = self.labels[source_index];
+        }
+
+        self.freeSortedList(allocator);
+        self.sorted_source_indexes = indexes;
+        self.sorted_labels = labels;
+        self.sorted_list = ui.List.init(.{ .items = self.sorted_labels });
+    }
+
+    fn freeSortedList(self: *HotGamesState, allocator: std.mem.Allocator) void {
+        allocator.free(self.sorted_source_indexes);
+        allocator.free(self.sorted_labels);
+        self.sorted_source_indexes = &.{};
+        self.sorted_labels = &.{};
+        self.sorted_list = ui.List.init(.{});
+    }
+
     fn deinit(self: *HotGamesState, allocator: std.mem.Allocator) void {
         self.filter.deinit(allocator);
+        self.freeSortedList(allocator);
         freeHotGameLabels(allocator, self.labels);
         bgg_xml.freeHotGames(allocator, self.games);
         self.labels = &.{};
         self.games = &.{};
         self.list = ui.List.init(.{});
+        self.sort_mode = .source;
         self.filter_active = false;
         self.load_state = .idle;
     }
@@ -935,6 +1022,10 @@ const SearchState = struct {
     results: []bgg_model.GameSearchResult = &.{},
     labels: []const []const u8 = &.{},
     list: ui.List = ui.List.init(.{}),
+    sort_mode: ListSortMode = .source,
+    sorted_source_indexes: []usize = &.{},
+    sorted_labels: []const []const u8 = &.{},
+    sorted_list: ui.List = ui.List.init(.{}),
     filter: list_filter.FilterState = .{},
     filter_active: bool = false,
 
@@ -966,6 +1057,8 @@ const SearchState = struct {
     fn update(self: *SearchState, msg: ui.List.Msg) void {
         if (self.filter_active) {
             self.filter.update(msg);
+        } else if (self.sort_mode != .source) {
+            self.sorted_list.update(msg);
         } else {
             self.list.update(msg);
         }
@@ -974,27 +1067,83 @@ const SearchState = struct {
     fn handleEvent(self: *const SearchState, event: chasen.Event) ?ui.List.Msg {
         if (self.load_state != .loaded) return null;
         if (self.filter_active) return self.filter.handleEvent(event);
+        if (self.sort_mode != .source) return self.sorted_list.handleEvent(event);
         return self.list.handleEvent(event);
     }
 
     fn activeList(self: *const SearchState) *const ui.List {
-        return if (self.filter_active) &self.filter.list else &self.list;
+        if (self.filter_active) return &self.filter.list;
+        if (self.sort_mode != .source) return &self.sorted_list;
+        return &self.list;
     }
 
     fn sourceIndex(self: *const SearchState, visible_index: usize) ?usize {
         if (self.filter_active) return self.filter.sourceIndex(visible_index);
+        if (self.sort_mode != .source) {
+            if (visible_index >= self.sorted_source_indexes.len) return null;
+            return self.sorted_source_indexes[visible_index];
+        }
         if (visible_index >= self.results.len) return null;
         return visible_index;
     }
 
     fn applyFilter(self: *SearchState, allocator: std.mem.Allocator, query: []const u8) !void {
-        try self.filter.apply(allocator, self.labels, query);
+        if (self.sort_mode == .source) {
+            try self.filter.apply(allocator, self.labels, query);
+        } else {
+            try self.filter.applyWithSourceIndexes(allocator, self.sorted_labels, self.sorted_source_indexes, query);
+        }
         self.filter_active = true;
     }
 
     fn clearFilter(self: *SearchState, allocator: std.mem.Allocator) void {
         self.filter.deinit(allocator);
         self.filter_active = false;
+    }
+
+    fn toggleSort(self: *SearchState, allocator: std.mem.Allocator) !void {
+        if (self.load_state != .loaded) return;
+
+        const next_mode = self.sort_mode.next();
+        if (next_mode != .source) {
+            try self.rebuildSortedList(allocator, next_mode);
+        } else {
+            self.freeSortedList(allocator);
+        }
+
+        self.sort_mode = next_mode;
+        self.filter.deinit(allocator);
+        self.filter_active = false;
+    }
+
+    fn rebuildSortedList(self: *SearchState, allocator: std.mem.Allocator, mode: ListSortMode) !void {
+        const indexes = try allocator.alloc(usize, self.results.len);
+        errdefer allocator.free(indexes);
+        for (indexes, 0..) |*index, value| index.* = value;
+
+        switch (mode) {
+            .source => {},
+            .name_asc => std.mem.sort(usize, indexes, self.results, searchResultNameLessThan),
+        }
+
+        const labels = try allocator.alloc([]const u8, indexes.len);
+        errdefer allocator.free(labels);
+        for (indexes, 0..) |source_index, display_index| {
+            labels[display_index] = self.labels[source_index];
+        }
+
+        self.freeSortedList(allocator);
+        self.sorted_source_indexes = indexes;
+        self.sorted_labels = labels;
+        self.sorted_list = ui.List.init(.{ .items = self.sorted_labels });
+    }
+
+    fn freeSortedList(self: *SearchState, allocator: std.mem.Allocator) void {
+        allocator.free(self.sorted_source_indexes);
+        allocator.free(self.sorted_labels);
+        self.sorted_source_indexes = &.{};
+        self.sorted_labels = &.{};
+        self.sorted_list = ui.List.init(.{});
     }
 
     fn deinit(self: *SearchState, allocator: std.mem.Allocator) void {
@@ -1004,11 +1153,13 @@ const SearchState = struct {
 
     fn clearResults(self: *SearchState, allocator: std.mem.Allocator) void {
         self.filter.deinit(allocator);
+        self.freeSortedList(allocator);
         freeSearchResultLabels(allocator, self.labels);
         bgg_xml.freeSearchResults(allocator, self.results);
         self.labels = &.{};
         self.results = &.{};
         self.list = ui.List.init(.{});
+        self.sort_mode = .source;
         self.filter_active = false;
     }
 };
@@ -1063,6 +1214,29 @@ const GameDetailResult = union(enum) {
 const GameDetailTaskResult = struct {
     request_id: u64,
     result: GameDetailResult,
+};
+
+const ListSortMode = enum {
+    source,
+    name_asc,
+
+    fn next(self: ListSortMode) ListSortMode {
+        return switch (self) {
+            .source => .name_asc,
+            .name_asc => .source,
+        };
+    }
+
+    fn label(self: ListSortMode, screen: Screen) []const u8 {
+        return switch (self) {
+            .source => switch (screen) {
+                .hot_games => "rank",
+                .search_results => "relevance",
+                else => "default",
+            },
+            .name_asc => "name",
+        };
+    }
 };
 
 // The task owns only copied request inputs. API response data is transferred
@@ -1275,6 +1449,29 @@ fn freeHotGameLabels(allocator: std.mem.Allocator, labels: []const []const u8) v
     allocator.free(labels);
 }
 
+fn hotGameNameLessThan(games: []const bgg_model.HotGame, lhs: usize, rhs: usize) bool {
+    const order = compareAsciiIgnoreCase(games[lhs].name, games[rhs].name);
+    if (order == .eq) return lhs < rhs;
+    return order == .lt;
+}
+
+fn searchResultNameLessThan(results: []const bgg_model.GameSearchResult, lhs: usize, rhs: usize) bool {
+    const order = compareAsciiIgnoreCase(results[lhs].name, results[rhs].name);
+    if (order == .eq) return lhs < rhs;
+    return order == .lt;
+}
+
+fn compareAsciiIgnoreCase(lhs: []const u8, rhs: []const u8) std.math.Order {
+    const len = @min(lhs.len, rhs.len);
+    for (lhs[0..len], rhs[0..len]) |lhs_byte, rhs_byte| {
+        const left = std.ascii.toLower(lhs_byte);
+        const right = std.ascii.toLower(rhs_byte);
+        if (left < right) return .lt;
+        if (left > right) return .gt;
+    }
+    return std.math.order(lhs.len, rhs.len);
+}
+
 // App screens receive a local surface. `ui.layout.center` handles clamping when
 // the terminal is smaller than the requested block.
 fn centeredSurface(surface: *chasen.Surface, size: chasen.Size) chasen.Surface {
@@ -1408,7 +1605,7 @@ test "footer hint matches screen key handling" {
     try std.testing.expectEqualStrings("Up/Down: move  Enter: open  h, /, c, s: shortcuts  Esc/q: quit", app.footerHint());
 
     app.screen = .hot_games;
-    try std.testing.expectEqualStrings("Up/Down: move  Enter: detail  /: filter  m: menu  Esc/q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down: move  Enter: detail  /: filter  s: sort  m: menu  Esc/q: quit", app.footerHint());
     app.hot_games.filter_active = true;
     try std.testing.expectEqualStrings("Type: filter  Up/Down: move  Enter: detail  Esc: clear", app.footerHint());
     app.hot_games.filter_active = false;
@@ -1417,7 +1614,7 @@ test "footer hint matches screen key handling" {
     try std.testing.expectEqualStrings("Enter: search  Esc: menu", app.footerHint());
 
     app.screen = .search_results;
-    try std.testing.expectEqualStrings("Up/Down: move  Enter: detail  /: filter  b/Esc: search  m: menu  q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down: move  Enter: detail  /: filter  s: sort  b/Esc: search  m: menu  q: quit", app.footerHint());
     app.search.filter_active = true;
     try std.testing.expectEqualStrings("Type: filter  Up/Down: move  Enter: detail  Esc: clear  b: search", app.footerHint());
     app.search.filter_active = false;
@@ -1672,6 +1869,77 @@ test "hot games filter maps visible focus back to source index" {
     try std.testing.expectEqual(@as(usize, 2), state.sourceIndex(state.activeList().focusedIndex()).?);
 }
 
+test "hot games name sort preserves source index activation" {
+    const games = try std.testing.allocator.alloc(bgg_model.HotGame, 3);
+    games[0] = .{ .id = 1, .rank = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+    games[1] = .{ .id = 2, .rank = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia") };
+    games[2] = .{ .id = 3, .rank = 3, .name = try std.testing.allocator.dupe(u8, "CATAN") };
+
+    var state: HotGamesState = .{};
+    try state.setLoaded(std.testing.allocator, games);
+    defer state.deinit(std.testing.allocator);
+
+    try state.toggleSort(std.testing.allocator);
+    try std.testing.expectEqual(ListSortMode.name_asc, state.sort_mode);
+    try std.testing.expectEqualStrings("# 2  Cascadia", state.activeList().items[0]);
+    try std.testing.expectEqual(@as(usize, 1), state.sourceIndex(0).?);
+}
+
+test "hot games sorted projection owns movement and activation" {
+    const games = try std.testing.allocator.alloc(bgg_model.HotGame, 3);
+    games[0] = .{ .id = 1, .rank = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+    games[1] = .{ .id = 2, .rank = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia") };
+    games[2] = .{ .id = 3, .rank = 3, .name = try std.testing.allocator.dupe(u8, "CATAN") };
+
+    var state: HotGamesState = .{};
+    try state.setLoaded(std.testing.allocator, games);
+    defer state.deinit(std.testing.allocator);
+
+    try state.toggleSort(std.testing.allocator);
+    state.update(.move_next);
+
+    try std.testing.expectEqual(@as(usize, 0), state.list.focusedIndex());
+    try std.testing.expectEqual(@as(usize, 1), state.activeList().focusedIndex());
+    try std.testing.expectEqual(@as(usize, 2), state.sourceIndex(state.activeList().focusedIndex()).?);
+    try std.testing.expectEqual(ui.List.Msg{ .activate = 1 }, state.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?);
+}
+
+test "hot games sort failure keeps existing projection state" {
+    const games = try std.testing.allocator.alloc(bgg_model.HotGame, 1);
+    games[0] = .{ .id = 1, .rank = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+
+    var state: HotGamesState = .{};
+    try state.setLoaded(std.testing.allocator, games);
+    defer state.deinit(std.testing.allocator);
+
+    var failing_allocator = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    try std.testing.expectError(error.OutOfMemory, state.toggleSort(failing_allocator.allocator()));
+
+    try std.testing.expectEqual(ListSortMode.source, state.sort_mode);
+    try std.testing.expectEqual(@as(usize, 0), state.sorted_source_indexes.len);
+    try std.testing.expectEqual(@as(usize, 1), state.activeList().items.len);
+    try std.testing.expectEqualStrings("# 1  Root", state.activeList().items[0]);
+}
+
+test "hot games filter uses current name sort order" {
+    const games = try std.testing.allocator.alloc(bgg_model.HotGame, 3);
+    games[0] = .{ .id = 1, .rank = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+    games[1] = .{ .id = 2, .rank = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia") };
+    games[2] = .{ .id = 3, .rank = 3, .name = try std.testing.allocator.dupe(u8, "CATAN") };
+
+    var state: HotGamesState = .{};
+    try state.setLoaded(std.testing.allocator, games);
+    defer state.deinit(std.testing.allocator);
+
+    try state.toggleSort(std.testing.allocator);
+    try state.applyFilter(std.testing.allocator, "ca");
+
+    try std.testing.expectEqualStrings("# 2  Cascadia", state.activeList().items[0]);
+    try std.testing.expectEqualStrings("# 3  CATAN", state.activeList().items[1]);
+    try std.testing.expectEqual(@as(usize, 1), state.sourceIndex(0).?);
+    try std.testing.expectEqual(@as(usize, 2), state.sourceIndex(1).?);
+}
+
 test "hot games slash starts filter before global search shortcut" {
     var app = App.create(.{ .api = .{ .token = "token" } }, .{});
     app.screen = .hot_games;
@@ -1748,6 +2016,58 @@ test "search results filter maps visible focus back to source index" {
     try std.testing.expect(state.filter_active);
     try std.testing.expectEqual(@as(usize, 2), state.filter.labels.len);
     try std.testing.expectEqual(@as(usize, 2), state.sourceIndex(state.activeList().focusedIndex()).?);
+}
+
+test "search results name sort preserves source index activation" {
+    const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 3);
+    results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+    results[1] = .{ .id = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia") };
+    results[2] = .{ .id = 3, .name = try std.testing.allocator.dupe(u8, "CATAN") };
+
+    var state: SearchState = .{};
+    try state.setLoaded(std.testing.allocator, results);
+    defer state.deinit(std.testing.allocator);
+
+    try state.toggleSort(std.testing.allocator);
+    try std.testing.expectEqual(ListSortMode.name_asc, state.sort_mode);
+    try std.testing.expectEqualStrings("Cascadia", state.activeList().items[0]);
+    try std.testing.expectEqual(@as(usize, 1), state.sourceIndex(0).?);
+}
+
+test "search results sorted projection owns movement and activation" {
+    const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 3);
+    results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+    results[1] = .{ .id = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia") };
+    results[2] = .{ .id = 3, .name = try std.testing.allocator.dupe(u8, "CATAN") };
+
+    var state: SearchState = .{};
+    try state.setLoaded(std.testing.allocator, results);
+    defer state.deinit(std.testing.allocator);
+
+    try state.toggleSort(std.testing.allocator);
+    state.update(.move_next);
+
+    try std.testing.expectEqual(@as(usize, 0), state.list.focusedIndex());
+    try std.testing.expectEqual(@as(usize, 1), state.activeList().focusedIndex());
+    try std.testing.expectEqual(@as(usize, 2), state.sourceIndex(state.activeList().focusedIndex()).?);
+    try std.testing.expectEqual(ui.List.Msg{ .activate = 1 }, state.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?);
+}
+
+test "search results sort failure keeps existing projection state" {
+    const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
+    results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+
+    var state: SearchState = .{};
+    try state.setLoaded(std.testing.allocator, results);
+    defer state.deinit(std.testing.allocator);
+
+    var failing_allocator = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    try std.testing.expectError(error.OutOfMemory, state.toggleSort(failing_allocator.allocator()));
+
+    try std.testing.expectEqual(ListSortMode.source, state.sort_mode);
+    try std.testing.expectEqual(@as(usize, 0), state.sorted_source_indexes.len);
+    try std.testing.expectEqual(@as(usize, 1), state.activeList().items.len);
+    try std.testing.expectEqualStrings("Root", state.activeList().items[0]);
 }
 
 test "search results slash starts filter" {

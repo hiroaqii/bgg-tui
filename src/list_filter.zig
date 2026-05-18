@@ -18,6 +18,16 @@ pub const FilterState = struct {
     }
 
     pub fn apply(self: *FilterState, allocator: std.mem.Allocator, source_labels: []const []const u8, query: []const u8) !void {
+        try self.applyWithSourceIndexes(allocator, source_labels, null, query);
+    }
+
+    pub fn applyWithSourceIndexes(
+        self: *FilterState,
+        allocator: std.mem.Allocator,
+        source_labels: []const []const u8,
+        source_indexes: ?[]const usize,
+        query: []const u8,
+    ) !void {
         const next_query = try allocator.dupe(u8, query);
         errdefer allocator.free(next_query);
 
@@ -28,7 +38,7 @@ pub const FilterState = struct {
 
         for (source_labels, 0..) |label, index| {
             if (!matchesLabel(label, query)) continue;
-            try indexes.append(allocator, index);
+            try indexes.append(allocator, if (source_indexes) |map| map[index] else index);
             try labels.append(allocator, label);
         }
 
@@ -125,6 +135,19 @@ test "filter state maps visible activation back to source index" {
 
     try std.testing.expectEqual(@as(usize, 1), state.list.focusedIndex());
     try std.testing.expectEqual(@as(usize, 2), state.sourceIndex(state.list.focusedIndex()).?);
+}
+
+test "filter state can preserve projected source indexes" {
+    const labels = [_][]const u8{ "CATAN", "Cascadia", "Root" };
+    const indexes = [_]usize{ 2, 1, 0 };
+    var state: FilterState = .{};
+    defer state.deinit(std.testing.allocator);
+
+    try state.applyWithSourceIndexes(std.testing.allocator, &labels, &indexes, "ca");
+    state.update(.move_next);
+
+    try std.testing.expectEqual(@as(usize, 1), state.list.focusedIndex());
+    try std.testing.expectEqual(@as(usize, 1), state.sourceIndex(state.list.focusedIndex()).?);
 }
 
 test "filter state handles no matches" {
