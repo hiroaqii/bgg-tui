@@ -127,7 +127,7 @@ pub const App = struct {
             },
             .setup_token_paste => |text| {
                 if (self.setup_token_input) |*input| {
-                    try insertPastedToken(input, text);
+                    try insertPastedCodepoints(input, text);
                 }
             },
             .hot_filter_start => try self.startHotFilter(),
@@ -139,7 +139,7 @@ pub const App = struct {
             },
             .hot_filter_paste => |text| {
                 if (self.hot_filter_input) |*input| {
-                    try insertPastedText(input, text);
+                    try insertPastedCodepoints(input, text);
                     try self.applyHotFilter();
                 }
             },
@@ -153,7 +153,7 @@ pub const App = struct {
             },
             .search_paste => |text| {
                 if (self.search_input) |*input| {
-                    try insertPastedText(input, text);
+                    try insertPastedCodepoints(input, text);
                 }
             },
             .search_filter_start => try self.startSearchFilter(),
@@ -165,7 +165,7 @@ pub const App = struct {
             },
             .search_filter_paste => |text| {
                 if (self.search_filter_input) |*input| {
-                    try insertPastedText(input, text);
+                    try insertPastedCodepoints(input, text);
                     try self.applySearchFilter();
                 }
             },
@@ -1551,27 +1551,7 @@ fn screenTitle(screen: Screen) []const u8 {
     };
 }
 
-fn insertPastedToken(input: *ui.PasswordInput, text: []const u8) !void {
-    var index: usize = 0;
-    while (index < text.len) {
-        const len = std.unicode.utf8ByteSequenceLength(text[index]) catch {
-            index += 1;
-            continue;
-        };
-        if (index + len > text.len) break;
-
-        const codepoint = std.unicode.utf8Decode(text[index .. index + len]) catch {
-            index += len;
-            continue;
-        };
-        if (isPasteCodepoint(codepoint)) {
-            try input.update(.{ .insert = codepoint });
-        }
-        index += len;
-    }
-}
-
-fn insertPastedText(input: *ui.TextInput, text: []const u8) !void {
+fn insertPastedCodepoints(input: anytype, text: []const u8) !void {
     var index: usize = 0;
     while (index < text.len) {
         const len = std.unicode.utf8ByteSequenceLength(text[index]) catch {
@@ -1678,7 +1658,7 @@ test "setup token paste inserts printable token text" {
     var input = try ui.PasswordInput.init(std.testing.allocator, .{});
     defer input.deinit();
 
-    try insertPastedToken(&input, " tok-123\n\tあ ");
+    try insertPastedCodepoints(&input, " tok-123\n\tあ ");
 
     try std.testing.expectEqualStrings(" tok-123あ ", input.text());
 }
@@ -1698,7 +1678,7 @@ test "search paste inserts printable query text" {
     var input = try ui.TextInput.init(std.testing.allocator, .{});
     defer input.deinit();
 
-    try insertPastedText(&input, "Catan\n\tDuel");
+    try insertPastedCodepoints(&input, "Catan\n\tDuel");
 
     try std.testing.expectEqualStrings("CatanDuel", input.text());
 }
