@@ -1479,11 +1479,7 @@ fn centeredSurface(surface: *chasen.Surface, size: chasen.Size) chasen.Surface {
 }
 
 fn constrainedListSurface(surface: *chasen.Surface) chasen.Surface {
-    const size = surface.size();
-    return surface.child(ui.layout.center(surfaceRect(surface), .{
-        .width = @min(size.width, list_screen_max_size.width),
-        .height = @min(size.height, list_screen_max_size.height),
-    }));
+    return surface.child(ui.layout.center(surfaceRect(surface), list_screen_max_size));
 }
 
 fn surfaceRect(surface: *const chasen.Surface) chasen.Rect {
