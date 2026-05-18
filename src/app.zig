@@ -411,10 +411,10 @@ pub const App = struct {
             },
             .loaded => {
                 if (self.hot_games.list.items.len == 0) {
-                    _ = area.textAt(0, 2, "No hot games returned by BGG.", .{ .fg = .gray });
+                    self.drawEmptyState(&area, 2, "No hot games", "BGG did not return any hot games.");
                 } else if (self.hot_games.filter_active and self.hot_games.filter.labels.len == 0) {
                     try self.drawHotFilterInput(&area);
-                    _ = area.textAt(0, 6, "No hot games match the filter.", .{ .fg = .gray });
+                    self.drawEmptyState(&area, 6, "No matches", "No hot games match the filter.");
                 } else {
                     const body_row = if (self.hot_games.filter_active) list_filtered_body_row else list_body_row;
                     if (self.hot_games.filter_active) try self.drawHotFilterInput(&area);
@@ -447,7 +447,7 @@ pub const App = struct {
 
         switch (self.search.load_state) {
             .idle => {
-                _ = area.textAt(0, 4, "Enter at least 3 characters and press Enter.", .{ .fg = .gray });
+                self.drawGuidance(&area, 4, "Ready to search", "Enter at least 3 characters and press Enter.");
             },
             .loading => {
                 _ = area.textAt(0, 4, "Search request is running...", .{ .fg = .gray });
@@ -457,7 +457,7 @@ pub const App = struct {
                 _ = area.textAt(0, 6, message, .{ .fg = .gray });
             },
             .loaded => {
-                _ = area.textAt(0, 4, "Press Enter to run a new search.", .{ .fg = .gray });
+                self.drawGuidance(&area, 4, "Search complete", "Press Enter to run a new search.");
             },
         }
 
@@ -470,9 +470,10 @@ pub const App = struct {
 
         switch (self.search.load_state) {
             .idle => {
-                _ = area.textAt(0, 2, "No search has been run.", .{ .fg = .gray });
+                self.drawEmptyState(&area, 2, "No search yet", "Run a search to see matching board games.");
             },
             .loading => {
+                area.hideCursor();
                 _ = area.textAt(0, 2, "Searching BoardGameGeek...", .{ .fg = .gray });
             },
             .failed => |message| {
@@ -481,10 +482,10 @@ pub const App = struct {
             },
             .loaded => {
                 if (self.search.list.items.len == 0) {
-                    _ = area.textAt(0, 2, "No games matched the current query.", .{ .fg = .gray });
+                    self.drawEmptyState(&area, 2, "No results", "No games matched the current query.");
                 } else if (self.search.filter_active and self.search.filter.labels.len == 0) {
                     try self.drawSearchFilterInput(&area);
-                    _ = area.textAt(0, 6, "No search results match the filter.", .{ .fg = .gray });
+                    self.drawEmptyState(&area, 6, "No matches", "No search results match the filter.");
                 } else {
                     const body_row = if (self.search.filter_active) list_filtered_body_row else list_body_row;
                     if (self.search.filter_active) try self.drawSearchFilterInput(&area);
@@ -521,7 +522,7 @@ pub const App = struct {
             },
             .loaded => {
                 if (self.game_detail.games.len == 0) {
-                    _ = area.textAt(0, 2, "No game detail returned by BGG.", .{ .fg = .gray });
+                    self.drawEmptyState(&area, 2, "No detail", "BGG did not return game detail.");
                 } else {
                     const game = self.game_detail.games[0];
                     if (game.year_published) |year| {
@@ -785,6 +786,17 @@ pub const App = struct {
 
         const text = try list_view.focusedPositionText(surface.frameAllocator(), list.focusedIndex(), item_count);
         _ = surface.textAt(0, list_position_row, text, .{ .dim = true });
+    }
+
+    fn drawEmptyState(self: *const App, surface: *chasen.Surface, row: u16, title: []const u8, message: []const u8) void {
+        surface.hideCursor();
+        self.drawGuidance(surface, row, title, message);
+    }
+
+    fn drawGuidance(self: *const App, surface: *chasen.Surface, row: u16, title: []const u8, message: []const u8) void {
+        _ = self;
+        _ = surface.textAt(0, row, title, .{ .bold = true, .fg = .gray });
+        _ = surface.textAt(0, row + 1, message, .{ .fg = .gray });
     }
 
     fn drawHotFilterInput(self: *const App, surface: *chasen.Surface) !void {
