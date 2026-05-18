@@ -51,6 +51,7 @@ pub const App = struct {
     setup_token_input: ?ui.PasswordInput = null,
     hot_filter_input: ?ui.TextInput = null,
     search_input: ?ui.TextInput = null,
+    search_filter_input: ?ui.TextInput = null,
     owned_token: ?[]u8 = null,
     hot_games: HotGamesState = .{},
     search: SearchState = .{},
@@ -70,6 +71,10 @@ pub const App = struct {
         hot_filter_clear,
         search_input: ui.TextInput.Msg,
         search_paste: []const u8,
+        search_filter_start,
+        search_filter_input: ui.TextInput.Msg,
+        search_filter_paste: []const u8,
+        search_filter_clear,
         search_results_loaded: SearchTaskResult,
         search_list: ui.List.Msg,
         game_detail_loaded: GameDetailTaskResult,
@@ -102,6 +107,9 @@ pub const App = struct {
         });
         self.search_input = try ui.TextInput.init(ctx.allocator(), .{
             .placeholder = "Search board games",
+        });
+        self.search_filter_input = try ui.TextInput.init(ctx.allocator(), .{
+            .placeholder = "Filter search results",
         });
     }
 
@@ -145,10 +153,26 @@ pub const App = struct {
                     try insertPastedText(input, text);
                 }
             },
+            .search_filter_start => try self.startSearchFilter(),
+            .search_filter_input => |input_msg| {
+                if (input_msg != .submit) {
+                    if (self.search_filter_input) |*input| try input.update(input_msg);
+                    try self.applySearchFilter();
+                }
+            },
+            .search_filter_paste => |text| {
+                if (self.search_filter_input) |*input| {
+                    try insertPastedText(input, text);
+                    try self.applySearchFilter();
+                }
+            },
+            .search_filter_clear => try self.clearSearchFilter(),
             .search_results_loaded => |result| try self.finishSearch(result),
             .search_list => |list_msg| switch (list_msg) {
                 .move_prev, .move_next => self.search.update(list_msg),
-                .activate => |index| try self.openSearchResult(index, ctx),
+                .activate => |index| {
+                    if (self.search.sourceIndex(index)) |source_index| try self.openSearchResult(source_index, ctx);
+                },
             },
             .game_detail_loaded => |result| try self.finishGameDetail(result),
             .menu => |menu_msg| switch (menu_msg) {
@@ -234,11 +258,28 @@ pub const App = struct {
         if (self.screen == .search_results) {
             switch (event) {
                 .key_press => |key| {
-                    if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'b') return .{ .show_screen = .search };
-                    if (key.codepoint == 'm') return .{ .show_screen = .main_menu };
-                    if (key.codepoint == 'q') return .quit;
+                    if (self.search.filter_active) {
+                        if (key.matches(chasen.Key.escape, .{})) return .search_filter_clear;
+                        if (key.codepoint == 'b') return .{ .show_screen = .search };
+                        if (key.matches(chasen.Key.enter, .{})) {
+                            if (self.search.handleEvent(event)) |msg| return .{ .search_list = msg };
+                            return null;
+                        }
+                    } else if (key.codepoint == '/') {
+                        return .search_filter_start;
+                    } else {
+                        if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'b') return .{ .show_screen = .search };
+                        if (key.codepoint == 'm') return .{ .show_screen = .main_menu };
+                        if (key.codepoint == 'q') return .quit;
+                    }
                 },
+                .paste => |text| if (self.search.filter_active) return .{ .search_filter_paste = text },
                 else => {},
+            }
+            if (self.search.filter_active) {
+                if (self.search_filter_input) |*input| {
+                    if (input.handleEvent(event)) |msg| return .{ .search_filter_input = msg };
+                }
             }
             if (self.search.handleEvent(event)) |msg| return .{ .search_list = msg };
             return null;
@@ -257,28 +298,26 @@ pub const App = struct {
         }
 
         if (self.screen == .hot_games) {
-            switch (event) {
-                .key_press => |key| {
-                    if (self.hot_games.filter_active) {
+            if (self.hot_games.filter_active) {
+                switch (event) {
+                    .key_press => |key| {
                         if (key.matches(chasen.Key.escape, .{})) return .hot_filter_clear;
                         if (key.matches(chasen.Key.enter, .{})) {
                             if (self.hot_games.handleEvent(event)) |msg| return .{ .hot_list = msg };
                             return null;
                         }
-                    } else if (key.codepoint == '/') {
-                        return .hot_filter_start;
-                    }
-                },
-                .paste => |text| if (self.hot_games.filter_active) return .{ .hot_filter_paste = text },
-                else => {},
-            }
-            if (self.hot_games.filter_active) {
+                    },
+                    .paste => |text| return .{ .hot_filter_paste = text },
+                    else => {},
+                }
                 if (self.hot_filter_input) |*input| {
                     if (input.handleEvent(event)) |msg| return .{ .hot_filter_input = msg };
                 }
+                if (self.hot_games.handleEvent(event)) |msg| return .{ .hot_list = msg };
+                return null;
+            } else if (event == .key_press and event.key_press.codepoint == '/') {
+                return .hot_filter_start;
             }
-            if (self.hot_games.handleEvent(event)) |msg| return .{ .hot_list = msg };
-            return null;
         }
 
         switch (event) {
@@ -297,6 +336,9 @@ pub const App = struct {
         if (self.screen == .main_menu) {
             // Menu owns only cursor movement and activation; App maps activation to screens.
             if (self.menu.handleEvent(event)) |msg| return .{ .menu = msg };
+        }
+        if (self.screen == .hot_games) {
+            if (self.hot_games.handleEvent(event)) |msg| return .{ .hot_list = msg };
         }
         return null;
     }
@@ -440,17 +482,23 @@ pub const App = struct {
             .loaded => {
                 if (self.search.list.items.len == 0) {
                     _ = area.textAt(0, 2, "No games matched the current query.", .{ .fg = .gray });
+                } else if (self.search.filter_active and self.search.filter.labels.len == 0) {
+                    try self.drawSearchFilterInput(&area);
+                    _ = area.textAt(0, 6, "No search results match the filter.", .{ .fg = .gray });
                 } else {
+                    const body_row = if (self.search.filter_active) list_filtered_body_row else list_body_row;
+                    if (self.search.filter_active) try self.drawSearchFilterInput(&area);
+                    const list = self.search.activeList();
                     var list_area = area.child(.{
                         .col = 0,
-                        .row = list_body_row,
+                        .row = body_row,
                         .width = area.size().width,
-                        .height = area.size().height -| (list_body_row + 1),
+                        .height = area.size().height -| (body_row + 1),
                     });
-                    list_view.viewListWithDensity(&self.search.list, &list_area, .{
+                    list_view.viewListWithDensity(list, &list_area, .{
                         .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
                     }, self.listDensity());
-                    try self.drawListPosition(&area, &self.search.list);
+                    try self.drawListPosition(&area, list);
                 }
             },
         }
@@ -534,6 +582,10 @@ pub const App = struct {
             input.deinit();
             self.search_input = null;
         }
+        if (self.search_filter_input) |*input| {
+            input.deinit();
+            self.search_filter_input = null;
+        }
         if (self.owned_token) |token| {
             self.allocator.?.free(token);
             self.owned_token = null;
@@ -556,6 +608,21 @@ pub const App = struct {
     fn clearHotFilter(self: *App) !void {
         if (self.hot_filter_input) |*input| try input.update(.clear);
         self.hot_games.clearFilter(self.allocator.?);
+    }
+
+    fn startSearchFilter(self: *App) !void {
+        if (self.search_filter_input) |*input| try input.update(.clear);
+        try self.search.applyFilter(self.allocator.?, "");
+    }
+
+    fn applySearchFilter(self: *App) !void {
+        const input = if (self.search_filter_input) |*input| input else return;
+        try self.search.applyFilter(self.allocator.?, input.text());
+    }
+
+    fn clearSearchFilter(self: *App) !void {
+        if (self.search_filter_input) |*input| try input.update(.clear);
+        self.search.clearFilter(self.allocator.?);
     }
 
     fn showScreen(self: *App, screen: Screen, ctx: *chasen.Ctx(Msg)) !void {
@@ -733,6 +800,19 @@ pub const App = struct {
         }
     }
 
+    fn drawSearchFilterInput(self: *const App, surface: *chasen.Surface) !void {
+        _ = surface.textAt(0, list_filter_row, "Filter:", .{ .dim = true });
+        if (self.search_filter_input) |*input| {
+            var input_area = surface.child(.{
+                .col = 8,
+                .row = list_filter_row,
+                .width = surface.size().width -| 8,
+                .height = 1,
+            });
+            input.view(&input_area, .{});
+        }
+    }
+
     fn listDensity(self: *const App) list_view.Density {
         return list_view.Density.fromConfig(self.config.interface.list_density);
     }
@@ -746,7 +826,10 @@ pub const App = struct {
             else
                 "Up/Down: move  Enter: detail  /: filter  m: menu  Esc/q: quit",
             .search => "Enter: search  Esc: menu",
-            .search_results => "Up/Down: move  Enter: detail  b/Esc: search  m: menu  q: quit",
+            .search_results => if (self.search.filter_active)
+                "Type: filter  Up/Down: move  Enter: detail  Esc: clear  b: search"
+            else
+                "Up/Down: move  Enter: detail  /: filter  b/Esc: search  m: menu  q: quit",
             .game_detail => "b/Esc: back  m: menu  q: quit",
             .collection, .settings => "m: menu  Esc/q: quit",
         };
@@ -840,6 +923,8 @@ const SearchState = struct {
     results: []bgg_model.GameSearchResult = &.{},
     labels: []const []const u8 = &.{},
     list: ui.List = ui.List.init(.{}),
+    filter: list_filter.FilterState = .{},
+    filter_active: bool = false,
 
     const LoadState = union(enum) {
         idle,
@@ -867,12 +952,37 @@ const SearchState = struct {
     }
 
     fn update(self: *SearchState, msg: ui.List.Msg) void {
-        self.list.update(msg);
+        if (self.filter_active) {
+            self.filter.update(msg);
+        } else {
+            self.list.update(msg);
+        }
     }
 
     fn handleEvent(self: *const SearchState, event: chasen.Event) ?ui.List.Msg {
         if (self.load_state != .loaded) return null;
+        if (self.filter_active) return self.filter.handleEvent(event);
         return self.list.handleEvent(event);
+    }
+
+    fn activeList(self: *const SearchState) *const ui.List {
+        return if (self.filter_active) &self.filter.list else &self.list;
+    }
+
+    fn sourceIndex(self: *const SearchState, visible_index: usize) ?usize {
+        if (self.filter_active) return self.filter.sourceIndex(visible_index);
+        if (visible_index >= self.results.len) return null;
+        return visible_index;
+    }
+
+    fn applyFilter(self: *SearchState, allocator: std.mem.Allocator, query: []const u8) !void {
+        try self.filter.apply(allocator, self.labels, query);
+        self.filter_active = true;
+    }
+
+    fn clearFilter(self: *SearchState, allocator: std.mem.Allocator) void {
+        self.filter.deinit(allocator);
+        self.filter_active = false;
     }
 
     fn deinit(self: *SearchState, allocator: std.mem.Allocator) void {
@@ -881,11 +991,13 @@ const SearchState = struct {
     }
 
     fn clearResults(self: *SearchState, allocator: std.mem.Allocator) void {
+        self.filter.deinit(allocator);
         freeSearchResultLabels(allocator, self.labels);
         bgg_xml.freeSearchResults(allocator, self.results);
         self.labels = &.{};
         self.results = &.{};
         self.list = ui.List.init(.{});
+        self.filter_active = false;
     }
 };
 
@@ -1293,7 +1405,10 @@ test "footer hint matches screen key handling" {
     try std.testing.expectEqualStrings("Enter: search  Esc: menu", app.footerHint());
 
     app.screen = .search_results;
-    try std.testing.expectEqualStrings("Up/Down: move  Enter: detail  b/Esc: search  m: menu  q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down: move  Enter: detail  /: filter  b/Esc: search  m: menu  q: quit", app.footerHint());
+    app.search.filter_active = true;
+    try std.testing.expectEqualStrings("Type: filter  Up/Down: move  Enter: detail  Esc: clear  b: search", app.footerHint());
+    app.search.filter_active = false;
 
     app.screen = .game_detail;
     try std.testing.expectEqualStrings("b/Esc: back  m: menu  q: quit", app.footerHint());
@@ -1554,6 +1669,24 @@ test "hot games slash starts filter before global search shortcut" {
     try std.testing.expect(msg == .hot_filter_start);
 }
 
+test "hot games global shortcuts work after clearing filter" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.allocator = std.testing.allocator;
+    app.screen = .hot_games;
+    app.hot_filter_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "ca" });
+    defer app.deinitOwnedState();
+
+    try app.hot_games.applyFilter(std.testing.allocator, "");
+    const clear_msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.escape } }).?;
+    try std.testing.expect(clear_msg == .hot_filter_clear);
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.update(clear_msg, &tc.ctx);
+
+    const menu_msg = app.handleEvent(.{ .key_press = .{ .codepoint = 'm' } }).?;
+    try std.testing.expectEqual(App.Msg{ .show_screen = .main_menu }, menu_msg);
+}
+
 test "search result labels include optional year" {
     const with_year = try formatSearchResultLabel(std.testing.allocator, .{
         .id = 13,
@@ -1585,6 +1718,33 @@ test "search state owns labels for loaded results" {
     try std.testing.expectEqual(@as(usize, 2), state.list.items.len);
     try std.testing.expectEqualStrings("First", state.list.items[0]);
     try std.testing.expectEqualStrings("Second (2024)", state.list.items[1]);
+}
+
+test "search results filter maps visible focus back to source index" {
+    const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 3);
+    results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+    results[1] = .{ .id = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia") };
+    results[2] = .{ .id = 3, .name = try std.testing.allocator.dupe(u8, "CATAN") };
+
+    var state: SearchState = .{};
+    try state.setLoaded(std.testing.allocator, results);
+    defer state.deinit(std.testing.allocator);
+
+    try state.applyFilter(std.testing.allocator, "ca");
+    state.update(.move_next);
+
+    try std.testing.expect(state.filter_active);
+    try std.testing.expectEqual(@as(usize, 2), state.filter.labels.len);
+    try std.testing.expectEqual(@as(usize, 2), state.sourceIndex(state.activeList().focusedIndex()).?);
+}
+
+test "search results slash starts filter" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.screen = .search_results;
+
+    const msg = app.handleEvent(.{ .key_press = .{ .codepoint = '/' } }).?;
+
+    try std.testing.expect(msg == .search_filter_start);
 }
 
 test "successful search completion loads result list" {
