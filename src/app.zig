@@ -54,6 +54,7 @@ pub const App = struct {
     search_input: ?ui.TextInput = null,
     search_filter_input: ?ui.TextInput = null,
     collection_username_input: ?ui.TextInput = null,
+    collection_filter_input: ?ui.TextInput = null,
     owned_token: ?[]u8 = null,
     hot_games: HotGamesState = .{},
     search: SearchState = .{},
@@ -84,6 +85,10 @@ pub const App = struct {
         search_list: ui.List.Msg,
         collection_username_input: ui.TextInput.Msg,
         collection_username_paste: []const u8,
+        collection_filter_start,
+        collection_filter_input: ui.TextInput.Msg,
+        collection_filter_paste: []const u8,
+        collection_filter_clear,
         collection_items_loaded: CollectionTaskResult,
         collection_list: ui.List.Msg,
         game_detail_loaded: GameDetailTaskResult,
@@ -124,6 +129,9 @@ pub const App = struct {
         self.collection_username_input = try ui.TextInput.init(ctx.allocator(), .{
             .value = self.config.collection.default_username orelse "",
             .placeholder = "BGG username",
+        });
+        self.collection_filter_input = try ui.TextInput.init(ctx.allocator(), .{
+            .placeholder = "Filter collection",
         });
     }
 
@@ -201,6 +209,20 @@ pub const App = struct {
                     try insertPastedCodepoints(input, text);
                 }
             },
+            .collection_filter_start => try self.startCollectionFilter(),
+            .collection_filter_input => |input_msg| {
+                if (input_msg != .submit) {
+                    if (self.collection_filter_input) |*input| try input.update(input_msg);
+                    try self.applyCollectionFilter();
+                }
+            },
+            .collection_filter_paste => |text| {
+                if (self.collection_filter_input) |*input| {
+                    try insertPastedCodepoints(input, text);
+                    try self.applyCollectionFilter();
+                }
+            },
+            .collection_filter_clear => try self.clearCollectionFilter(),
             .collection_items_loaded => |result| try self.finishCollectionLoad(result),
             .collection_list => |list_msg| switch (list_msg) {
                 .move_prev, .move_next => self.collection.update(list_msg),
@@ -334,9 +356,28 @@ pub const App = struct {
         }
 
         if (self.screen == .collection) {
+            if (self.collection.filter_active) {
+                switch (event) {
+                    .key_press => |key| {
+                        if (key.matches(chasen.Key.escape, .{})) return .collection_filter_clear;
+                        if (key.matches(chasen.Key.enter, .{})) {
+                            if (self.collection.handleEvent(event)) |msg| return .{ .collection_list = msg };
+                            return null;
+                        }
+                    },
+                    .paste => |text| return .{ .collection_filter_paste = text },
+                    else => {},
+                }
+                if (self.collection_filter_input) |*input| {
+                    if (input.handleEvent(event)) |msg| return .{ .collection_filter_input = msg };
+                }
+                if (self.collection.handleEvent(event)) |msg| return .{ .collection_list = msg };
+                return null;
+            }
             switch (event) {
                 .key_press => |key| {
                     if (self.collection.load_state == .loaded) {
+                        if (key.codepoint == '/') return .collection_filter_start;
                         if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'm') return .{ .show_screen = .main_menu };
                         if (key.codepoint == 'q') return .quit;
                     } else if (key.matches(chasen.Key.escape, .{})) {
@@ -589,13 +630,18 @@ pub const App = struct {
             .loaded => {
                 if (self.collection.list.items.len == 0) {
                     self.drawEmptyState(&area, 2, "No collection items", "BGG did not return any games for this collection.");
+                } else if (self.collection.filter_active and self.collection.filter.labels.len == 0) {
+                    try self.drawCollectionFilterInput(&area);
+                    self.drawEmptyState(&area, 6, "No matches", "No collection items match the filter.");
                 } else {
+                    const body_row = if (self.collection.filter_active) list_filtered_body_row else list_body_row;
+                    if (self.collection.filter_active) try self.drawCollectionFilterInput(&area);
                     const list = self.collection.activeList();
                     var list_area = area.child(.{
                         .col = 0,
-                        .row = list_body_row,
+                        .row = body_row,
                         .width = area.size().width,
-                        .height = area.size().height -| (list_body_row + 1),
+                        .height = area.size().height -| (body_row + 1),
                     });
                     list_view.viewListWithDensity(list, &list_area, .{
                         .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
@@ -692,6 +738,10 @@ pub const App = struct {
             input.deinit();
             self.collection_username_input = null;
         }
+        if (self.collection_filter_input) |*input| {
+            input.deinit();
+            self.collection_filter_input = null;
+        }
         if (self.owned_token) |token| {
             self.allocator.?.free(token);
             self.owned_token = null;
@@ -738,6 +788,21 @@ pub const App = struct {
 
     fn toggleSearchSort(self: *App) !void {
         try self.search.toggleSort(self.allocator.?);
+    }
+
+    fn startCollectionFilter(self: *App) !void {
+        if (self.collection_filter_input) |*input| try input.update(.clear);
+        try self.collection.applyFilter(self.allocator.?, "");
+    }
+
+    fn applyCollectionFilter(self: *App) !void {
+        const input = if (self.collection_filter_input) |*input| input else return;
+        try self.collection.applyFilter(self.allocator.?, input.text());
+    }
+
+    fn clearCollectionFilter(self: *App) !void {
+        if (self.collection_filter_input) |*input| try input.update(.clear);
+        self.collection.clearFilter(self.allocator.?);
     }
 
     fn showScreen(self: *App, screen: Screen, ctx: *chasen.Ctx(Msg)) !void {
@@ -1017,6 +1082,19 @@ pub const App = struct {
         }
     }
 
+    fn drawCollectionFilterInput(self: *const App, surface: *chasen.Surface) !void {
+        _ = surface.textAt(0, list_filter_row, "Filter:", .{ .dim = true });
+        if (self.collection_filter_input) |*input| {
+            var input_area = surface.child(.{
+                .col = 8,
+                .row = list_filter_row,
+                .width = surface.size().width -| 8,
+                .height = 1,
+            });
+            input.view(&input_area, .{});
+        }
+    }
+
     fn listDensity(self: *const App) list_view.Density {
         return list_view.Density.fromConfig(self.config.interface.list_density);
     }
@@ -1038,7 +1116,10 @@ pub const App = struct {
             .collection => switch (self.collection.load_state) {
                 .idle, .failed => "Enter: load  Esc: menu",
                 .loading => "Esc: menu",
-                .loaded => "Up/Down: move  Enter: detail  Esc/m: menu  q: quit",
+                .loaded => if (self.collection.filter_active)
+                    "Type: filter  Up/Down: move  Enter: detail  Esc: clear"
+                else
+                    "Up/Down: move  Enter: detail  /: filter  Esc/m: menu  q: quit",
             },
             .settings => "m: menu  Esc/q: quit",
         };
@@ -1353,6 +1434,8 @@ const CollectionState = struct {
     items: []bgg_model.CollectionItem = &.{},
     labels: []const []const u8 = &.{},
     list: ui.List = ui.List.init(.{}),
+    filter: list_filter.FilterState = .{},
+    filter_active: bool = false,
 
     const LoadState = union(enum) {
         idle,
@@ -1380,21 +1463,39 @@ const CollectionState = struct {
     }
 
     fn update(self: *CollectionState, msg: ui.List.Msg) void {
-        self.list.update(msg);
+        if (self.filter_active) {
+            self.filter.update(msg);
+        } else {
+            self.list.update(msg);
+        }
     }
 
     fn handleEvent(self: *const CollectionState, event: chasen.Event) ?ui.List.Msg {
-        if (self.load_state != .loaded or self.list.items.len == 0) return null;
+        if (self.load_state != .loaded) return null;
+        if (self.filter_active) return self.filter.handleEvent(event);
+        if (self.list.items.len == 0) return null;
         return self.list.handleEvent(event);
     }
 
     fn activeList(self: *const CollectionState) *const ui.List {
+        if (self.filter_active) return &self.filter.list;
         return &self.list;
     }
 
     fn sourceIndex(self: *const CollectionState, visible_index: usize) ?usize {
+        if (self.filter_active) return self.filter.sourceIndex(visible_index);
         if (visible_index >= self.items.len) return null;
         return visible_index;
+    }
+
+    fn applyFilter(self: *CollectionState, allocator: std.mem.Allocator, query: []const u8) !void {
+        try self.filter.apply(allocator, self.labels, query);
+        self.filter_active = true;
+    }
+
+    fn clearFilter(self: *CollectionState, allocator: std.mem.Allocator) void {
+        self.filter.deinit(allocator);
+        self.filter_active = false;
     }
 
     fn deinit(self: *CollectionState, allocator: std.mem.Allocator) void {
@@ -1403,11 +1504,13 @@ const CollectionState = struct {
     }
 
     fn clearItems(self: *CollectionState, allocator: std.mem.Allocator) void {
+        self.filter.deinit(allocator);
         freeCollectionItemLabels(allocator, self.labels);
         bgg_xml.freeCollectionItems(allocator, self.items);
         self.labels = &.{};
         self.items = &.{};
         self.list = ui.List.init(.{});
+        self.filter_active = false;
     }
 };
 
@@ -2000,7 +2103,10 @@ test "footer hint matches screen key handling" {
     app.collection.load_state = .loading;
     try std.testing.expectEqualStrings("Esc: menu", app.footerHint());
     app.collection.load_state = .loaded;
-    try std.testing.expectEqualStrings("Up/Down: move  Enter: detail  Esc/m: menu  q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down: move  Enter: detail  /: filter  Esc/m: menu  q: quit", app.footerHint());
+    app.collection.filter_active = true;
+    try std.testing.expectEqualStrings("Type: filter  Up/Down: move  Enter: detail  Esc: clear", app.footerHint());
+    app.collection.filter_active = false;
 }
 
 test "setup token submit hint reflects save availability" {
@@ -2192,6 +2298,37 @@ test "loaded collection receives activation on collection screen" {
     const msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
     try std.testing.expect(msg == .collection_list);
     try std.testing.expectEqual(ui.List.Msg{ .activate = 0 }, msg.collection_list);
+}
+
+test "loaded collection slash starts filter" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.allocator = std.testing.allocator;
+    app.screen = .collection;
+    defer app.deinitOwnedState();
+
+    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 1);
+    items[0] = .{ .id = 13, .name = try std.testing.allocator.dupe(u8, "CATAN") };
+    try app.collection.setLoaded(std.testing.allocator, items);
+
+    const msg = app.handleEvent(.{ .key_press = .{ .codepoint = '/' } }).?;
+    try std.testing.expect(msg == .collection_filter_start);
+}
+
+test "collection filter maps visible activation back to source item" {
+    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 3);
+    items[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+    items[1] = .{ .id = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia") };
+    items[2] = .{ .id = 3, .name = try std.testing.allocator.dupe(u8, "CATAN") };
+
+    var state: CollectionState = .{};
+    try state.setLoaded(std.testing.allocator, items);
+    defer state.deinit(std.testing.allocator);
+
+    try state.applyFilter(std.testing.allocator, "ca");
+    state.update(.move_next);
+
+    try std.testing.expectEqual(@as(usize, 1), state.activeList().focusedIndex());
+    try std.testing.expectEqual(@as(usize, 2), state.sourceIndex(state.activeList().focusedIndex()).?);
 }
 
 test "search results escape returns to search input screen" {
