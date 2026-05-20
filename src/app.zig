@@ -9,6 +9,7 @@ const bgg_model = @import("bgg/model.zig");
 const bgg_xml = @import("bgg/xml.zig");
 const config_mod = @import("config.zig");
 const format = @import("format.zig");
+const labels_mod = @import("labels.zig");
 const list_filter = @import("list_filter.zig");
 const list_view = @import("list_view.zig");
 
@@ -1293,7 +1294,7 @@ const HotGamesState = struct {
     fn setLoaded(self: *HotGamesState, allocator: std.mem.Allocator, games: []bgg_model.HotGame) !void {
         self.deinit(allocator);
         self.games = games;
-        self.labels = try buildHotGameLabels(allocator, games);
+        self.labels = try labels_mod.buildHotGameLabels(allocator, games);
         self.list = ui.List.init(.{ .items = self.labels });
         self.load_state = .loaded;
     }
@@ -1393,7 +1394,7 @@ const HotGamesState = struct {
     fn deinit(self: *HotGamesState, allocator: std.mem.Allocator) void {
         self.filter.deinit(allocator);
         self.freeSortedList(allocator);
-        freeHotGameLabels(allocator, self.labels);
+        labels_mod.freeHotGameLabels(allocator, self.labels);
         bgg_xml.freeHotGames(allocator, self.games);
         self.labels = &.{};
         self.games = &.{};
@@ -1441,7 +1442,7 @@ const SearchState = struct {
     fn setLoaded(self: *SearchState, allocator: std.mem.Allocator, results: []bgg_model.GameSearchResult) !void {
         self.clearResults(allocator);
         self.results = results;
-        self.labels = try buildSearchResultLabels(allocator, results);
+        self.labels = try labels_mod.buildSearchResultLabels(allocator, results);
         self.list = ui.List.init(.{ .items = self.labels });
         self.load_state = .loaded;
     }
@@ -1546,7 +1547,7 @@ const SearchState = struct {
     fn clearResults(self: *SearchState, allocator: std.mem.Allocator) void {
         self.filter.deinit(allocator);
         self.freeSortedList(allocator);
-        freeSearchResultLabels(allocator, self.labels);
+        labels_mod.freeSearchResultLabels(allocator, self.labels);
         bgg_xml.freeSearchResults(allocator, self.results);
         self.labels = &.{};
         self.results = &.{};
@@ -1646,11 +1647,11 @@ const CollectionState = struct {
 
         const next_items = try projected.toOwnedSlice(allocator);
         errdefer allocator.free(next_items);
-        const next_labels = try buildCollectionItemLabels(allocator, next_items);
-        errdefer freeCollectionItemLabels(allocator, next_labels);
+        const next_labels = try labels_mod.buildCollectionItemLabels(allocator, next_items);
+        errdefer labels_mod.freeCollectionItemLabels(allocator, next_labels);
 
         self.filter.deinit(allocator);
-        freeCollectionItemLabels(allocator, self.labels);
+        labels_mod.freeCollectionItemLabels(allocator, self.labels);
         allocator.free(self.items);
         self.items = next_items;
         self.labels = next_labels;
@@ -1670,7 +1671,7 @@ const CollectionState = struct {
 
     fn clearItems(self: *CollectionState, allocator: std.mem.Allocator) void {
         self.filter.deinit(allocator);
-        freeCollectionItemLabels(allocator, self.labels);
+        labels_mod.freeCollectionItemLabels(allocator, self.labels);
         allocator.free(self.items);
         bgg_xml.freeCollectionItems(allocator, self.all_items);
         self.labels = &.{};
@@ -1994,111 +1995,6 @@ fn apiErrorMessage(err: bgg_error.ApiError) []const u8 {
         .network => |network| network.message,
         .parse => |parse| parse.message,
     };
-}
-
-fn buildSearchResultLabels(allocator: std.mem.Allocator, results: []const bgg_model.GameSearchResult) ![]const []const u8 {
-    const labels = try allocator.alloc([]const u8, results.len);
-    var initialized_count: usize = 0;
-    errdefer {
-        for (labels[0..initialized_count]) |label| allocator.free(label);
-        allocator.free(labels);
-    }
-
-    for (results, 0..) |result, index| {
-        labels[index] = try formatSearchResultLabel(allocator, result);
-        initialized_count = index + 1;
-    }
-
-    return labels;
-}
-
-fn formatSearchResultLabel(allocator: std.mem.Allocator, result: bgg_model.GameSearchResult) ![]u8 {
-    if (result.year_published) |year| {
-        return try std.fmt.allocPrint(allocator, "{s} ({d})", .{ result.name, year });
-    }
-    return try allocator.dupe(u8, result.name);
-}
-
-fn freeSearchResultLabels(allocator: std.mem.Allocator, labels: []const []const u8) void {
-    for (labels) |label| allocator.free(label);
-    allocator.free(labels);
-}
-
-fn buildHotGameLabels(allocator: std.mem.Allocator, games: []const bgg_model.HotGame) ![]const []const u8 {
-    const labels = try allocator.alloc([]const u8, games.len);
-    var initialized_count: usize = 0;
-    errdefer {
-        for (labels[0..initialized_count]) |label| allocator.free(label);
-        allocator.free(labels);
-    }
-
-    for (games, 0..) |game, index| {
-        labels[index] = try formatHotGameLabel(allocator, game);
-        initialized_count = index + 1;
-    }
-
-    return labels;
-}
-
-fn formatHotGameLabel(allocator: std.mem.Allocator, game: bgg_model.HotGame) ![]u8 {
-    if (game.year_published) |year| {
-        return try std.fmt.allocPrint(allocator, "#{d: >2}  {s} ({d})", .{ game.rank, game.name, year });
-    }
-    return try std.fmt.allocPrint(allocator, "#{d: >2}  {s}", .{ game.rank, game.name });
-}
-
-fn freeHotGameLabels(allocator: std.mem.Allocator, labels: []const []const u8) void {
-    for (labels) |label| allocator.free(label);
-    allocator.free(labels);
-}
-
-fn buildCollectionItemLabels(allocator: std.mem.Allocator, items: []const bgg_model.CollectionItem) ![]const []const u8 {
-    const labels = try allocator.alloc([]const u8, items.len);
-    var initialized_count: usize = 0;
-    errdefer {
-        for (labels[0..initialized_count]) |label| allocator.free(label);
-        allocator.free(labels);
-    }
-
-    for (items, 0..) |item, index| {
-        labels[index] = try formatCollectionItemLabel(allocator, item);
-        initialized_count = index + 1;
-    }
-
-    return labels;
-}
-
-fn formatCollectionItemLabel(allocator: std.mem.Allocator, item: bgg_model.CollectionItem) ![]u8 {
-    var out: std.Io.Writer.Allocating = .init(allocator);
-    errdefer out.deinit();
-
-    try out.writer.writeAll(item.name);
-    if (item.year_published) |year| try out.writer.print(" ({d})", .{year});
-
-    // Keep the label single-line for the current list component while still
-    // surfacing the core collection metadata users need for scanning.
-    try out.writer.writeAll("  ");
-    try writeCollectionRating(&out.writer, "user", item.rating);
-    try out.writer.writeAll("  ");
-    try writeCollectionRating(&out.writer, "BGG", item.bgg_rating);
-    if (item.rank > 0) try out.writer.print("  rank #{d}", .{item.rank});
-    if (item.num_plays > 0) try out.writer.print("  plays {d}", .{item.num_plays});
-
-    return try out.toOwnedSlice();
-}
-
-fn freeCollectionItemLabels(allocator: std.mem.Allocator, labels: []const []const u8) void {
-    for (labels) |label| allocator.free(label);
-    allocator.free(labels);
-}
-
-fn writeCollectionRating(writer: *std.Io.Writer, label: []const u8, rating: f64) !void {
-    try writer.print("{s} ", .{label});
-    if (rating <= 0) {
-        try writer.writeByte('-');
-    } else {
-        try writer.print("{d:.1}", .{rating});
-    }
 }
 
 fn collectionStatusBit(index: usize) u8 {
@@ -2699,42 +2595,6 @@ test "submit token saves config when path is available" {
     try std.testing.expectEqualStrings("saved-token", loaded.config.apiClientToken().?);
 }
 
-test "hot game labels include rank and optional year" {
-    const with_year = try formatHotGameLabel(std.testing.allocator, .{
-        .id = 13,
-        .rank = 1,
-        .name = "CATAN",
-        .year_published = 1995,
-    });
-    defer std.testing.allocator.free(with_year);
-
-    const without_year = try formatHotGameLabel(std.testing.allocator, .{
-        .id = 42,
-        .rank = 12,
-        .name = "Unknown Year",
-    });
-    defer std.testing.allocator.free(without_year);
-
-    try std.testing.expectEqualStrings("# 1  CATAN (1995)", with_year);
-    try std.testing.expectEqualStrings("#12  Unknown Year", without_year);
-}
-
-test "collection item labels omit status marker for Go compatibility" {
-    const label = try formatCollectionItemLabel(std.testing.allocator, .{
-        .id = 13,
-        .name = "CATAN",
-        .year_published = 1995,
-        .num_plays = 3,
-        .rating = 7.0,
-        .bgg_rating = 6.5,
-        .rank = 1,
-        .owned = true,
-    });
-    defer std.testing.allocator.free(label);
-
-    try std.testing.expectEqualStrings("CATAN (1995)  user 7.0  BGG 6.5  rank #1  plays 3", label);
-}
-
 test "hot games state owns labels for loaded games" {
     const games = try std.testing.allocator.alloc(bgg_model.HotGame, 2);
     games[0] = .{ .id = 1, .rank = 1, .name = try std.testing.allocator.dupe(u8, "First") };
@@ -2864,24 +2724,6 @@ test "hot games global shortcuts work after clearing filter" {
 
     const menu_msg = app.handleEvent(.{ .key_press = .{ .codepoint = 'm' } }).?;
     try std.testing.expectEqual(App.Msg{ .show_screen = .main_menu }, menu_msg);
-}
-
-test "search result labels include optional year" {
-    const with_year = try formatSearchResultLabel(std.testing.allocator, .{
-        .id = 13,
-        .name = "CATAN",
-        .year_published = 1995,
-    });
-    defer std.testing.allocator.free(with_year);
-
-    const without_year = try formatSearchResultLabel(std.testing.allocator, .{
-        .id = 42,
-        .name = "No Year",
-    });
-    defer std.testing.allocator.free(without_year);
-
-    try std.testing.expectEqualStrings("CATAN (1995)", with_year);
-    try std.testing.expectEqualStrings("No Year", without_year);
 }
 
 test "search state owns labels for loaded results" {
