@@ -53,10 +53,13 @@ pub const App = struct {
     hot_filter_input: ?ui.TextInput = null,
     search_input: ?ui.TextInput = null,
     search_filter_input: ?ui.TextInput = null,
+    collection_username_input: ?ui.TextInput = null,
     owned_token: ?[]u8 = null,
     hot_games: HotGamesState = .{},
     search: SearchState = .{},
     search_request_id: u64 = 0,
+    collection: CollectionState = .{},
+    collection_request_id: u64 = 0,
     game_detail: GameDetailState = .{},
     detail_request_id: u64 = 0,
     detail_back_screen: Screen = .main_menu,
@@ -79,6 +82,10 @@ pub const App = struct {
         search_sort_toggle,
         search_results_loaded: SearchTaskResult,
         search_list: ui.List.Msg,
+        collection_username_input: ui.TextInput.Msg,
+        collection_username_paste: []const u8,
+        collection_items_loaded: CollectionTaskResult,
+        collection_list: ui.List.Msg,
         game_detail_loaded: GameDetailTaskResult,
         menu: ui.Menu.Msg,
         hot_list: ui.List.Msg,
@@ -113,6 +120,10 @@ pub const App = struct {
         });
         self.search_filter_input = try ui.TextInput.init(ctx.allocator(), .{
             .placeholder = "Filter search results",
+        });
+        self.collection_username_input = try ui.TextInput.init(ctx.allocator(), .{
+            .value = self.config.collection.default_username orelse "",
+            .placeholder = "BGG username",
         });
     }
 
@@ -176,6 +187,25 @@ pub const App = struct {
                 .move_prev, .move_next => self.search.update(list_msg),
                 .activate => |index| {
                     if (self.search.sourceIndex(index)) |source_index| try self.openSearchResult(source_index, ctx);
+                },
+            },
+            .collection_username_input => |input_msg| {
+                if (input_msg == .submit) {
+                    try self.startCollectionLoad(ctx);
+                } else if (self.collection_username_input) |*input| {
+                    try input.update(input_msg);
+                }
+            },
+            .collection_username_paste => |text| {
+                if (self.collection_username_input) |*input| {
+                    try insertPastedCodepoints(input, text);
+                }
+            },
+            .collection_items_loaded => |result| try self.finishCollectionLoad(result),
+            .collection_list => |list_msg| switch (list_msg) {
+                .move_prev, .move_next => self.collection.update(list_msg),
+                .activate => |index| {
+                    if (self.collection.sourceIndex(index)) |source_index| try self.openCollectionItem(source_index, ctx);
                 },
             },
             .game_detail_loaded => |result| try self.finishGameDetail(result),
@@ -303,6 +333,27 @@ pub const App = struct {
             return null;
         }
 
+        if (self.screen == .collection) {
+            switch (event) {
+                .key_press => |key| {
+                    if (self.collection.load_state == .loaded) {
+                        if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'm') return .{ .show_screen = .main_menu };
+                        if (key.codepoint == 'q') return .quit;
+                    } else if (key.matches(chasen.Key.escape, .{})) {
+                        return .{ .show_screen = .main_menu };
+                    }
+                },
+                .paste => |text| if (self.collection.load_state != .loaded) return .{ .collection_username_paste = text },
+                else => {},
+            }
+            if (self.collection.load_state == .loaded) {
+                if (self.collection.handleEvent(event)) |msg| return .{ .collection_list = msg };
+            } else if (self.collection_username_input) |*input| {
+                if (input.handleEvent(event)) |msg| return .{ .collection_username_input = msg };
+            }
+            return null;
+        }
+
         if (self.screen == .hot_games) {
             if (self.hot_games.filter_active) {
                 switch (event) {
@@ -359,7 +410,7 @@ pub const App = struct {
             .search => try self.viewSearch(sfc),
             .search_results => try self.viewSearchResults(sfc),
             .game_detail => try self.viewGameDetail(sfc),
-            .collection => self.viewPlaceholder(sfc, "Collection", "Collection loading is planned after the MVP list flow."),
+            .collection => try self.viewCollection(sfc),
             .settings => self.viewPlaceholder(sfc, "Settings", "Minimum settings screen is pending."),
         }
     }
@@ -517,6 +568,46 @@ pub const App = struct {
         _ = area.textAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
     }
 
+    fn viewCollection(self: *const App, sfc: *chasen.Surface) !void {
+        var area = constrainedListSurface(sfc);
+        _ = area.textAt(0, 0, "Collection", .{ .bold = true, .fg = .{ .index = 14 } });
+
+        switch (self.collection.load_state) {
+            .idle => {
+                try self.drawCollectionUsernameInput(&area);
+                self.drawGuidance(&area, 4, "Ready to load collection", "Enter a BGG username and press Enter.");
+            },
+            .loading => {
+                area.hideCursor();
+                _ = area.textAt(0, 2, "Loading BoardGameGeek collection...", .{ .fg = .gray });
+            },
+            .failed => |message| {
+                try self.drawCollectionUsernameInput(&area);
+                _ = area.textAt(0, 4, "Could not load collection.", .{ .fg = .{ .index = 9 } });
+                _ = area.textAt(0, 6, message, .{ .fg = .gray });
+            },
+            .loaded => {
+                if (self.collection.list.items.len == 0) {
+                    self.drawEmptyState(&area, 2, "No collection items", "BGG did not return any games for this collection.");
+                } else {
+                    const list = self.collection.activeList();
+                    var list_area = area.child(.{
+                        .col = 0,
+                        .row = list_body_row,
+                        .width = area.size().width,
+                        .height = area.size().height -| (list_body_row + 1),
+                    });
+                    list_view.viewListWithDensity(list, &list_area, .{
+                        .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
+                    }, self.listDensity());
+                    try self.drawListPosition(&area, list);
+                }
+            },
+        }
+
+        _ = area.textAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
+    }
+
     fn viewGameDetail(self: *const App, sfc: *chasen.Surface) !void {
         sfc.hideCursor();
         var area = centeredSurface(sfc, detail_size);
@@ -597,12 +688,17 @@ pub const App = struct {
             input.deinit();
             self.search_filter_input = null;
         }
+        if (self.collection_username_input) |*input| {
+            input.deinit();
+            self.collection_username_input = null;
+        }
         if (self.owned_token) |token| {
             self.allocator.?.free(token);
             self.owned_token = null;
         }
         self.hot_games.deinit(self.allocator.?);
         self.search.deinit(self.allocator.?);
+        self.collection.deinit(self.allocator.?);
         self.game_detail.deinit(self.allocator.?);
     }
 
@@ -671,6 +767,11 @@ pub const App = struct {
     fn openSearchResult(self: *App, index: usize, ctx: *chasen.Ctx(Msg)) !void {
         if (index >= self.search.results.len) return;
         try self.startGameDetail(ctx, self.search.results[index].id, .search_results);
+    }
+
+    fn openCollectionItem(self: *App, index: usize, ctx: *chasen.Ctx(Msg)) !void {
+        if (index >= self.collection.items.len) return;
+        try self.startGameDetail(ctx, self.collection.items[index].id, .collection);
     }
 
     fn startHotGamesLoad(self: *App, ctx: *chasen.Ctx(Msg)) !void {
@@ -751,6 +852,60 @@ pub const App = struct {
                 try self.search.setLoaded(self.allocator.?, results);
             },
             .failed => |message| self.search.setFailed(self.allocator.?, message),
+        }
+    }
+
+    fn startCollectionLoad(self: *App, ctx: *chasen.Ctx(Msg)) !void {
+        const input = if (self.collection_username_input) |*input| input else return;
+        const username = std.mem.trim(u8, input.text(), " \t\r\n");
+        self.collection_request_id +%= 1;
+        const request_id = self.collection_request_id;
+
+        if (username.len == 0) {
+            self.collection.setFailed(self.allocator.?, "BGG username is required");
+            return;
+        }
+
+        const token = self.config.apiClientToken() orelse {
+            self.collection.setFailed(self.allocator.?, "BGG API token is required");
+            return;
+        };
+
+        const task = try ctx.allocator().create(CollectionTask);
+        errdefer ctx.allocator().destroy(task);
+
+        const task_token = try ctx.allocator().dupe(u8, token);
+        errdefer ctx.allocator().free(task_token);
+
+        const task_username = try ctx.allocator().dupe(u8, username);
+        errdefer ctx.allocator().free(task_username);
+
+        task.* = .{
+            .token = task_token,
+            .username = task_username,
+            .status_filter = self.config.collection.status_filter,
+            .request_id = request_id,
+        };
+
+        self.collection.setLoading(self.allocator.?);
+        ctx.spawnWith(task, CollectionTask.run) catch |err| {
+            self.collection.setFailed(self.allocator.?, "Could not start collection loading task");
+            return err;
+        };
+    }
+
+    fn finishCollectionLoad(self: *App, task_result: CollectionTaskResult) !void {
+        if (task_result.request_id != self.collection_request_id) {
+            switch (task_result.result) {
+                .ok => |items| bgg_xml.freeCollectionItems(self.allocator.?, items),
+                .failed => {},
+            }
+            return;
+        }
+
+        switch (task_result.result) {
+            .ok => |items| try self.collection.setLoaded(self.allocator.?, items),
+            .failed => |message| self.collection.setFailed(self.allocator.?, message),
         }
     }
 
@@ -849,6 +1004,19 @@ pub const App = struct {
         }
     }
 
+    fn drawCollectionUsernameInput(self: *const App, surface: *chasen.Surface) !void {
+        _ = surface.textAt(0, 2, "User:", .{ .dim = true });
+        if (self.collection_username_input) |*input| {
+            var input_area = surface.child(.{
+                .col = 6,
+                .row = 2,
+                .width = surface.size().width -| 6,
+                .height = 1,
+            });
+            input.view(&input_area, .{});
+        }
+    }
+
     fn listDensity(self: *const App) list_view.Density {
         return list_view.Density.fromConfig(self.config.interface.list_density);
     }
@@ -867,7 +1035,12 @@ pub const App = struct {
             else
                 "Up/Down: move  Enter: detail  /: filter  s: sort  b/Esc: search  m: menu  q: quit",
             .game_detail => "b/Esc: back  m: menu  q: quit",
-            .collection, .settings => "m: menu  Esc/q: quit",
+            .collection => switch (self.collection.load_state) {
+                .idle, .failed => "Enter: load  Esc: menu",
+                .loading => "Esc: menu",
+                .loaded => "Up/Down: move  Enter: detail  Esc/m: menu  q: quit",
+            },
+            .settings => "m: menu  Esc/q: quit",
         };
     }
 };
@@ -1175,6 +1348,79 @@ const SearchTaskResult = struct {
     result: SearchResult,
 };
 
+const CollectionState = struct {
+    load_state: LoadState = .idle,
+    items: []bgg_model.CollectionItem = &.{},
+    labels: []const []const u8 = &.{},
+    list: ui.List = ui.List.init(.{}),
+
+    const LoadState = union(enum) {
+        idle,
+        loading,
+        loaded,
+        failed: []const u8,
+    };
+
+    fn setLoading(self: *CollectionState, allocator: std.mem.Allocator) void {
+        self.clearItems(allocator);
+        self.load_state = .loading;
+    }
+
+    fn setFailed(self: *CollectionState, allocator: std.mem.Allocator, message: []const u8) void {
+        self.clearItems(allocator);
+        self.load_state = .{ .failed = message };
+    }
+
+    fn setLoaded(self: *CollectionState, allocator: std.mem.Allocator, items: []bgg_model.CollectionItem) !void {
+        self.clearItems(allocator);
+        self.items = items;
+        self.labels = try buildCollectionItemLabels(allocator, items);
+        self.list = ui.List.init(.{ .items = self.labels });
+        self.load_state = .loaded;
+    }
+
+    fn update(self: *CollectionState, msg: ui.List.Msg) void {
+        self.list.update(msg);
+    }
+
+    fn handleEvent(self: *const CollectionState, event: chasen.Event) ?ui.List.Msg {
+        if (self.load_state != .loaded or self.list.items.len == 0) return null;
+        return self.list.handleEvent(event);
+    }
+
+    fn activeList(self: *const CollectionState) *const ui.List {
+        return &self.list;
+    }
+
+    fn sourceIndex(self: *const CollectionState, visible_index: usize) ?usize {
+        if (visible_index >= self.items.len) return null;
+        return visible_index;
+    }
+
+    fn deinit(self: *CollectionState, allocator: std.mem.Allocator) void {
+        self.clearItems(allocator);
+        self.load_state = .idle;
+    }
+
+    fn clearItems(self: *CollectionState, allocator: std.mem.Allocator) void {
+        freeCollectionItemLabels(allocator, self.labels);
+        bgg_xml.freeCollectionItems(allocator, self.items);
+        self.labels = &.{};
+        self.items = &.{};
+        self.list = ui.List.init(.{});
+    }
+};
+
+const CollectionResult = union(enum) {
+    ok: []bgg_model.CollectionItem,
+    failed: []const u8,
+};
+
+const CollectionTaskResult = struct {
+    request_id: u64,
+    result: CollectionResult,
+};
+
 const GameDetailState = struct {
     load_state: LoadState = .idle,
     games: []bgg_model.Game = &.{},
@@ -1276,6 +1522,27 @@ const SearchTask = struct {
     }
 };
 
+const CollectionTask = struct {
+    token: []const u8,
+    username: []const u8,
+    status_filter: config_mod.CollectionStatus,
+    request_id: u64,
+
+    fn run(ctx_ptr: *anyopaque, allocator: std.mem.Allocator, io: std.Io) App.Msg {
+        const task: *CollectionTask = @ptrCast(@alignCast(ctx_ptr));
+        defer {
+            allocator.free(task.token);
+            allocator.free(task.username);
+            allocator.destroy(task);
+        }
+
+        return .{ .collection_items_loaded = .{
+            .request_id = task.request_id,
+            .result = loadCollectionItems(allocator, io, task.token, task.username, task.status_filter) catch |err| .{ .failed = @errorName(err) },
+        } };
+    }
+};
+
 const GameDetailTask = struct {
     token: []const u8,
     game_id: u32,
@@ -1332,6 +1599,33 @@ fn loadSearchResults(allocator: std.mem.Allocator, io: std.Io, token: []const u8
                 else => return .{ .failed = apiErrorMessage(bgg_error.classifyParseError(parse_error)) },
             };
             return .{ .ok = results };
+        },
+        .api_error => |err| return .{ .failed = apiErrorMessage(err) },
+    }
+}
+
+fn loadCollectionItems(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    token: []const u8,
+    username: []const u8,
+    status_filter: config_mod.CollectionStatus,
+) !CollectionResult {
+    var client = bgg_client.Client.init(allocator, io, .{ .token = token });
+    defer client.deinit();
+
+    const path = try bgg_endpoint.collection(allocator, username, collectionOptionsForStatus(status_filter));
+    defer allocator.free(path);
+
+    const result = try client.getPath(path, .collection);
+    switch (result) {
+        .ok => |response| {
+            defer response.deinit(allocator);
+            const items = bgg_xml.parseCollectionResponse(allocator, response.body) catch |parse_error| switch (parse_error) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => return .{ .failed = apiErrorMessage(bgg_error.classifyParseError(parse_error)) },
+            };
+            return .{ .ok = items };
         },
         .api_error => |err| return .{ .failed = apiErrorMessage(err) },
     }
@@ -1490,6 +1784,68 @@ fn freeHotGameLabels(allocator: std.mem.Allocator, labels: []const []const u8) v
     allocator.free(labels);
 }
 
+fn buildCollectionItemLabels(allocator: std.mem.Allocator, items: []const bgg_model.CollectionItem) ![]const []const u8 {
+    const labels = try allocator.alloc([]const u8, items.len);
+    var initialized_count: usize = 0;
+    errdefer {
+        for (labels[0..initialized_count]) |label| allocator.free(label);
+        allocator.free(labels);
+    }
+
+    for (items, 0..) |item, index| {
+        labels[index] = try formatCollectionItemLabel(allocator, item);
+        initialized_count = index + 1;
+    }
+
+    return labels;
+}
+
+fn formatCollectionItemLabel(allocator: std.mem.Allocator, item: bgg_model.CollectionItem) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+
+    try out.writer.writeAll(item.name);
+    if (item.year_published) |year| try out.writer.print(" ({d})", .{year});
+
+    // Keep the label single-line for the current list component while still
+    // surfacing the core collection metadata users need for scanning.
+    try out.writer.writeAll("  ");
+    try writeCollectionRating(&out.writer, "user", item.rating);
+    try out.writer.writeAll("  ");
+    try writeCollectionRating(&out.writer, "BGG", item.bgg_rating);
+    if (item.rank > 0) try out.writer.print("  rank #{d}", .{item.rank});
+    if (item.num_plays > 0) try out.writer.print("  plays {d}", .{item.num_plays});
+
+    return try out.toOwnedSlice();
+}
+
+fn freeCollectionItemLabels(allocator: std.mem.Allocator, labels: []const []const u8) void {
+    for (labels) |label| allocator.free(label);
+    allocator.free(labels);
+}
+
+fn writeCollectionRating(writer: *std.Io.Writer, label: []const u8, rating: f64) !void {
+    try writer.print("{s} ", .{label});
+    if (rating <= 0) {
+        try writer.writeByte('-');
+    } else {
+        try writer.print("{d:.1}", .{rating});
+    }
+}
+
+fn collectionOptionsForStatus(status: config_mod.CollectionStatus) bgg_endpoint.CollectionOptions {
+    return switch (status) {
+        .own => .{ .own = true },
+        .prev_owned => .{ .prev_owned = true },
+        .for_trade => .{ .for_trade = true },
+        .want => .{ .want = true },
+        .want_to_play => .{ .want_to_play = true },
+        .want_to_buy => .{ .want_to_buy = true },
+        .wishlist => .{ .wishlist = true },
+        .preordered => .{ .preordered = true },
+    };
+}
+
 fn hotGameNameLessThan(games: []const bgg_model.HotGame, lhs: usize, rhs: usize) bool {
     const order = compareAsciiIgnoreCase(games[lhs].name, games[rhs].name);
     if (order == .eq) return lhs < rhs;
@@ -1640,7 +1996,11 @@ test "footer hint matches screen key handling" {
     try std.testing.expectEqualStrings("b/Esc: back  m: menu  q: quit", app.footerHint());
 
     app.screen = .collection;
-    try std.testing.expectEqualStrings("m: menu  Esc/q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Enter: load  Esc: menu", app.footerHint());
+    app.collection.load_state = .loading;
+    try std.testing.expectEqualStrings("Esc: menu", app.footerHint());
+    app.collection.load_state = .loaded;
+    try std.testing.expectEqualStrings("Up/Down: move  Enter: detail  Esc/m: menu  q: quit", app.footerHint());
 }
 
 test "setup token submit hint reflects save availability" {
@@ -1683,6 +2043,20 @@ test "search paste inserts printable query text" {
     try std.testing.expectEqualStrings("CatanDuel", input.text());
 }
 
+test "collection username input starts from config default" {
+    var app = App.create(.{
+        .api = .{ .token = "token" },
+        .collection = .{ .default_username = "hiro" },
+    }, .{});
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+
+    try std.testing.expectEqualStrings("hiro", app.collection_username_input.?.text());
+}
+
 test "detail list line text joins metadata values" {
     const values = [_][]const u8{ "Klaus Teuber", "Tanja Donner" };
     const text = try listLineText(std.testing.allocator, "Designers", &values);
@@ -1709,6 +2083,30 @@ test "search query shorter than three characters fails before spawning task" {
 
     try std.testing.expect(app.search.load_state == .failed);
     try std.testing.expectEqual(@as(u8, 0), tc.ctx.pending_tasks_with_len);
+}
+
+test "collection empty username fails before spawning task" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.allocator = std.testing.allocator;
+    app.collection_username_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "  " });
+    defer app.deinitOwnedState();
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.startCollectionLoad(&tc.ctx);
+
+    try std.testing.expect(app.collection.load_state == .failed);
+    try std.testing.expectEqual(@as(u8, 0), tc.ctx.pending_tasks_with_len);
+}
+
+test "collection status config maps to endpoint options" {
+    try std.testing.expect(collectionOptionsForStatus(.own).own);
+    try std.testing.expect(collectionOptionsForStatus(.prev_owned).prev_owned);
+    try std.testing.expect(collectionOptionsForStatus(.for_trade).for_trade);
+    try std.testing.expect(collectionOptionsForStatus(.want).want);
+    try std.testing.expect(collectionOptionsForStatus(.want_to_play).want_to_play);
+    try std.testing.expect(collectionOptionsForStatus(.want_to_buy).want_to_buy);
+    try std.testing.expect(collectionOptionsForStatus(.wishlist).wishlist);
+    try std.testing.expect(collectionOptionsForStatus(.preordered).preordered);
 }
 
 test "search screen escape returns to main menu" {
@@ -1778,6 +2176,22 @@ test "loaded search results receive activation on search results screen" {
     const msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
     try std.testing.expect(msg == .search_list);
     try std.testing.expectEqual(ui.List.Msg{ .activate = 0 }, msg.search_list);
+}
+
+test "loaded collection receives activation on collection screen" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.allocator = std.testing.allocator;
+    app.screen = .collection;
+    defer app.deinitOwnedState();
+
+    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 1);
+    items[0] = .{ .id = 13, .name = try std.testing.allocator.dupe(u8, "CATAN"), .owned = true };
+
+    try app.collection.setLoaded(std.testing.allocator, items);
+
+    const msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
+    try std.testing.expect(msg == .collection_list);
+    try std.testing.expectEqual(ui.List.Msg{ .activate = 0 }, msg.collection_list);
 }
 
 test "search results escape returns to search input screen" {
@@ -1866,6 +2280,22 @@ test "hot game labels include rank and optional year" {
 
     try std.testing.expectEqualStrings("# 1  CATAN (1995)", with_year);
     try std.testing.expectEqualStrings("#12  Unknown Year", without_year);
+}
+
+test "collection item labels omit status marker for Go compatibility" {
+    const label = try formatCollectionItemLabel(std.testing.allocator, .{
+        .id = 13,
+        .name = "CATAN",
+        .year_published = 1995,
+        .num_plays = 3,
+        .rating = 7.0,
+        .bgg_rating = 6.5,
+        .rank = 1,
+        .owned = true,
+    });
+    defer std.testing.allocator.free(label);
+
+    try std.testing.expectEqualStrings("CATAN (1995)  user 7.0  BGG 6.5  rank #1  plays 3", label);
 }
 
 test "hot games state owns labels for loaded games" {
