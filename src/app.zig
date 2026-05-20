@@ -89,6 +89,8 @@ pub const App = struct {
         collection_filter_input: ui.TextInput.Msg,
         collection_filter_paste: []const u8,
         collection_filter_clear,
+        collection_change_user,
+        collection_refresh,
         collection_items_loaded: CollectionTaskResult,
         collection_list: ui.List.Msg,
         game_detail_loaded: GameDetailTaskResult,
@@ -223,6 +225,8 @@ pub const App = struct {
                 }
             },
             .collection_filter_clear => try self.clearCollectionFilter(),
+            .collection_change_user => try self.changeCollectionUser(),
+            .collection_refresh => try self.refreshCollection(ctx),
             .collection_items_loaded => |result| try self.finishCollectionLoad(result),
             .collection_list => |list_msg| switch (list_msg) {
                 .move_prev, .move_next => self.collection.update(list_msg),
@@ -378,6 +382,8 @@ pub const App = struct {
                 .key_press => |key| {
                     if (self.collection.load_state == .loaded) {
                         if (key.codepoint == '/') return .collection_filter_start;
+                        if (key.codepoint == 'u') return .collection_change_user;
+                        if (key.codepoint == 'r') return .collection_refresh;
                         if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'm') return .{ .show_screen = .main_menu };
                         if (key.codepoint == 'q') return .quit;
                     } else if (key.matches(chasen.Key.escape, .{})) {
@@ -805,6 +811,18 @@ pub const App = struct {
         self.collection.clearFilter(self.allocator.?);
     }
 
+    fn changeCollectionUser(self: *App) !void {
+        self.collection_request_id +%= 1;
+        if (self.collection_filter_input) |*input| try input.update(.clear);
+        self.collection.deinit(self.allocator.?);
+    }
+
+    fn refreshCollection(self: *App, ctx: *chasen.Ctx(Msg)) !void {
+        if (self.collection_filter_input) |*input| try input.update(.clear);
+        self.collection.clearFilter(self.allocator.?);
+        try self.startCollectionLoad(ctx);
+    }
+
     fn showScreen(self: *App, screen: Screen, ctx: *chasen.Ctx(Msg)) !void {
         const previous_screen = self.screen;
         self.screen = screen;
@@ -1119,7 +1137,7 @@ pub const App = struct {
                 .loaded => if (self.collection.filter_active)
                     "Type: filter  Up/Down: move  Enter: detail  Esc: clear"
                 else
-                    "Up/Down: move  Enter: detail  /: filter  Esc/m: menu  q: quit",
+                    "Up/Down: move  Enter: detail  /: filter  r: refresh  u: user  Esc/m: menu  q: quit",
             },
             .settings => "m: menu  Esc/q: quit",
         };
@@ -2103,7 +2121,7 @@ test "footer hint matches screen key handling" {
     app.collection.load_state = .loading;
     try std.testing.expectEqualStrings("Esc: menu", app.footerHint());
     app.collection.load_state = .loaded;
-    try std.testing.expectEqualStrings("Up/Down: move  Enter: detail  /: filter  Esc/m: menu  q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down: move  Enter: detail  /: filter  r: refresh  u: user  Esc/m: menu  q: quit", app.footerHint());
     app.collection.filter_active = true;
     try std.testing.expectEqualStrings("Type: filter  Up/Down: move  Enter: detail  Esc: clear", app.footerHint());
     app.collection.filter_active = false;
@@ -2312,6 +2330,44 @@ test "loaded collection slash starts filter" {
 
     const msg = app.handleEvent(.{ .key_press = .{ .codepoint = '/' } }).?;
     try std.testing.expect(msg == .collection_filter_start);
+}
+
+test "loaded collection handles change user and refresh shortcuts" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.allocator = std.testing.allocator;
+    app.screen = .collection;
+    defer app.deinitOwnedState();
+
+    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 1);
+    items[0] = .{ .id = 13, .name = try std.testing.allocator.dupe(u8, "CATAN") };
+    try app.collection.setLoaded(std.testing.allocator, items);
+
+    const user_msg = app.handleEvent(.{ .key_press = .{ .codepoint = 'u' } }).?;
+    try std.testing.expect(user_msg == .collection_change_user);
+
+    const refresh_msg = app.handleEvent(.{ .key_press = .{ .codepoint = 'r' } }).?;
+    try std.testing.expect(refresh_msg == .collection_refresh);
+}
+
+test "changing collection user clears loaded state and invalidates tasks" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.allocator = std.testing.allocator;
+    app.collection_filter_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "ca" });
+    defer app.deinitOwnedState();
+
+    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 1);
+    items[0] = .{ .id = 13, .name = try std.testing.allocator.dupe(u8, "CATAN") };
+    try app.collection.setLoaded(std.testing.allocator, items);
+    try app.collection.applyFilter(std.testing.allocator, "cat");
+    app.collection_request_id = 7;
+
+    try app.changeCollectionUser();
+
+    try std.testing.expect(app.collection.load_state == .idle);
+    try std.testing.expectEqual(@as(usize, 0), app.collection.items.len);
+    try std.testing.expect(!app.collection.filter_active);
+    try std.testing.expectEqualStrings("", app.collection_filter_input.?.text());
+    try std.testing.expectEqual(@as(u64, 8), app.collection_request_id);
 }
 
 test "collection filter maps visible activation back to source item" {
