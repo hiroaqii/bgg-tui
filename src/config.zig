@@ -117,7 +117,12 @@ pub const Display = struct {
 
 pub const Collection = struct {
     default_username: ?[]const u8 = null,
-    status_filter: CollectionStatus = .own,
+    status_filter: CollectionStatusFilter = .{},
+};
+
+pub const CollectionStatusFilter = struct {
+    // Empty matches the Go version: no active status means show the full collection.
+    mask: u8 = 0,
 };
 
 pub const CollectionStatus = enum {
@@ -129,6 +134,17 @@ pub const CollectionStatus = enum {
     want_to_buy,
     wishlist,
     preordered,
+};
+
+const collection_status_order = [_]CollectionStatus{
+    .own,
+    .prev_owned,
+    .for_trade,
+    .want,
+    .want_to_play,
+    .want_to_buy,
+    .wishlist,
+    .preordered,
 };
 
 pub const Interface = struct {
@@ -182,7 +198,7 @@ pub fn formatToml(allocator: std.mem.Allocator, config: Config) SaveError![]u8 {
     try out.writer.writeByte(' ');
     try writeTomlString(&out.writer, config.collection.default_username orelse "");
     try out.writer.writeAll("\nstatus_filter = ");
-    try writeTomlString(&out.writer, @tagName(config.collection.status_filter));
+    try writeStatusFilter(&out.writer, config.collection.status_filter);
     try out.writer.writeAll(
         \\
         \\
@@ -490,11 +506,11 @@ fn parseCollectionValue(collection: *Collection, key: []const u8, value: []const
     if (std.mem.eql(u8, key, "default_username")) {
         collection.default_username = nonEmptyTrimmed(try parseString(value));
     } else if (std.mem.eql(u8, key, "status_filter")) {
-        collection.status_filter = try parseEnum(CollectionStatus, value);
+        collection.status_filter = try parseStatusFilter(value);
     } else if (std.mem.eql(u8, key, "show_only_owned")) {
         // Deprecated Go config compatibility. The Zig schema stores the same
         // intent as a named status filter.
-        if (try parseBool(value)) collection.status_filter = .own;
+        if (try parseBool(value)) collection.status_filter = .{ .mask = collectionStatusBit(.own) };
     } else {
         return error.UnknownKey;
     }
@@ -538,6 +554,64 @@ fn parseU16(value: []const u8) ParseError!u16 {
 fn parseEnum(comptime T: type, value: []const u8) ParseError!T {
     const name = try parseString(value);
     return std.meta.stringToEnum(T, name) orelse error.InvalidEnum;
+}
+
+fn parseStatusFilter(value: []const u8) ParseError!CollectionStatusFilter {
+    if (value.len == 0) return error.InvalidEnum;
+    if (value[0] == '"') {
+        const status = collectionStatusFromKey(try parseString(value)) orelse return error.InvalidEnum;
+        return .{ .mask = collectionStatusBit(status) };
+    }
+    if (value[0] != '[' or value[value.len - 1] != ']') return error.InvalidString;
+
+    const inner = std.mem.trim(u8, value[1 .. value.len - 1], " \t\r");
+    if (inner.len == 0) return .{};
+
+    var filter: CollectionStatusFilter = .{};
+    var parts = std.mem.splitScalar(u8, inner, ',');
+    while (parts.next()) |raw_part| {
+        const part = std.mem.trim(u8, raw_part, " \t\r");
+        const status = collectionStatusFromKey(try parseString(part)) orelse return error.InvalidEnum;
+        filter.mask |= collectionStatusBit(status);
+    }
+    return filter;
+}
+
+fn writeStatusFilter(writer: *std.Io.Writer, filter: CollectionStatusFilter) SaveError!void {
+    try writer.writeByte('[');
+    var wrote = false;
+    for (collection_status_order) |status| {
+        if ((filter.mask & collectionStatusBit(status)) == 0) continue;
+        if (wrote) try writer.writeAll(", ");
+        try writeTomlString(writer, collectionStatusKey(status));
+        wrote = true;
+    }
+    try writer.writeByte(']');
+}
+
+pub fn collectionStatusBit(status: CollectionStatus) u8 {
+    return @as(u8, 1) << @intFromEnum(status);
+}
+
+fn collectionStatusKey(status: CollectionStatus) []const u8 {
+    return switch (status) {
+        .own => "owned",
+        .prev_owned => "prev_owned",
+        .for_trade => "for_trade",
+        .want => "want",
+        .want_to_play => "want_to_play",
+        .want_to_buy => "want_to_buy",
+        .wishlist => "wishlist",
+        .preordered => "preordered",
+    };
+}
+
+fn collectionStatusFromKey(key: []const u8) ?CollectionStatus {
+    if (std.mem.eql(u8, key, "owned") or std.mem.eql(u8, key, "own")) return .own;
+    for (collection_status_order) |status| {
+        if (std.mem.eql(u8, key, @tagName(status))) return status;
+    }
+    return null;
 }
 
 fn nonEmptyTrimmed(value: ?[]const u8) ?[]const u8 {
@@ -591,13 +665,25 @@ test "config parses toml values into typed schema" {
     try std.testing.expectEqual(@as(u16, 100), config.display.thread_width);
     try std.testing.expectEqual(@as(u16, 110), config.display.detail_width);
     try std.testing.expectEqualStrings("hiro", config.collection.default_username.?);
-    try std.testing.expectEqual(CollectionStatus.wishlist, config.collection.status_filter);
+    try std.testing.expectEqual(collectionStatusBit(.wishlist), config.collection.status_filter.mask);
     try std.testing.expectEqualStrings("dark", config.interface.color_theme);
     try std.testing.expectEqualStrings("slide", config.interface.transition);
     try std.testing.expectEqualStrings("pulse", config.interface.selection);
     try std.testing.expectEqualStrings("compact", config.interface.list_density);
     try std.testing.expectEqualStrings("yyyy/mm/dd", config.interface.date_format);
     try std.testing.expectEqualStrings("plain", config.interface.border_style);
+}
+
+test "config parses Go-style collection status filter array" {
+    const config = try parseToml(
+        \\[collection]
+        \\status_filter = ["owned", "prev_owned", "wishlist"]
+    );
+
+    try std.testing.expectEqual(
+        collectionStatusBit(.own) | collectionStatusBit(.prev_owned) | collectionStatusBit(.wishlist),
+        config.collection.status_filter.mask,
+    );
 }
 
 test "config parser preserves defaults for omitted values" {
@@ -609,7 +695,7 @@ test "config parser preserves defaults for omitted values" {
     try std.testing.expectEqualStrings("token-from-file", config.apiClientToken().?);
     try std.testing.expect(config.display.show_images);
     try std.testing.expectEqual(ImageProtocol.auto, config.display.image_protocol);
-    try std.testing.expectEqual(CollectionStatus.own, config.collection.status_filter);
+    try std.testing.expectEqual(@as(u8, 0), config.collection.status_filter.mask);
 }
 
 test "config parser migrates deprecated show only owned option" {
@@ -618,7 +704,7 @@ test "config parser migrates deprecated show only owned option" {
         \\show_only_owned = true
     );
 
-    try std.testing.expectEqual(CollectionStatus.own, config.collection.status_filter);
+    try std.testing.expectEqual(collectionStatusBit(.own), config.collection.status_filter.mask);
 }
 
 test "config parser rejects unknown keys and escaped strings" {
@@ -781,7 +867,7 @@ test "config formats and parses default config" {
     try std.testing.expect(parsed.display.show_images);
     try std.testing.expectEqual(ImageProtocol.auto, parsed.display.image_protocol);
     try std.testing.expectEqual(@as(?[]const u8, null), parsed.collection.default_username);
-    try std.testing.expectEqual(CollectionStatus.own, parsed.collection.status_filter);
+    try std.testing.expectEqual(@as(u8, 0), parsed.collection.status_filter.mask);
 }
 
 test "config save creates parent directories and writes toml" {
@@ -875,7 +961,7 @@ test "config defaults keep token unset and stable display values" {
     try std.testing.expectEqual(ImageProtocol.auto, config.display.image_protocol);
     try std.testing.expect(config.display.show_images);
     try std.testing.expectEqual(@as(u16, 40), config.display.list_width);
-    try std.testing.expectEqual(CollectionStatus.own, config.collection.status_filter);
+    try std.testing.expectEqual(@as(u8, 0), config.collection.status_filter.mask);
 }
 
 test "config loads primary API token environment variable" {
