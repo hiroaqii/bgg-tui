@@ -2527,6 +2527,42 @@ test "collection filter maps visible activation back to source item" {
     try std.testing.expectEqual(@as(usize, 2), state.sourceIndex(state.activeList().focusedIndex()).?);
 }
 
+test "collection status and name filters activate projected item" {
+    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 3);
+    items[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root"), .owned = true };
+    items[1] = .{ .id = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia"), .wishlist = true };
+    items[2] = .{ .id = 3, .name = try std.testing.allocator.dupe(u8, "CATAN"), .wishlist = true };
+
+    var state: CollectionState = .{};
+    try state.setLoaded(std.testing.allocator, items, collectionStatusBit(6));
+    defer state.deinit(std.testing.allocator);
+
+    try state.applyFilter(std.testing.allocator, "ca");
+    state.update(.move_next);
+
+    const projected_index = state.sourceIndex(state.activeList().focusedIndex()).?;
+    try std.testing.expectEqual(@as(u32, 3), state.items[projected_index].id);
+}
+
+test "collection focus resets and clamps after status projection" {
+    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 3);
+    items[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Owned"), .owned = true };
+    items[1] = .{ .id = 2, .name = try std.testing.allocator.dupe(u8, "Wishlist"), .wishlist = true };
+    items[2] = .{ .id = 3, .name = try std.testing.allocator.dupe(u8, "Both"), .owned = true, .wishlist = true };
+
+    var state: CollectionState = .{};
+    try state.setLoaded(std.testing.allocator, items, collectionStatusBit(6));
+    defer state.deinit(std.testing.allocator);
+
+    state.update(.move_next);
+    state.update(.move_next);
+    try std.testing.expectEqual(@as(usize, 1), state.activeList().focusedIndex());
+
+    try state.applyStatusFilter(std.testing.allocator, collectionStatusBit(0));
+    try std.testing.expectEqual(@as(usize, 0), state.activeList().focusedIndex());
+    try std.testing.expectEqual(@as(u32, 1), state.items[state.sourceIndex(0).?].id);
+}
+
 test "search results escape returns to search input screen" {
     var app = App.create(.{ .api = .{ .token = "token" } }, .{});
     app.screen = .search_results;
@@ -2663,6 +2699,29 @@ test "hot games sorted projection owns movement and activation" {
     try std.testing.expectEqual(ui.List.Msg{ .activate = 1 }, state.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?);
 }
 
+test "hot games focus clamps in source and sorted projections" {
+    const games = try std.testing.allocator.alloc(bgg_model.HotGame, 2);
+    games[0] = .{ .id = 1, .rank = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+    games[1] = .{ .id = 2, .rank = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia") };
+
+    var state: HotGamesState = .{};
+    try state.setLoaded(std.testing.allocator, games);
+    defer state.deinit(std.testing.allocator);
+
+    state.update(.move_prev);
+    try std.testing.expectEqual(@as(usize, 0), state.activeList().focusedIndex());
+    state.update(.move_next);
+    state.update(.move_next);
+    try std.testing.expectEqual(@as(usize, 1), state.activeList().focusedIndex());
+
+    try state.toggleSort(std.testing.allocator);
+    state.update(.move_prev);
+    try std.testing.expectEqual(@as(usize, 0), state.activeList().focusedIndex());
+    state.update(.move_next);
+    state.update(.move_next);
+    try std.testing.expectEqual(@as(usize, 1), state.activeList().focusedIndex());
+}
+
 test "hot games sort failure keeps existing projection state" {
     const games = try std.testing.allocator.alloc(bgg_model.HotGame, 1);
     games[0] = .{ .id = 1, .rank = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
@@ -2792,6 +2851,29 @@ test "search results sorted projection owns movement and activation" {
     try std.testing.expectEqual(@as(usize, 1), state.activeList().focusedIndex());
     try std.testing.expectEqual(@as(usize, 2), state.sourceIndex(state.activeList().focusedIndex()).?);
     try std.testing.expectEqual(ui.List.Msg{ .activate = 1 }, state.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?);
+}
+
+test "search results focus clamps in source and sorted projections" {
+    const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 2);
+    results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+    results[1] = .{ .id = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia") };
+
+    var state: SearchState = .{};
+    try state.setLoaded(std.testing.allocator, results);
+    defer state.deinit(std.testing.allocator);
+
+    state.update(.move_prev);
+    try std.testing.expectEqual(@as(usize, 0), state.activeList().focusedIndex());
+    state.update(.move_next);
+    state.update(.move_next);
+    try std.testing.expectEqual(@as(usize, 1), state.activeList().focusedIndex());
+
+    try state.toggleSort(std.testing.allocator);
+    state.update(.move_prev);
+    try std.testing.expectEqual(@as(usize, 0), state.activeList().focusedIndex());
+    state.update(.move_next);
+    state.update(.move_next);
+    try std.testing.expectEqual(@as(usize, 1), state.activeList().focusedIndex());
 }
 
 test "search results sort failure keeps existing projection state" {
