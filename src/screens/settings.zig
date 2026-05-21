@@ -26,6 +26,12 @@ pub const EditField = enum {
 };
 
 pub const CycleField = enum {
+    color_theme,
+    transition,
+    selection,
+    border_style,
+    list_density,
+    date_format,
     image_protocol,
 };
 
@@ -79,6 +85,12 @@ pub const State = struct {
 
     pub fn focusedCycleField(self: *const State) ?CycleField {
         return switch (self.list.focusedIndex()) {
+            color_theme_index => .color_theme,
+            transition_index => .transition,
+            selection_index => .selection,
+            border_style_index => .border_style,
+            list_density_index => .list_density,
+            date_format_index => .date_format,
             image_protocol_index => .image_protocol,
             else => null,
         };
@@ -241,6 +253,12 @@ fn editHelp(field: EditField) []const u8 {
 
 fn cycleHelp(field: CycleField) []const u8 {
     return switch (field) {
+        .color_theme => "j/k ↑↓: Navigate  Enter: Change Color Theme  m: Menu  Esc/q: Quit",
+        .transition => "j/k ↑↓: Navigate  Enter: Change Transition  m: Menu  Esc/q: Quit",
+        .selection => "j/k ↑↓: Navigate  Enter: Change Selection  m: Menu  Esc/q: Quit",
+        .border_style => "j/k ↑↓: Navigate  Enter: Change Border Style  m: Menu  Esc/q: Quit",
+        .list_density => "j/k ↑↓: Navigate  Enter: Change List Density  m: Menu  Esc/q: Quit",
+        .date_format => "j/k ↑↓: Navigate  Enter: Change Date Format  m: Menu  Esc/q: Quit",
         .image_protocol => "j/k ↑↓: Navigate  Enter: Change Image Protocol  m: Menu  Esc/q: Quit",
     };
 }
@@ -262,6 +280,12 @@ const thread_width_index: usize = 9;
 const detail_width_index: usize = 10;
 const username_index: usize = 11;
 const token_index: usize = 12;
+const color_theme_index: usize = 0;
+const transition_index: usize = 1;
+const selection_index: usize = 2;
+const border_style_index: usize = 3;
+const list_density_index: usize = 4;
+const date_format_index: usize = 5;
 
 fn valueFor(surface: *chasen.Surface, index: usize, config: config_mod.Config, config_path: ?[]const u8) ![]const u8 {
     return switch (index) {
@@ -375,4 +399,20 @@ test "settings exposes image protocol cycle row" {
 
     try std.testing.expectEqual(CycleField.image_protocol, state.focusedCycleField().?);
     try std.testing.expect(state.focusedEditField() == null);
+}
+
+test "settings exposes interface cycle rows" {
+    var state: State = .{};
+
+    try std.testing.expectEqual(CycleField.color_theme, state.focusedCycleField().?);
+    state.updateList(.move_next);
+    try std.testing.expectEqual(CycleField.transition, state.focusedCycleField().?);
+    state.updateList(.move_next);
+    try std.testing.expectEqual(CycleField.selection, state.focusedCycleField().?);
+    state.updateList(.move_next);
+    try std.testing.expectEqual(CycleField.border_style, state.focusedCycleField().?);
+    state.updateList(.move_next);
+    try std.testing.expectEqual(CycleField.list_density, state.focusedCycleField().?);
+    state.updateList(.move_next);
+    try std.testing.expectEqual(CycleField.date_format, state.focusedCycleField().?);
 }

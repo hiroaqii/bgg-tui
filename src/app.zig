@@ -1232,6 +1232,12 @@ pub const App = struct {
 
     fn cycleSettingsField(self: *App, ctx: *chasen.Ctx(Msg), field: screens.settings.CycleField) !void {
         switch (field) {
+            .color_theme => self.config.interface.color_theme = nextCycleValue(self.config.interface.color_theme, &color_theme_values),
+            .transition => self.config.interface.transition = nextCycleValue(self.config.interface.transition, &transition_values),
+            .selection => self.config.interface.selection = nextCycleValue(self.config.interface.selection, &selection_values),
+            .border_style => self.config.interface.border_style = nextCycleValue(self.config.interface.border_style, &border_style_values),
+            .list_density => self.config.interface.list_density = nextCycleValue(self.config.interface.list_density, &list_density_values),
+            .date_format => self.config.interface.date_format = nextCycleValue(self.config.interface.date_format, &date_format_values),
             .image_protocol => self.config.display.image_protocol = nextImageProtocol(self.config.display.image_protocol),
         }
         if (self.config_path) |path| {
@@ -2076,6 +2082,8 @@ pub const App = struct {
                     .thread_width => "Up/Down: move  Enter: edit thread width  m: menu  Esc/q: quit",
                     .detail_width => "Up/Down: move  Enter: edit detail width  m: menu  Esc/q: quit",
                 }
+            else if (self.settings.focusedCycleField() != null)
+                "Up/Down: move  Enter: change setting  m: menu  Esc/q: quit"
             else
                 "Up/Down: move  m: menu  Esc/q: quit",
         };
@@ -3192,6 +3200,22 @@ fn parseSettingsWidth(text: []const u8) !u16 {
     return value;
 }
 
+const color_theme_values = [_][]const u8{ "default", "blue", "orange", "green" };
+const transition_values = [_][]const u8{ "none", "fade", "glitch", "dissolve", "sweep", "lines", "lines-cross", "random" };
+const selection_values = [_][]const u8{ "none", "wave", "blink", "glitch" };
+const border_style_values = [_][]const u8{ "none", "rounded", "thick", "double", "block" };
+const list_density_values = [_][]const u8{ "compact", "normal", "comfortable", "relaxed" };
+const date_format_values = [_][]const u8{ "yyyy-mm-dd", "yyyy/mm/dd", "relative", "YYYY-MM-DD" };
+
+fn nextCycleValue(current: []const u8, values: []const []const u8) []const u8 {
+    for (values, 0..) |value, index| {
+        if (std.mem.eql(u8, current, value)) {
+            return values[(index + 1) % values.len];
+        }
+    }
+    return values[0];
+}
+
 fn nextImageProtocol(current: config_mod.ImageProtocol) config_mod.ImageProtocol {
     return switch (current) {
         .auto => .kitty,
@@ -3282,7 +3306,7 @@ test "footer hint matches screen key handling" {
     app.collection.filter_active = false;
 
     app.screen = .settings;
-    try std.testing.expectEqualStrings("Up/Down: move  m: menu  Esc/q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down: move  Enter: change setting  m: menu  Esc/q: quit", app.footerHint());
     for (0..8) |_| app.settings.updateList(.move_next);
     try std.testing.expectEqualStrings("Up/Down: move  Enter: edit list width  m: menu  Esc/q: quit", app.footerHint());
     app.settings.updateList(.move_next);
@@ -4137,6 +4161,52 @@ test "settings image protocol cycle saves config when path is available" {
     defer loaded.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(config_mod.ImageProtocol.kitty, loaded.config.display.image_protocol);
+}
+
+test "settings interface cycle fields update supported values" {
+    var app = App.create(.{}, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.cycleSettingsField(&tc.ctx, .color_theme);
+    try std.testing.expectEqualStrings("blue", app.config.interface.color_theme);
+    try app.cycleSettingsField(&tc.ctx, .transition);
+    try std.testing.expectEqualStrings("fade", app.config.interface.transition);
+    try app.cycleSettingsField(&tc.ctx, .selection);
+    try std.testing.expectEqualStrings("wave", app.config.interface.selection);
+    try app.cycleSettingsField(&tc.ctx, .border_style);
+    try std.testing.expectEqualStrings("thick", app.config.interface.border_style);
+    try app.cycleSettingsField(&tc.ctx, .list_density);
+    try std.testing.expectEqualStrings("comfortable", app.config.interface.list_density);
+    try app.cycleSettingsField(&tc.ctx, .date_format);
+    try std.testing.expectEqualStrings("yyyy/mm/dd", app.config.interface.date_format);
+}
+
+test "settings interface cycle wraps unknown values to first supported value" {
+    var app = App.create(.{ .interface = .{ .color_theme = "custom" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.cycleSettingsField(&tc.ctx, .color_theme);
+
+    try std.testing.expectEqualStrings("default", app.config.interface.color_theme);
+}
+
+test "settings interface cycle saves config when path is available" {
+    const path = ".zig-cache/test-bgg-tui-settings-interface-cycle/config.toml";
+
+    var app = App.create(.{}, .{ .config_path = path });
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{
+        .ctx = .{ ._allocator = std.testing.allocator, ._io = std.testing.io },
+    };
+    try app.cycleSettingsField(&tc.ctx, .list_density);
+
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    var loaded = try config_mod.loadConfig(std.testing.allocator, std.testing.io, path, &env);
+    defer loaded.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("comfortable", loaded.config.interface.list_density);
 }
 
 test "hot games state owns labels for loaded games" {
