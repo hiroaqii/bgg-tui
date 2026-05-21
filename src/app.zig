@@ -131,6 +131,7 @@ pub const App = struct {
         collection_items_loaded: CollectionTaskResult,
         collection_list: ui.List.Msg,
         game_detail_loaded: GameDetailTaskResult,
+        game_detail_open_browser,
         forum_open,
         forums_loaded: ForumListTaskResult,
         forum_list: ui.List.Msg,
@@ -296,6 +297,7 @@ pub const App = struct {
                 },
             },
             .game_detail_loaded => |result| try self.finishGameDetail(result),
+            .game_detail_open_browser => try self.openGameInBrowser(ctx),
             .forum_open => try self.startForumList(ctx),
             .forums_loaded => |result| try self.finishForumList(result),
             .forum_list => |list_msg| switch (list_msg) {
@@ -441,6 +443,7 @@ pub const App = struct {
                 .key_press => |key| {
                     if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'b') return .{ .show_screen = self.detail_back_screen };
                     if (key.codepoint == 'f' and self.game_detail.load_state == .loaded and self.game_detail.games.len > 0) return .forum_open;
+                    if (key.codepoint == 'o' and self.game_detail.load_state == .loaded and self.game_detail.games.len > 0) return .game_detail_open_browser;
                     if (key.codepoint == 'm') return .{ .show_screen = .main_menu };
                     if (key.codepoint == 'q') return .quit;
                 },
@@ -853,6 +856,10 @@ pub const App = struct {
 
                     var desc_area = area.child(.{ .col = 0, .row = 13, .width = area.size().width, .height = area.size().height -| 16 });
                     drawDescriptionPreview(&desc_area, game.description);
+
+                    if (self.game_detail.browser_error_url.len > 0) {
+                        try self.drawManualOpenHint(&area, area.size().height -| 2, self.game_detail.browser_error_url);
+                    }
                 }
             },
         }
@@ -945,7 +952,7 @@ pub const App = struct {
                 self.drawThreadBody(&body_area);
 
                 if (self.thread.browser_error_url.len > 0) {
-                    try self.drawThreadManualOpenHint(&area, area.size().height -| 2);
+                    try self.drawManualOpenHint(&area, area.size().height -| 2, self.thread.browser_error_url);
                 } else if (self.thread.maxScroll(body_area.size().height) > 0 and area.size().height >= 3) {
                     _ = try area.printAt(0, area.size().height -| 2, .{ .dim = true }, "({d}/{d})", .{
                         self.thread.scroll + 1,
@@ -1284,6 +1291,7 @@ pub const App = struct {
 
     fn startGameDetail(self: *App, ctx: *chasen.Ctx(Msg), game_id: u32, back_screen: Screen) !void {
         self.detail_request_id +%= 1;
+        self.browser_request_id +%= 1;
         const request_id = self.detail_request_id;
         self.detail_back_screen = back_screen;
         self.screen = .game_detail;
@@ -1323,6 +1331,26 @@ pub const App = struct {
             .ok => |games| try self.game_detail.setLoaded(self.allocator.?, games),
             .failed => |message| self.game_detail.setFailed(message),
         }
+    }
+
+    fn openGameInBrowser(self: *App, ctx: *chasen.Ctx(Msg)) !void {
+        if (self.game_detail.load_state != .loaded or self.game_detail.games.len == 0) return;
+
+        const game = self.game_detail.games[0];
+        const url = try formatOwnedText(ctx.allocator(), format.writeBggGameUrl, .{game.id});
+        errdefer ctx.allocator().free(url);
+
+        self.browser_request_id +%= 1;
+        const request_id = self.browser_request_id;
+
+        const task = try ctx.allocator().create(BrowserOpenTask);
+        errdefer ctx.allocator().destroy(task);
+        task.* = .{ .url = url, .request_id = request_id, .target = .game_detail };
+
+        ctx.spawnWith(task, BrowserOpenTask.run) catch |err| {
+            ctx.allocator().free(url);
+            return err;
+        };
     }
 
     fn startForumList(self: *App, ctx: *chasen.Ctx(Msg)) !void {
@@ -1492,7 +1520,7 @@ pub const App = struct {
 
         const task = try ctx.allocator().create(BrowserOpenTask);
         errdefer ctx.allocator().destroy(task);
-        task.* = .{ .url = url, .request_id = request_id };
+        task.* = .{ .url = url, .request_id = request_id, .target = .thread };
 
         ctx.spawnWith(task, BrowserOpenTask.run) catch |err| {
             ctx.allocator().free(url);
@@ -1510,10 +1538,16 @@ pub const App = struct {
         }
 
         switch (task_result.result) {
-            .ok => self.thread.clearBrowserErrorUrl(self.allocator.?),
+            .ok => switch (task_result.target) {
+                .game_detail => self.game_detail.clearBrowserErrorUrl(self.allocator.?),
+                .thread => self.thread.clearBrowserErrorUrl(self.allocator.?),
+            },
             .failed => |url| {
                 defer self.allocator.?.free(url);
-                try self.thread.setBrowserErrorUrl(self.allocator.?, url);
+                switch (task_result.target) {
+                    .game_detail => try self.game_detail.setBrowserErrorUrl(self.allocator.?, url),
+                    .thread => try self.thread.setBrowserErrorUrl(self.allocator.?, url),
+                }
             },
         }
     }
@@ -1585,9 +1619,10 @@ pub const App = struct {
         }
     }
 
-    fn drawThreadManualOpenHint(self: *const App, surface: *chasen.Surface, row: u16) !void {
+    fn drawManualOpenHint(self: *const App, surface: *chasen.Surface, row: u16, url: []const u8) !void {
+        _ = self;
         if (row >= surface.size().height) return;
-        _ = try surface.printAt(0, row, .{ .dim = true }, "Open manually: {s}", .{self.thread.browser_error_url});
+        _ = try surface.printAt(0, row, .{ .dim = true }, "Open manually: {s}", .{url});
     }
 
     fn threadBodyHeight(self: *const App) usize {
@@ -1702,7 +1737,7 @@ pub const App = struct {
                 "Type: filter  Up/Down: move  Enter: detail  Esc: clear  b: search"
             else
                 "Up/Down: move  Enter: detail  /: filter  s: sort  b/Esc: search  m: menu  q: quit",
-            .game_detail => "f: forums  b/Esc: back  m: menu  q: quit",
+            .game_detail => "o: open BGG  f: forums  b/Esc: back  m: menu  q: quit",
             .forums => switch (self.forums.mode) {
                 .forum_list => "Up/Down: move  Enter: threads  b: detail  Esc/m: menu  q: quit",
                 .thread_list => "Up/Down: move  Enter: read  n/p: page  b: forums  Esc/m: menu  q: quit",
@@ -2154,6 +2189,7 @@ const CollectionTaskResult = struct {
 const GameDetailState = struct {
     load_state: LoadState = .idle,
     games: []bgg_model.Game = &.{},
+    browser_error_url: []u8 = "",
 
     const LoadState = union(enum) {
         idle,
@@ -2176,8 +2212,19 @@ const GameDetailState = struct {
         self.load_state = .loaded;
     }
 
+    fn setBrowserErrorUrl(self: *GameDetailState, allocator: std.mem.Allocator, url: []const u8) !void {
+        self.clearBrowserErrorUrl(allocator);
+        self.browser_error_url = try allocator.dupe(u8, url);
+    }
+
+    fn clearBrowserErrorUrl(self: *GameDetailState, allocator: std.mem.Allocator) void {
+        if (self.browser_error_url.len > 0) allocator.free(self.browser_error_url);
+        self.browser_error_url = "";
+    }
+
     fn deinit(self: *GameDetailState, allocator: std.mem.Allocator) void {
         bgg_xml.freeGames(allocator, self.games);
+        self.clearBrowserErrorUrl(allocator);
         self.games = &.{};
         self.load_state = .idle;
     }
@@ -2228,8 +2275,14 @@ const BrowserOpenResult = union(enum) {
     failed: []u8,
 };
 
+const BrowserTarget = enum {
+    game_detail,
+    thread,
+};
+
 const BrowserOpenTaskResult = struct {
     request_id: u64,
+    target: BrowserTarget,
     result: BrowserOpenResult,
 };
 
@@ -2392,6 +2445,7 @@ const ThreadTask = struct {
 const BrowserOpenTask = struct {
     url: []u8,
     request_id: u64,
+    target: BrowserTarget,
 
     fn run(ctx_ptr: *anyopaque, allocator: std.mem.Allocator, io: std.Io) App.Msg {
         const task: *BrowserOpenTask = @ptrCast(@alignCast(ctx_ptr));
@@ -2402,12 +2456,14 @@ const BrowserOpenTask = struct {
         browser.openUrl(io, task.url) catch {
             return .{ .browser_opened = .{
                 .request_id = task.request_id,
+                .target = task.target,
                 .result = .{ .failed = task.url },
             } };
         };
         allocator.free(task.url);
         return .{ .browser_opened = .{
             .request_id = task.request_id,
+            .target = task.target,
             .result = .ok,
         } };
     }
@@ -2848,7 +2904,7 @@ test "footer hint matches screen key handling" {
     app.search.filter_active = false;
 
     app.screen = .game_detail;
-    try std.testing.expectEqualStrings("f: forums  b/Esc: back  m: menu  q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("o: open BGG  f: forums  b/Esc: back  m: menu  q: quit", app.footerHint());
 
     app.screen = .forums;
     app.forums.mode = .forum_list;
@@ -3275,6 +3331,20 @@ test "loaded game detail f opens forums" {
     try std.testing.expect(msg == .forum_open);
 }
 
+test "loaded game detail o opens browser" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    const games = try std.testing.allocator.alloc(bgg_model.Game, 1);
+    games[0] = .{ .id = 13, .name = try std.testing.allocator.dupe(u8, "Catan") };
+    try app.game_detail.setLoaded(std.testing.allocator, games);
+    app.screen = .game_detail;
+
+    const msg = app.handleEvent(.{ .key_press = .{ .codepoint = 'o' } }).?;
+    try std.testing.expect(msg == .game_detail_open_browser);
+}
+
 test "forum back key returns to detail or forum list" {
     var app = App.create(.{ .api = .{ .token = "token" } }, .{});
     app.allocator = std.testing.allocator;
@@ -3356,6 +3426,7 @@ test "stale browser failure does not update current thread" {
     app.browser_request_id = 2;
     try app.finishBrowserOpen(.{
         .request_id = 1,
+        .target = .thread,
         .result = .{ .failed = try std.testing.allocator.dupe(u8, "https://boardgamegeek.com/thread/1") },
     });
 
@@ -3389,6 +3460,7 @@ test "opening another thread invalidates in-flight browser result" {
 
     try app.finishBrowserOpen(.{
         .request_id = 7,
+        .target = .thread,
         .result = .{ .failed = try std.testing.allocator.dupe(u8, "https://boardgamegeek.com/thread/1") },
     });
     try std.testing.expectEqualStrings("", app.thread.browser_error_url);
