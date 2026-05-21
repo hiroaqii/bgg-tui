@@ -20,6 +20,9 @@ const Item = struct {
 pub const EditField = enum {
     token,
     username,
+    list_width,
+    thread_width,
+    detail_width,
 };
 
 const items = [_]Item{
@@ -60,6 +63,9 @@ pub const State = struct {
 
     pub fn focusedEditField(self: *const State) ?EditField {
         return switch (self.list.focusedIndex()) {
+            list_width_index => .list_width,
+            thread_width_index => .thread_width,
+            detail_width_index => .detail_width,
             username_index => .username,
             token_index => .token,
             else => null,
@@ -81,6 +87,7 @@ pub const State = struct {
         config_path: ?[]const u8,
         token_input: ?*const ui.PasswordInput,
         username_input: ?*const ui.TextInput,
+        width_input: ?*const ui.TextInput,
     ) !void {
         const size = surface.size();
         if (size.width == 0 or size.height == 0) return;
@@ -100,7 +107,7 @@ pub const State = struct {
             }
             if (row >= size.height) return;
 
-            try drawItem(surface, row, index, item, current_section, config, config_path, self.list.focus.isFocused(index), self.editing, token_input, username_input);
+            try drawItem(surface, row, index, item, current_section, config, config_path, self.list.focus.isFocused(index), self.editing, token_input, username_input, width_input);
             row += 1;
         }
 
@@ -128,6 +135,7 @@ fn drawItem(
     editing: ?EditField,
     token_input: ?*const ui.PasswordInput,
     username_input: ?*const ui.TextInput,
+    width_input: ?*const ui.TextInput,
 ) !void {
     const label_style: chasen.TextStyle = if (focused) .{ .bold = true, .fg = .{ .index = 14 } } else .{};
     const cursor = if (focused) "> " else "  ";
@@ -143,7 +151,7 @@ fn drawItem(
     _ = surface.borrowTextAt(2, row, item.label, label_style);
     const value_col: u16 = @intCast(2 + sectionWidth(section) + 2);
     _ = surface.borrowTextAt(value_col - 2, row, ":", .{});
-    if (drawEditingInput(surface, row, value_col, index, editing, token_input, username_input)) {
+    if (drawEditingInput(surface, row, value_col, index, editing, token_input, username_input, width_input)) {
         return;
     }
     switch (item.kind) {
@@ -164,6 +172,7 @@ fn drawEditingInput(
     editing: ?EditField,
     token_input: ?*const ui.PasswordInput,
     username_input: ?*const ui.TextInput,
+    width_input: ?*const ui.TextInput,
 ) bool {
     const field = editing orelse return false;
     const input_rect = chasen.Rect{
@@ -189,6 +198,14 @@ fn drawEditingInput(
             }
             return true;
         },
+        .list_width, .thread_width, .detail_width => {
+            if (index != fieldIndex(field)) return false;
+            if (width_input) |input| {
+                var input_area = surface.child(input_rect);
+                input.view(&input_area, .{});
+            }
+            return true;
+        },
     }
 }
 
@@ -196,9 +213,25 @@ fn editHelp(field: EditField) []const u8 {
     return switch (field) {
         .token => "j/k ↑↓: Navigate  Enter: Edit Token  m: Menu  Esc/q: Quit",
         .username => "j/k ↑↓: Navigate  Enter: Edit Username  m: Menu  Esc/q: Quit",
+        .list_width => "j/k ↑↓: Navigate  Enter: Edit List Width  m: Menu  Esc/q: Quit",
+        .thread_width => "j/k ↑↓: Navigate  Enter: Edit Thread Width  m: Menu  Esc/q: Quit",
+        .detail_width => "j/k ↑↓: Navigate  Enter: Edit Detail Width  m: Menu  Esc/q: Quit",
     };
 }
 
+fn fieldIndex(field: EditField) usize {
+    return switch (field) {
+        .list_width => list_width_index,
+        .thread_width => thread_width_index,
+        .detail_width => detail_width_index,
+        .username => username_index,
+        .token => token_index,
+    };
+}
+
+const list_width_index: usize = 7;
+const thread_width_index: usize = 8;
+const detail_width_index: usize = 9;
 const username_index: usize = 10;
 const token_index: usize = 11;
 
@@ -284,4 +317,15 @@ test "settings focused edit field follows editable rows" {
     try std.testing.expectEqual(EditField.username, state.focusedEditField().?);
     state.updateList(.move_next);
     try std.testing.expectEqual(EditField.token, state.focusedEditField().?);
+}
+
+test "settings focused edit field includes width rows" {
+    var state: State = .{};
+
+    for (0..list_width_index) |_| state.updateList(.move_next);
+    try std.testing.expectEqual(EditField.list_width, state.focusedEditField().?);
+    state.updateList(.move_next);
+    try std.testing.expectEqual(EditField.thread_width, state.focusedEditField().?);
+    state.updateList(.move_next);
+    try std.testing.expectEqual(EditField.detail_width, state.focusedEditField().?);
 }

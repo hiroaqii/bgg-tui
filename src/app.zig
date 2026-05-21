@@ -79,6 +79,7 @@ pub const App = struct {
     collection_filter_input: ?ui.TextInput = null,
     settings_token_input: ?ui.PasswordInput = null,
     settings_username_input: ?ui.TextInput = null,
+    settings_width_input: ?ui.TextInput = null,
     owned_token: ?[]u8 = null,
     owned_default_username: ?[]u8 = null,
     hot_games: HotGamesState = .{},
@@ -165,6 +166,11 @@ pub const App = struct {
         settings_username_paste: []const u8,
         settings_username_submit,
         settings_username_cancel,
+        settings_width_start: screens.settings.EditField,
+        settings_width_input: ui.TextInput.Msg,
+        settings_width_paste: []const u8,
+        settings_width_submit,
+        settings_width_cancel,
         settings_list: ui.List.Msg,
         terminal_resized: chasen.Size,
         menu: ui.Menu.Msg,
@@ -214,6 +220,9 @@ pub const App = struct {
         });
         self.settings_username_input = try ui.TextInput.init(ctx.allocator(), .{
             .placeholder = "Enter BGG username",
+        });
+        self.settings_width_input = try ui.TextInput.init(ctx.allocator(), .{
+            .placeholder = "Enter width (20-240)",
         });
     }
 
@@ -376,6 +385,21 @@ pub const App = struct {
             },
             .settings_username_submit => try self.submitSettingsUsername(ctx),
             .settings_username_cancel => self.cancelSettingsUsernameEdit(),
+            .settings_width_start => |field| try self.startSettingsWidthEdit(field),
+            .settings_width_input => |input_msg| {
+                if (input_msg == .submit) {
+                    try self.submitSettingsWidth(ctx);
+                } else if (self.settings_width_input) |*input| {
+                    try input.update(input_msg);
+                }
+            },
+            .settings_width_paste => |text| {
+                if (self.settings_width_input) |*input| {
+                    try insertPastedCodepoints(input, text);
+                }
+            },
+            .settings_width_submit => try self.submitSettingsWidth(ctx),
+            .settings_width_cancel => self.cancelSettingsWidthEdit(),
             .settings_list => |list_msg| self.settings.updateList(list_msg),
             .terminal_resized => |size| self.handleResize(size),
             .menu => |menu_msg| switch (menu_msg) {
@@ -612,12 +636,14 @@ pub const App = struct {
                             return switch (field) {
                                 .token => .settings_token_cancel,
                                 .username => .settings_username_cancel,
+                                .list_width, .thread_width, .detail_width => .settings_width_cancel,
                             };
                         }
                         if (key.matches(chasen.Key.enter, .{})) {
                             return switch (field) {
                                 .token => .settings_token_submit,
                                 .username => .settings_username_submit,
+                                .list_width, .thread_width, .detail_width => .settings_width_submit,
                             };
                         }
                     },
@@ -625,6 +651,7 @@ pub const App = struct {
                         return switch (field) {
                             .token => .{ .settings_token_paste = text },
                             .username => .{ .settings_username_paste = text },
+                            .list_width, .thread_width, .detail_width => .{ .settings_width_paste = text },
                         };
                     },
                     else => {},
@@ -636,6 +663,9 @@ pub const App = struct {
                     .username => if (self.settings_username_input) |*input| {
                         if (input.handleEvent(event)) |msg| return .{ .settings_username_input = msg };
                     },
+                    .list_width, .thread_width, .detail_width => if (self.settings_width_input) |*input| {
+                        if (input.handleEvent(event)) |msg| return .{ .settings_width_input = msg };
+                    },
                 }
                 return null;
             }
@@ -646,6 +676,7 @@ pub const App = struct {
                             return switch (field) {
                                 .token => .settings_token_start,
                                 .username => .settings_username_start,
+                                .list_width, .thread_width, .detail_width => .{ .settings_width_start = field },
                             };
                         }
                     }
@@ -766,7 +797,8 @@ pub const App = struct {
         var area = centeredSurface(sfc, screens.settings.required_size);
         const token_input = if (self.settings_token_input) |*input| input else null;
         const username_input = if (self.settings_username_input) |*input| input else null;
-        try self.settings.view(&area, self.config, self.config_path, token_input, username_input);
+        const width_input = if (self.settings_width_input) |*input| input else null;
+        try self.settings.view(&area, self.config, self.config_path, token_input, username_input, width_input);
     }
 
     fn viewHotGames(self: *const App, sfc: *chasen.Surface) !void {
@@ -1158,6 +1190,38 @@ pub const App = struct {
         self.settings.stopEditing();
     }
 
+    fn startSettingsWidthEdit(self: *App, field: screens.settings.EditField) !void {
+        if (self.settings_width_input) |*input| {
+            try input.update(.clear);
+            try inputWidthValue(input, self.config, field);
+        }
+        self.settings.startEdit(field);
+    }
+
+    fn submitSettingsWidth(self: *App, ctx: *chasen.Ctx(Msg)) !void {
+        const field = self.settings.editing orelse return;
+        const input = if (self.settings_width_input) |*input| input else return;
+        const value = parseSettingsWidth(input.text()) catch return;
+        switch (field) {
+            .list_width => self.config.display.list_width = value,
+            .thread_width => self.config.display.thread_width = value,
+            .detail_width => self.config.display.detail_width = value,
+            else => return,
+        }
+        if (self.config_path) |path| {
+            try config_mod.saveConfig(ctx.allocator(), ctx.io(), path, self.config);
+        }
+        try input.update(.clear);
+        self.settings.stopEditing();
+    }
+
+    fn cancelSettingsWidthEdit(self: *App) void {
+        if (self.settings_width_input) |*input| {
+            input.update(.clear) catch {};
+        }
+        self.settings.stopEditing();
+    }
+
     fn deinitOwnedState(self: *App) void {
         if (self.setup_token_input) |*input| {
             input.deinit();
@@ -1190,6 +1254,10 @@ pub const App = struct {
         if (self.settings_username_input) |*input| {
             input.deinit();
             self.settings_username_input = null;
+        }
+        if (self.settings_width_input) |*input| {
+            input.deinit();
+            self.settings_width_input = null;
         }
         if (self.owned_token) |token| {
             self.allocator.?.free(token);
@@ -1947,6 +2015,9 @@ pub const App = struct {
                 switch (field) {
                     .token => "Up/Down: move  Enter: edit token  m: menu  Esc/q: quit",
                     .username => "Up/Down: move  Enter: edit username  m: menu  Esc/q: quit",
+                    .list_width => "Up/Down: move  Enter: edit list width  m: menu  Esc/q: quit",
+                    .thread_width => "Up/Down: move  Enter: edit thread width  m: menu  Esc/q: quit",
+                    .detail_width => "Up/Down: move  Enter: edit detail width  m: menu  Esc/q: quit",
                 }
             else
                 "Up/Down: move  m: menu  Esc/q: quit",
@@ -3006,6 +3077,25 @@ fn setupTokenSubmitHint(config_path: ?[]const u8) []const u8 {
         "Enter: save token and continue  Esc: quit";
 }
 
+fn inputWidthValue(input: anytype, config: config_mod.Config, field: screens.settings.EditField) !void {
+    const value: u16 = switch (field) {
+        .list_width => config.display.list_width,
+        .thread_width => config.display.thread_width,
+        .detail_width => config.display.detail_width,
+        else => return,
+    };
+    var buf: [8]u8 = undefined;
+    const text = try std.fmt.bufPrint(&buf, "{d}", .{value});
+    try insertPastedCodepoints(input, text);
+}
+
+fn parseSettingsWidth(text: []const u8) !u16 {
+    const trimmed = std.mem.trim(u8, text, " \t\r\n");
+    const value = try std.fmt.parseInt(u16, trimmed, 10);
+    if (value < 20 or value > 240) return error.InvalidWidth;
+    return value;
+}
+
 test "app initializes with main menu screen" {
     const app = App.create(.{ .api = .{ .token = "token" } }, .{});
 
@@ -3089,7 +3179,13 @@ test "footer hint matches screen key handling" {
 
     app.screen = .settings;
     try std.testing.expectEqualStrings("Up/Down: move  m: menu  Esc/q: quit", app.footerHint());
-    for (0..10) |_| app.settings.updateList(.move_next);
+    for (0..7) |_| app.settings.updateList(.move_next);
+    try std.testing.expectEqualStrings("Up/Down: move  Enter: edit list width  m: menu  Esc/q: quit", app.footerHint());
+    app.settings.updateList(.move_next);
+    try std.testing.expectEqualStrings("Up/Down: move  Enter: edit thread width  m: menu  Esc/q: quit", app.footerHint());
+    app.settings.updateList(.move_next);
+    try std.testing.expectEqualStrings("Up/Down: move  Enter: edit detail width  m: menu  Esc/q: quit", app.footerHint());
+    app.settings.updateList(.move_next);
     try std.testing.expectEqualStrings("Up/Down: move  Enter: edit username  m: menu  Esc/q: quit", app.footerHint());
     app.settings.updateList(.move_next);
     try std.testing.expectEqualStrings("Up/Down: move  Enter: edit token  m: menu  Esc/q: quit", app.footerHint());
@@ -3807,6 +3903,75 @@ test "settings username edit cancel clears input without changing username" {
     try std.testing.expect(app.settings.editing == null);
     try std.testing.expectEqualStrings("old-user", app.config.collection.default_username.?);
     try std.testing.expectEqualStrings("", app.settings_username_input.?.text());
+}
+
+test "settings width edit saves selected width and stays on settings" {
+    var app = App.create(.{}, .{});
+    app.allocator = std.testing.allocator;
+    app.screen = .settings;
+    app.settings_width_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "120" });
+    app.settings.startEdit(.thread_width);
+    defer app.deinitOwnedState();
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.submitSettingsWidth(&tc.ctx);
+
+    try std.testing.expectEqual(Screen.settings, app.screen);
+    try std.testing.expect(app.settings.editing == null);
+    try std.testing.expectEqual(@as(u16, 120), app.config.display.thread_width);
+    try std.testing.expectEqualStrings("", app.settings_width_input.?.text());
+}
+
+test "settings width edit ignores invalid width" {
+    var app = App.create(.{ .display = .{ .list_width = 40 } }, .{});
+    app.allocator = std.testing.allocator;
+    app.settings_width_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "10" });
+    app.settings.startEdit(.list_width);
+    defer app.deinitOwnedState();
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.submitSettingsWidth(&tc.ctx);
+
+    try std.testing.expectEqual(@as(u16, 40), app.config.display.list_width);
+    try std.testing.expectEqual(screens.settings.EditField.list_width, app.settings.editing.?);
+    try std.testing.expectEqualStrings("10", app.settings_width_input.?.text());
+}
+
+test "settings width edit saves config when path is available" {
+    const path = ".zig-cache/test-bgg-tui-settings-width/config.toml";
+
+    var app = App.create(.{}, .{ .config_path = path });
+    app.allocator = std.testing.allocator;
+    app.settings_width_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "144" });
+    app.settings.startEdit(.detail_width);
+    defer app.deinitOwnedState();
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{
+        .ctx = .{ ._allocator = std.testing.allocator, ._io = std.testing.io },
+    };
+    try app.submitSettingsWidth(&tc.ctx);
+
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    var loaded = try config_mod.loadConfig(std.testing.allocator, std.testing.io, path, &env);
+    defer loaded.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(u16, 144), loaded.config.display.detail_width);
+}
+
+test "settings width edit cancel clears input without changing width" {
+    var app = App.create(.{ .display = .{ .detail_width = 90 } }, .{});
+    app.allocator = std.testing.allocator;
+    app.settings_width_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "120" });
+    app.settings.startEdit(.detail_width);
+    defer app.deinitOwnedState();
+
+    app.cancelSettingsWidthEdit();
+
+    try std.testing.expect(app.settings.editing == null);
+    try std.testing.expectEqual(@as(u16, 90), app.config.display.detail_width);
+    try std.testing.expectEqualStrings("", app.settings_width_input.?.text());
 }
 
 test "hot games state owns labels for loaded games" {
