@@ -8,6 +8,7 @@ pub const format = @import("format.zig");
 pub const labels = @import("labels.zig");
 pub const list_filter = @import("list_filter.zig");
 pub const list_view = @import("list_view.zig");
+pub const screens = @import("screens/root.zig");
 
 test {
     _ = app;
@@ -17,4 +18,5 @@ test {
     _ = labels;
     _ = list_filter;
     _ = list_view;
+    _ = screens;
 }

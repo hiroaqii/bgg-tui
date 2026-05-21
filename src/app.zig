@@ -12,6 +12,7 @@ const format = @import("format.zig");
 const labels_mod = @import("labels.zig");
 const list_filter = @import("list_filter.zig");
 const list_view = @import("list_view.zig");
+const screens = @import("screens/root.zig");
 
 // Keep top-level screens centered until a screen needs its own full-page layout.
 const main_menu_size = chasen.Size{ .width = 48, .height = 12 };
@@ -19,6 +20,7 @@ const setup_token_size = chasen.Size{ .width = 56, .height = 9 };
 const placeholder_size = chasen.Size{ .width = 56, .height = 6 };
 const list_screen_max_size = chasen.Size{ .width = 72, .height = 34 };
 const detail_size = chasen.Size{ .width = 78, .height = 20 };
+const forum_screen_max_size = chasen.Size{ .width = 88, .height = 34 };
 
 // List screens follow the Go version's vertical rhythm:
 // row 0 title, row 1 blank, row 2 position, row 3 blank, row 4 list body.
@@ -57,6 +59,7 @@ pub const Screen = enum {
     search,
     search_results,
     game_detail,
+    forums,
     collection,
     settings,
 };
@@ -84,6 +87,9 @@ pub const App = struct {
     game_detail: GameDetailState = .{},
     detail_request_id: u64 = 0,
     detail_back_screen: Screen = .main_menu,
+    forums: screens.forum.State = .{},
+    forum_request_id: u64 = 0,
+    thread_list_request_id: u64 = 0,
     menu: ui.Menu = ui.Menu.init(.{ .items = &menu_items }),
     shell: ui.Panel = ui.Panel.init(.{}),
 
@@ -119,6 +125,15 @@ pub const App = struct {
         collection_items_loaded: CollectionTaskResult,
         collection_list: ui.List.Msg,
         game_detail_loaded: GameDetailTaskResult,
+        forum_open,
+        forums_loaded: ForumListTaskResult,
+        forum_list: ui.List.Msg,
+        forum_threads_loaded: ForumThreadsTaskResult,
+        forum_thread_list: ui.List.Msg,
+        forum_back_to_detail,
+        forum_back_to_list,
+        forum_next_page,
+        forum_previous_page,
         menu: ui.Menu.Msg,
         hot_list: ui.List.Msg,
         hot_sort_toggle,
@@ -266,6 +281,21 @@ pub const App = struct {
                 },
             },
             .game_detail_loaded => |result| try self.finishGameDetail(result),
+            .forum_open => try self.startForumList(ctx),
+            .forums_loaded => |result| try self.finishForumList(result),
+            .forum_list => |list_msg| switch (list_msg) {
+                .move_prev, .move_next => self.forums.updateForumList(list_msg),
+                .activate => |index| try self.startForumThreads(ctx, index, 1),
+            },
+            .forum_threads_loaded => |result| try self.finishForumThreads(result),
+            .forum_thread_list => |list_msg| switch (list_msg) {
+                .move_prev, .move_next => self.forums.updateThreadList(list_msg),
+                .activate => {},
+            },
+            .forum_back_to_detail => try self.showScreen(.game_detail, ctx),
+            .forum_back_to_list => self.backToForumList(),
+            .forum_next_page => try self.openForumPage(ctx, self.forums.thread_page.page + 1),
+            .forum_previous_page => try self.openForumPage(ctx, self.forums.thread_page.page -| 1),
             .menu => |menu_msg| switch (menu_msg) {
                 .move_prev, .move_next => self.menu.update(menu_msg),
                 .activate => |index| {
@@ -382,8 +412,30 @@ pub const App = struct {
             switch (event) {
                 .key_press => |key| {
                     if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'b') return .{ .show_screen = self.detail_back_screen };
+                    if (key.codepoint == 'f' and self.game_detail.load_state == .loaded and self.game_detail.games.len > 0) return .forum_open;
                     if (key.codepoint == 'm') return .{ .show_screen = .main_menu };
                     if (key.codepoint == 'q') return .quit;
+                },
+                else => {},
+            }
+            return null;
+        }
+
+        if (self.screen == .forums) {
+            switch (event) {
+                .key_press => |key| {
+                    if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'm') return .{ .show_screen = .main_menu };
+                    if (key.codepoint == 'q') return .quit;
+                    if (key.codepoint == 'b') {
+                        return if (self.forums.mode == .thread_list) .forum_back_to_list else .forum_back_to_detail;
+                    }
+                    if (self.forums.mode == .thread_list) {
+                        if (key.codepoint == 'n' and self.forums.canOpenNextPage()) return .forum_next_page;
+                        if (key.codepoint == 'p' and self.forums.canOpenPreviousPage()) return .forum_previous_page;
+                        if (self.forums.thread_list.handleEvent(event)) |msg| return .{ .forum_thread_list = msg };
+                    } else if (self.forums.mode == .forum_list) {
+                        if (self.forums.forum_list.handleEvent(event)) |msg| return .{ .forum_list = msg };
+                    }
                 },
                 else => {},
             }
@@ -501,6 +553,7 @@ pub const App = struct {
             .search => try self.viewSearch(sfc),
             .search_results => try self.viewSearchResults(sfc),
             .game_detail => try self.viewGameDetail(sfc),
+            .forums => try self.viewForums(sfc),
             .collection => try self.viewCollection(sfc),
             .settings => self.viewPlaceholder(sfc, "Settings", "Minimum settings screen is pending."),
         }
@@ -760,6 +813,63 @@ pub const App = struct {
         _ = area.textAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
     }
 
+    fn viewForums(self: *const App, sfc: *chasen.Surface) !void {
+        var area = forumSurface(sfc);
+
+        switch (self.forums.load_state) {
+            .idle, .loading_forums => {
+                area.hideCursor();
+                _ = try area.printAt(0, 0, .{ .bold = true, .fg = .{ .index = 14 } }, "{s} - Forums", .{self.forums.game_name});
+                _ = area.textAt(0, 2, "Loading BoardGameGeek forums...", .{ .fg = .gray });
+            },
+            .forums_loaded => {
+                _ = try area.printAt(0, 0, .{ .bold = true, .fg = .{ .index = 14 } }, "{s} - Forums", .{self.forums.game_name});
+                if (self.forums.forum_list.items.len == 0) {
+                    self.drawEmptyState(&area, 2, "No forums", "BGG did not return forums for this game.");
+                } else {
+                    var list_area = area.child(.{
+                        .col = 0,
+                        .row = list_body_row,
+                        .width = area.size().width,
+                        .height = area.size().height -| (list_body_row + 1),
+                    });
+                    list_view.viewListWithDensity(&self.forums.forum_list, &list_area, .{
+                        .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
+                    }, self.listDensity());
+                    try self.drawListPosition(&area, &self.forums.forum_list);
+                }
+            },
+            .loading_threads => {
+                area.hideCursor();
+                _ = area.textAt(0, 0, self.forumThreadTitle(), .{ .bold = true, .fg = .{ .index = 14 } });
+                _ = area.textAt(0, 2, "Loading BoardGameGeek threads...", .{ .fg = .gray });
+            },
+            .threads_loaded => {
+                _ = area.textAt(0, 0, self.forumThreadTitle(), .{ .bold = true, .fg = .{ .index = 14 } });
+                _ = try area.printAt(0, list_position_row, .{ .dim = true }, "Page {d} / {d}", .{ self.forums.thread_page.page, self.forums.thread_page.total_pages });
+                if (self.forums.thread_list.items.len == 0) {
+                    self.drawEmptyState(&area, list_body_row, "No threads", "BGG did not return threads for this forum page.");
+                } else {
+                    var list_area = area.child(.{
+                        .col = 0,
+                        .row = list_body_row,
+                        .width = area.size().width,
+                        .height = area.size().height -| (list_body_row + 1),
+                    });
+                    try self.drawForumThreadList(&list_area);
+                }
+            },
+            .failed => |message| {
+                area.hideCursor();
+                _ = area.textAt(0, 0, "Forums", .{ .bold = true, .fg = .{ .index = 14 } });
+                _ = area.textAt(0, 2, "Could not load forums.", .{ .fg = .{ .index = 9 } });
+                _ = area.textAt(0, 4, message, .{ .fg = .gray });
+            },
+        }
+
+        _ = area.textAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
+    }
+
     fn submitToken(self: *App, ctx: *chasen.Ctx(Msg)) !void {
         const input = if (self.setup_token_input) |*input| input else return;
         const token = std.mem.trim(u8, input.text(), " \t\r\n");
@@ -810,6 +920,7 @@ pub const App = struct {
         self.search.deinit(self.allocator.?);
         self.collection.deinit(self.allocator.?);
         self.game_detail.deinit(self.allocator.?);
+        self.forums.deinit(self.allocator.?);
     }
 
     fn startHotFilter(self: *App) !void {
@@ -1125,6 +1236,109 @@ pub const App = struct {
         }
     }
 
+    fn startForumList(self: *App, ctx: *chasen.Ctx(Msg)) !void {
+        if (self.game_detail.load_state != .loaded or self.game_detail.games.len == 0) return;
+        const game = self.game_detail.games[0];
+        self.forum_request_id +%= 1;
+        self.thread_list_request_id +%= 1;
+        const request_id = self.forum_request_id;
+
+        try self.forums.startForumLoad(self.allocator.?, game.id, game.name);
+        self.screen = .forums;
+
+        const token = self.config.apiClientToken() orelse {
+            self.forums.setFailed("BGG API token is required");
+            return;
+        };
+
+        const task = try ctx.allocator().create(ForumListTask);
+        errdefer ctx.allocator().destroy(task);
+        task.* = .{
+            .token = try ctx.allocator().dupe(u8, token),
+            .game_id = game.id,
+            .request_id = request_id,
+        };
+        errdefer ctx.allocator().free(task.token);
+
+        ctx.spawnWith(task, ForumListTask.run) catch |err| {
+            self.forums.setFailed("Could not start forum loading task");
+            return err;
+        };
+    }
+
+    fn finishForumList(self: *App, task_result: ForumListTaskResult) !void {
+        if (task_result.request_id != self.forum_request_id) {
+            switch (task_result.result) {
+                .ok => |forums| bgg_xml.freeForums(self.allocator.?, forums),
+                .failed => {},
+            }
+            return;
+        }
+
+        switch (task_result.result) {
+            .ok => |forums| try self.forums.setForumsLoaded(self.allocator.?, forums),
+            .failed => |message| self.forums.setFailed(message),
+        }
+    }
+
+    fn startForumThreads(self: *App, ctx: *chasen.Ctx(Msg), visible_index: usize, page: u32) !void {
+        const forum = self.forums.selectedForumFromVisible(visible_index) orelse return;
+        self.thread_list_request_id +%= 1;
+        const request_id = self.thread_list_request_id;
+        self.forums.startThreadLoad(self.allocator.?, visible_index);
+        try self.spawnForumThreadsTask(ctx, forum.id, page, request_id);
+    }
+
+    fn openForumPage(self: *App, ctx: *chasen.Ctx(Msg), page: u32) !void {
+        const forum = self.forums.selectedForum() orelse return;
+        self.thread_list_request_id +%= 1;
+        const request_id = self.thread_list_request_id;
+        self.forums.startThreadPageLoad(self.allocator.?, page);
+        try self.spawnForumThreadsTask(ctx, forum.id, page, request_id);
+    }
+
+    fn spawnForumThreadsTask(self: *App, ctx: *chasen.Ctx(Msg), forum_id: u32, page: u32, request_id: u64) !void {
+        const token = self.config.apiClientToken() orelse {
+            self.forums.setFailed("BGG API token is required");
+            return;
+        };
+
+        const task = try ctx.allocator().create(ForumThreadsTask);
+        errdefer ctx.allocator().destroy(task);
+        task.* = .{
+            .token = try ctx.allocator().dupe(u8, token),
+            .forum_id = forum_id,
+            .page = page,
+            .request_id = request_id,
+        };
+        errdefer ctx.allocator().free(task.token);
+
+        ctx.spawnWith(task, ForumThreadsTask.run) catch |err| {
+            self.forums.setFailed("Could not start thread list loading task");
+            return err;
+        };
+    }
+
+    fn finishForumThreads(self: *App, task_result: ForumThreadsTaskResult) !void {
+        if (task_result.request_id != self.thread_list_request_id) {
+            switch (task_result.result) {
+                .ok => |thread_page| bgg_xml.freeThreadList(self.allocator.?, thread_page),
+                .failed => {},
+            }
+            return;
+        }
+
+        switch (task_result.result) {
+            .ok => |thread_page| try self.forums.setThreadsLoaded(self.allocator.?, thread_page),
+            .failed => |message| self.forums.setFailed(message),
+        }
+    }
+
+    fn backToForumList(self: *App) void {
+        self.thread_list_request_id +%= 1;
+        self.forums.backToForumList(self.allocator.?);
+    }
+
     fn drawListPosition(self: *const App, surface: *chasen.Surface, list: *const ui.List) !void {
         _ = self;
         const item_count = list.items.len;
@@ -1138,6 +1352,38 @@ pub const App = struct {
         _ = self;
         if (surface.size().width <= 12 or surface.size().height <= list_position_row) return;
         _ = surface.textAt(10, list_position_row, label, .{ .dim = true });
+    }
+
+    fn forumThreadTitle(self: *const App) []const u8 {
+        if (self.forums.selectedForum()) |forum| return forum.title;
+        return "Threads";
+    }
+
+    fn drawForumThreadList(self: *const App, surface: *chasen.Surface) !void {
+        const threads = self.forums.thread_page.threads;
+        if (threads.len == 0 or surface.size().height == 0) return;
+
+        // Go version renders each thread as subject + metadata, so one logical
+        // item consumes two terminal rows.
+        const visible_items = @max(@as(usize, 1), surface.size().height / 2);
+        const range = list_view.visibleRange(threads.len, self.forums.thread_list.focusedIndex(), visible_items);
+        const focused_index = self.forums.thread_list.focusedIndex();
+
+        for (threads[range.start..range.end], 0..) |thread, local_index| {
+            const global_index = range.start + local_index;
+            const row: u16 = @intCast(local_index * 2);
+            if (row >= surface.size().height) break;
+
+            const focused = global_index == focused_index;
+            const marker = if (focused) ">" else " ";
+            _ = surface.textAt(0, row, marker, .{});
+            _ = surface.textAt(2, row, thread.subject, if (focused) .{ .bold = true, .fg = .{ .index = 14 } } else .{});
+
+            if (row + 1 < surface.size().height) {
+                const meta = try screens.forum.threadMetaText(surface.frameAllocator(), thread);
+                _ = surface.textAt(4, row + 1, meta, .{ .dim = true });
+            }
+        }
     }
 
     fn drawEmptyState(self: *const App, surface: *chasen.Surface, row: u16, title: []const u8, message: []const u8) void {
@@ -1248,7 +1494,11 @@ pub const App = struct {
                 "Type: filter  Up/Down: move  Enter: detail  Esc: clear  b: search"
             else
                 "Up/Down: move  Enter: detail  /: filter  s: sort  b/Esc: search  m: menu  q: quit",
-            .game_detail => "b/Esc: back  m: menu  q: quit",
+            .game_detail => "f: forums  b/Esc: back  m: menu  q: quit",
+            .forums => switch (self.forums.mode) {
+                .forum_list => "Up/Down: move  Enter: threads  b: detail  Esc/m: menu  q: quit",
+                .thread_list => "Up/Down: move  n/p: page  b: forums  Esc/m: menu  q: quit",
+            },
             .collection => switch (self.collection.load_state) {
                 .idle, .failed => "Enter: load  Esc: menu",
                 .loading => "Esc: menu",
@@ -1734,6 +1984,26 @@ const GameDetailTaskResult = struct {
     result: GameDetailResult,
 };
 
+const ForumListResult = union(enum) {
+    ok: []bgg_model.Forum,
+    failed: []const u8,
+};
+
+const ForumListTaskResult = struct {
+    request_id: u64,
+    result: ForumListResult,
+};
+
+const ForumThreadsResult = union(enum) {
+    ok: bgg_model.ThreadList,
+    failed: []const u8,
+};
+
+const ForumThreadsTaskResult = struct {
+    request_id: u64,
+    result: ForumThreadsResult,
+};
+
 const ListSortMode = enum {
     source,
     name_asc,
@@ -1832,6 +2102,45 @@ const GameDetailTask = struct {
     }
 };
 
+const ForumListTask = struct {
+    token: []const u8,
+    game_id: u32,
+    request_id: u64,
+
+    fn run(ctx_ptr: *anyopaque, allocator: std.mem.Allocator, io: std.Io) App.Msg {
+        const task: *ForumListTask = @ptrCast(@alignCast(ctx_ptr));
+        defer {
+            allocator.free(task.token);
+            allocator.destroy(task);
+        }
+
+        return .{ .forums_loaded = .{
+            .request_id = task.request_id,
+            .result = loadForumList(allocator, io, task.token, task.game_id) catch |err| .{ .failed = @errorName(err) },
+        } };
+    }
+};
+
+const ForumThreadsTask = struct {
+    token: []const u8,
+    forum_id: u32,
+    page: u32,
+    request_id: u64,
+
+    fn run(ctx_ptr: *anyopaque, allocator: std.mem.Allocator, io: std.Io) App.Msg {
+        const task: *ForumThreadsTask = @ptrCast(@alignCast(ctx_ptr));
+        defer {
+            allocator.free(task.token);
+            allocator.destroy(task);
+        }
+
+        return .{ .forum_threads_loaded = .{
+            .request_id = task.request_id,
+            .result = loadForumThreads(allocator, io, task.token, task.forum_id, task.page) catch |err| .{ .failed = @errorName(err) },
+        } };
+    }
+};
+
 fn loadHotGames(allocator: std.mem.Allocator, io: std.Io, token: []const u8) !HotGamesResult {
     var client = bgg_client.Client.init(allocator, io, .{ .token = token });
     defer client.deinit();
@@ -1917,6 +2226,49 @@ fn loadGameDetail(allocator: std.mem.Allocator, io: std.Io, token: []const u8, g
                 else => return .{ .failed = apiErrorMessage(bgg_error.classifyParseError(parse_error)) },
             };
             return .{ .ok = games };
+        },
+        .api_error => |err| return .{ .failed = apiErrorMessage(err) },
+    }
+}
+
+fn loadForumList(allocator: std.mem.Allocator, io: std.Io, token: []const u8, game_id: u32) !ForumListResult {
+    var client = bgg_client.Client.init(allocator, io, .{ .token = token });
+    defer client.deinit();
+
+    const path = try bgg_endpoint.forumList(allocator, game_id);
+    defer allocator.free(path);
+
+    const result = try client.getPath(path, .generic);
+    switch (result) {
+        .ok => |response| {
+            defer response.deinit(allocator);
+            const forums = bgg_xml.parseForumListResponse(allocator, response.body) catch |parse_error| switch (parse_error) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => return .{ .failed = apiErrorMessage(bgg_error.classifyParseError(parse_error)) },
+            };
+            return .{ .ok = forums };
+        },
+        .api_error => |err| return .{ .failed = apiErrorMessage(err) },
+    }
+}
+
+fn loadForumThreads(allocator: std.mem.Allocator, io: std.Io, token: []const u8, forum_id: u32, page: u32) !ForumThreadsResult {
+    var client = bgg_client.Client.init(allocator, io, .{ .token = token });
+    defer client.deinit();
+
+    const requested_page = if (page == 0) 1 else page;
+    const path = try bgg_endpoint.forum(allocator, forum_id, requested_page);
+    defer allocator.free(path);
+
+    const result = try client.getPath(path, .generic);
+    switch (result) {
+        .ok => |response| {
+            defer response.deinit(allocator);
+            const threads = bgg_xml.parseForumResponse(allocator, response.body, requested_page) catch |parse_error| switch (parse_error) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => return .{ .failed = apiErrorMessage(bgg_error.classifyParseError(parse_error)) },
+            };
+            return .{ .ok = threads };
         },
         .api_error => |err| return .{ .failed = apiErrorMessage(err) },
     }
@@ -2062,6 +2414,10 @@ fn constrainedListSurface(surface: *chasen.Surface) chasen.Surface {
     return surface.child(ui.layout.center(surfaceRect(surface), list_screen_max_size));
 }
 
+fn forumSurface(surface: *chasen.Surface) chasen.Surface {
+    return surface.child(ui.layout.center(surfaceRect(surface), forum_screen_max_size));
+}
+
 fn surfaceRect(surface: *const chasen.Surface) chasen.Rect {
     const size = surface.size();
     return .{ .col = 0, .row = 0, .width = size.width, .height = size.height };
@@ -2085,6 +2441,7 @@ fn screenTitle(screen: Screen) []const u8 {
         .search => "search",
         .search_results => "search results",
         .game_detail => "game detail",
+        .forums => "forums",
         .collection => "collection",
         .settings => "settings",
     };
@@ -2150,6 +2507,7 @@ test "screen titles match status labels" {
     try std.testing.expectEqualStrings("search", screenTitle(.search));
     try std.testing.expectEqualStrings("search results", screenTitle(.search_results));
     try std.testing.expectEqualStrings("game detail", screenTitle(.game_detail));
+    try std.testing.expectEqualStrings("forums", screenTitle(.forums));
     try std.testing.expectEqualStrings("collection", screenTitle(.collection));
     try std.testing.expectEqualStrings("settings", screenTitle(.settings));
 }
@@ -2176,7 +2534,13 @@ test "footer hint matches screen key handling" {
     app.search.filter_active = false;
 
     app.screen = .game_detail;
-    try std.testing.expectEqualStrings("b/Esc: back  m: menu  q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("f: forums  b/Esc: back  m: menu  q: quit", app.footerHint());
+
+    app.screen = .forums;
+    app.forums.mode = .forum_list;
+    try std.testing.expectEqualStrings("Up/Down: move  Enter: threads  b: detail  Esc/m: menu  q: quit", app.footerHint());
+    app.forums.mode = .thread_list;
+    try std.testing.expectEqualStrings("Up/Down: move  n/p: page  b: forums  Esc/m: menu  q: quit", app.footerHint());
 
     app.screen = .collection;
     try std.testing.expectEqualStrings("Enter: load  Esc: menu", app.footerHint());
@@ -2578,6 +2942,61 @@ test "game detail escape returns to previous list screen" {
 
     const msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.escape } }).?;
     try std.testing.expectEqual(App.Msg{ .show_screen = .search_results }, msg);
+}
+
+test "loaded game detail f opens forums" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    const games = try std.testing.allocator.alloc(bgg_model.Game, 1);
+    games[0] = .{ .id = 13, .name = try std.testing.allocator.dupe(u8, "Catan") };
+    try app.game_detail.setLoaded(std.testing.allocator, games);
+    app.screen = .game_detail;
+
+    const msg = app.handleEvent(.{ .key_press = .{ .codepoint = 'f' } }).?;
+    try std.testing.expect(msg == .forum_open);
+}
+
+test "forum back key returns to detail or forum list" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    app.screen = .forums;
+    app.forums.mode = .forum_list;
+    const detail_msg = app.handleEvent(.{ .key_press = .{ .codepoint = 'b' } }).?;
+    try std.testing.expect(detail_msg == .forum_back_to_detail);
+
+    app.forums.mode = .thread_list;
+    const list_msg = app.handleEvent(.{ .key_press = .{ .codepoint = 'b' } }).?;
+    try std.testing.expect(list_msg == .forum_back_to_list);
+}
+
+test "forum back to list invalidates in-flight thread load" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    app.thread_list_request_id = 7;
+    app.forums.mode = .thread_list;
+    app.backToForumList();
+    try std.testing.expectEqual(@as(u64, 8), app.thread_list_request_id);
+    try std.testing.expectEqual(screens.forum.Mode.forum_list, app.forums.mode);
+
+    const threads = try std.testing.allocator.alloc(bgg_model.ThreadSummary, 1);
+    threads[0] = .{
+        .id = 100,
+        .subject = try std.testing.allocator.dupe(u8, "Old response"),
+        .author = try std.testing.allocator.dupe(u8, "hiro"),
+    };
+    try app.finishForumThreads(.{
+        .request_id = 7,
+        .result = .{ .ok = .{ .threads = threads, .page = 1, .total_pages = 1 } },
+    });
+
+    try std.testing.expectEqual(screens.forum.Mode.forum_list, app.forums.mode);
+    try std.testing.expect(app.forums.thread_page.threads.len == 0);
 }
 
 test "game detail view hides cursor left by previous screen" {
