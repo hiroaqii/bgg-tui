@@ -36,6 +36,7 @@ const collection_status_bar_row: u16 = 3;
 const collection_body_row: u16 = 5;
 const collection_status_picker_gap: u16 = 1;
 const collection_status_picker_lines: u16 = 10;
+const main_menu_shortcut_col: u16 = 24;
 
 const collection_status_labels = [_][]const u8{
     "Owned",
@@ -777,21 +778,24 @@ pub const App = struct {
     fn viewMainMenu(self: *const App, sfc: *chasen.Surface) !void {
         var area = centeredSurface(sfc, main_menu_size);
         const token_status = if (self.config.apiClientToken() == null) "missing" else "configured";
-        _ = area.borrowTextAt(0, 0, "Main menu", .{ .bold = true });
-        _ = try area.printAt(0, 2, .{ .fg = .gray }, "BGG API token: {s}", .{token_status});
+        drawCenteredText(&area, 0, "Main menu", .{ .bold = true });
+        const token_text = try std.fmt.allocPrint(area.frameAllocator(), "BGG API token: {s}", .{token_status});
+        drawCenteredText(&area, 2, token_text, .{ .fg = .gray });
 
+        const menu_width = mainMenuContentWidth();
+        const menu_col: u16 = if (menu_width >= area.size().width) 0 else @intCast((area.size().width - menu_width) / 2);
         var menu_area = area.child(.{
-            .col = 0,
+            .col = menu_col,
             .row = 4,
-            .width = @min(area.size().width, 36),
+            .width = @min(area.size().width, menu_width),
             .height = @min(area.size().height -| 4, @as(u16, menu_items.len)),
         });
         self.menu.view(&menu_area, .{
-            .shortcut_col = 24,
+            .shortcut_col = main_menu_shortcut_col,
             .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
         });
 
-        _ = area.borrowTextAt(0, 10, self.footerHint(), .{ .dim = true });
+        drawCenteredText(&area, 10, self.footerHint(), .{ .dim = true });
     }
 
     fn viewPlaceholder(self: *const App, sfc: *chasen.Surface, title: []const u8, message: []const u8) void {
@@ -1021,20 +1025,15 @@ pub const App = struct {
                 self.drawCenteredGuidance(&area, title, "Loading BoardGameGeek forums...");
             },
             .forums_loaded => {
-                _ = try area.printAt(0, 0, .{ .bold = true, .fg = .{ .index = 14 } }, "{s} - Forums", .{self.forums.game_name});
                 if (self.forums.forum_list.items.len == 0) {
                     self.drawCenteredGuidance(&area, "No forums", "BGG did not return forums for this game.");
                 } else {
-                    var list_area = area.child(.{
-                        .col = 0,
-                        .row = list_body_row,
-                        .width = area.size().width,
-                        .height = area.size().height -| (list_body_row + 1),
-                    });
-                    list_view.viewListWithDensity(&self.forums.forum_list, &list_area, .{
-                        .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
-                    }, self.listDensity());
-                    try self.drawListPosition(&area, &self.forums.forum_list);
+                    var forum_area = forumListSurface(&area, self.forums.forum_list.items.len);
+                    const title = try std.fmt.allocPrint(forum_area.frameAllocator(), "{s} - Forums", .{self.forums.game_name});
+                    drawCenteredText(&forum_area, 0, title, .{ .bold = true, .fg = .{ .index = 14 } });
+                    try self.drawCenteredListPosition(&forum_area, &self.forums.forum_list);
+                    try self.drawCenteredForumList(&forum_area);
+                    drawCenteredText(&forum_area, forum_area.size().height -| 1, self.footerHint(), .{ .dim = true });
                 }
             },
             .loading_threads => {
@@ -1060,7 +1059,9 @@ pub const App = struct {
             },
         }
 
-        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
+        if (self.forums.load_state != .forums_loaded or self.forums.forum_list.items.len == 0) {
+            _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
+        }
     }
 
     fn viewThread(self: *const App, sfc: *chasen.Surface) !void {
@@ -1818,6 +1819,15 @@ pub const App = struct {
         _ = surface.borrowTextAt(0, list_position_row, text, .{ .dim = true });
     }
 
+    fn drawCenteredListPosition(self: *const App, surface: *chasen.Surface, list: *const ui.List) !void {
+        _ = self;
+        const item_count = list.items.len;
+        if (item_count == 0 or surface.size().height < 2) return;
+
+        const text = try list_view.focusedPositionText(surface.frameAllocator(), list.focusedIndex(), item_count);
+        drawCenteredText(surface, list_position_row, text, .{ .dim = true });
+    }
+
     fn drawSortMode(self: *const App, surface: *chasen.Surface, label: []const u8) void {
         _ = self;
         if (surface.size().width <= 12 or surface.size().height <= list_position_row) return;
@@ -1854,6 +1864,29 @@ pub const App = struct {
                 _ = surface.borrowTextAt(4, row + 1, meta, .{ .dim = true });
             }
         }
+    }
+
+    fn drawCenteredForumList(self: *const App, surface: *chasen.Surface) !void {
+        const list = &self.forums.forum_list;
+        const focused_index = list.focusedIndex();
+        const content_col = centeredForumListCol(surface, list.items);
+        for (list.items, 0..) |item, index| {
+            const row = list_body_row + @as(u16, @intCast(index));
+            if (row >= surface.size().height) break;
+            const marker = if (index == focused_index) "> " else "  ";
+            const text = try std.fmt.allocPrint(surface.frameAllocator(), "{s}{s}", .{ marker, item });
+            _ = surface.borrowTextAt(content_col, row, text, if (index == focused_index) .{ .bold = true, .fg = .{ .index = 14 } } else .{});
+        }
+    }
+
+    fn centeredForumListCol(surface: *chasen.Surface, items: []const []const u8) u16 {
+        var max_width: usize = 0;
+        for (items) |item| {
+            max_width = @max(max_width, chasen.text.displayWidth(item) + 2);
+        }
+        const surface_width = surface.size().width;
+        if (max_width >= surface_width) return 0;
+        return @intCast((surface_width - max_width) / 2);
     }
 
     fn drawThreadBody(self: *const App, surface: *chasen.Surface) void {
@@ -3010,6 +3043,17 @@ fn centeredSurface(surface: *chasen.Surface, size: chasen.Size) chasen.Surface {
     return surface.child(ui.layout.center(surfaceRect(surface), size));
 }
 
+fn mainMenuContentWidth() u16 {
+    var width: usize = 0;
+    for (menu_items) |item| {
+        width = @max(width, 2 + chasen.text.displayWidth(item.label));
+        if (item.shortcut) |shortcut| {
+            width = @max(width, @as(usize, main_menu_shortcut_col) + chasen.text.displayWidth(shortcut));
+        }
+    }
+    return @intCast(@min(width, std.math.maxInt(u16)));
+}
+
 fn detailSurface(surface: *chasen.Surface, configured_width: u16) chasen.Surface {
     // Detail is long-form content, so it uses the available body height while
     // still constraining width through the user's display setting.
@@ -3025,6 +3069,15 @@ fn constrainedListSurface(surface: *chasen.Surface) chasen.Surface {
 
 fn forumSurface(surface: *chasen.Surface) chasen.Surface {
     return surface.child(ui.layout.center(surfaceRect(surface), forum_screen_max_size));
+}
+
+fn forumListSurface(surface: *chasen.Surface, item_count: usize) chasen.Surface {
+    const count: u16 = @intCast(@min(item_count, std.math.maxInt(u16)));
+    const height = @min(forum_screen_max_size.height, @max(@as(u16, 7), list_body_row + count + 2));
+    return surface.child(ui.layout.center(surfaceRect(surface), .{
+        .width = forum_screen_max_size.width,
+        .height = height,
+    }));
 }
 
 fn threadSurface(surface: *chasen.Surface, configured_width: u16) chasen.Surface {
