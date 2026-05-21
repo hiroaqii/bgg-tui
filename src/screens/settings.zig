@@ -17,6 +17,11 @@ const Item = struct {
     kind: Kind,
 };
 
+pub const EditField = enum {
+    token,
+    username,
+};
+
 const items = [_]Item{
     .{ .label = "Color Theme", .section = "Interface", .kind = .cycle },
     .{ .label = "Transition", .kind = .cycle },
@@ -39,22 +44,26 @@ pub const required_size = chasen.Size{ .width = 72, .height = 26 };
 
 pub const State = struct {
     list: ui.List = ui.List.init(.{ .items = itemLabels() }),
-    editing_token: bool = false,
+    editing: ?EditField = null,
 
     pub fn updateList(self: *State, msg: ui.List.Msg) void {
         self.list.update(msg);
     }
 
-    pub fn startTokenEdit(self: *State) void {
-        self.editing_token = true;
+    pub fn startEdit(self: *State, field: EditField) void {
+        self.editing = field;
     }
 
     pub fn stopEditing(self: *State) void {
-        self.editing_token = false;
+        self.editing = null;
     }
 
-    pub fn canEditFocusedToken(self: *const State) bool {
-        return self.list.focusedIndex() == token_index;
+    pub fn focusedEditField(self: *const State) ?EditField {
+        return switch (self.list.focusedIndex()) {
+            username_index => .username,
+            token_index => .token,
+            else => null,
+        };
     }
 
     pub fn handleEvent(self: *const State, event: chasen.Event) ?ui.List.Msg {
@@ -71,11 +80,12 @@ pub const State = struct {
         config: config_mod.Config,
         config_path: ?[]const u8,
         token_input: ?*const ui.PasswordInput,
+        username_input: ?*const ui.TextInput,
     ) !void {
         const size = surface.size();
         if (size.width == 0 or size.height == 0) return;
 
-        if (!self.editing_token) surface.hideCursor();
+        if (self.editing == null) surface.hideCursor();
         _ = surface.borrowTextAt(0, 0, "Settings", .{ .bold = true, .fg = .{ .index = 14 } });
 
         var row: u16 = 2;
@@ -90,15 +100,15 @@ pub const State = struct {
             }
             if (row >= size.height) return;
 
-            try drawItem(surface, row, index, item, current_section, config, config_path, self.list.focus.isFocused(index), self.editing_token, token_input);
+            try drawItem(surface, row, index, item, current_section, config, config_path, self.list.focus.isFocused(index), self.editing, token_input, username_input);
             row += 1;
         }
 
         if (row < size.height) {
-            const help = if (self.editing_token)
+            const help = if (self.editing != null)
                 "Enter: Save  Esc: Cancel"
-            else if (self.canEditFocusedToken())
-                "j/k ↑↓: Navigate  Enter: Edit Token  m: Menu  Esc/q: Quit"
+            else if (self.focusedEditField()) |field|
+                editHelp(field)
             else
                 "j/k ↑↓: Navigate  m: Menu  Esc/q: Quit";
             _ = surface.borrowTextAt(0, row +| 1, help, .{ .dim = true });
@@ -115,8 +125,9 @@ fn drawItem(
     config: config_mod.Config,
     config_path: ?[]const u8,
     focused: bool,
-    editing_token: bool,
+    editing: ?EditField,
     token_input: ?*const ui.PasswordInput,
+    username_input: ?*const ui.TextInput,
 ) !void {
     const label_style: chasen.TextStyle = if (focused) .{ .bold = true, .fg = .{ .index = 14 } } else .{};
     const cursor = if (focused) "> " else "  ";
@@ -132,16 +143,7 @@ fn drawItem(
     _ = surface.borrowTextAt(2, row, item.label, label_style);
     const value_col: u16 = @intCast(2 + sectionWidth(section) + 2);
     _ = surface.borrowTextAt(value_col - 2, row, ":", .{});
-    if (index == token_index and editing_token) {
-        if (token_input) |input| {
-            var input_area = surface.child(.{
-                .col = value_col,
-                .row = row,
-                .width = surface.size().width -| value_col,
-                .height = 1,
-            });
-            input.view(&input_area, .{});
-        }
+    if (drawEditingInput(surface, row, value_col, index, editing, token_input, username_input)) {
         return;
     }
     switch (item.kind) {
@@ -154,6 +156,50 @@ fn drawItem(
     }
 }
 
+fn drawEditingInput(
+    surface: *chasen.Surface,
+    row: u16,
+    col: u16,
+    index: usize,
+    editing: ?EditField,
+    token_input: ?*const ui.PasswordInput,
+    username_input: ?*const ui.TextInput,
+) bool {
+    const field = editing orelse return false;
+    const input_rect = chasen.Rect{
+        .col = col,
+        .row = row,
+        .width = surface.size().width -| col,
+        .height = 1,
+    };
+    switch (field) {
+        .token => {
+            if (index != token_index) return false;
+            if (token_input) |input| {
+                var input_area = surface.child(input_rect);
+                input.view(&input_area, .{});
+            }
+            return true;
+        },
+        .username => {
+            if (index != username_index) return false;
+            if (username_input) |input| {
+                var input_area = surface.child(input_rect);
+                input.view(&input_area, .{});
+            }
+            return true;
+        },
+    }
+}
+
+fn editHelp(field: EditField) []const u8 {
+    return switch (field) {
+        .token => "j/k ↑↓: Navigate  Enter: Edit Token  m: Menu  Esc/q: Quit",
+        .username => "j/k ↑↓: Navigate  Enter: Edit Username  m: Menu  Esc/q: Quit",
+    };
+}
+
+const username_index: usize = 10;
 const token_index: usize = 11;
 
 fn valueFor(surface: *chasen.Surface, index: usize, config: config_mod.Config, config_path: ?[]const u8) ![]const u8 {
@@ -228,4 +274,14 @@ test "settings list movement is delegated to ui.List" {
     try std.testing.expectEqual(@as(usize, 1), state.list.focusedIndex());
     state.updateList(.move_prev);
     try std.testing.expectEqual(@as(usize, 0), state.list.focusedIndex());
+}
+
+test "settings focused edit field follows editable rows" {
+    var state: State = .{};
+
+    try std.testing.expect(state.focusedEditField() == null);
+    for (0..username_index) |_| state.updateList(.move_next);
+    try std.testing.expectEqual(EditField.username, state.focusedEditField().?);
+    state.updateList(.move_next);
+    try std.testing.expectEqual(EditField.token, state.focusedEditField().?);
 }
