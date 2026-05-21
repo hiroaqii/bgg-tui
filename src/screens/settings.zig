@@ -25,6 +25,10 @@ pub const EditField = enum {
     detail_width,
 };
 
+pub const CycleField = enum {
+    image_protocol,
+};
+
 const items = [_]Item{
     .{ .label = "Color Theme", .section = "Interface", .kind = .cycle },
     .{ .label = "Transition", .kind = .cycle },
@@ -33,6 +37,7 @@ const items = [_]Item{
     .{ .label = "List Density", .kind = .cycle },
     .{ .label = "Date Format", .kind = .cycle },
     .{ .label = "Show Images", .section = "Display", .kind = .toggle },
+    .{ .label = "Image Protocol", .kind = .cycle },
     .{ .label = "List Width", .kind = .text },
     .{ .label = "Thread Width", .kind = .text },
     .{ .label = "Detail Width", .kind = .text },
@@ -43,7 +48,7 @@ const items = [_]Item{
 
 /// Size needed to show the Go-compatible settings shell: title, section gaps,
 /// all rows through Config File, and the in-content help line.
-pub const required_size = chasen.Size{ .width = 72, .height = 26 };
+pub const required_size = chasen.Size{ .width = 72, .height = 27 };
 
 pub const State = struct {
     list: ui.List = ui.List.init(.{ .items = itemLabels() }),
@@ -68,6 +73,13 @@ pub const State = struct {
             detail_width_index => .detail_width,
             username_index => .username,
             token_index => .token,
+            else => null,
+        };
+    }
+
+    pub fn focusedCycleField(self: *const State) ?CycleField {
+        return switch (self.list.focusedIndex()) {
+            image_protocol_index => .image_protocol,
             else => null,
         };
     }
@@ -120,6 +132,8 @@ pub const State = struct {
                 "Enter: Save  Esc: Cancel"
             else if (self.focusedEditField()) |field|
                 editHelp(field)
+            else if (self.focusedCycleField()) |field|
+                cycleHelp(field)
             else if (self.isShowImagesFocused())
                 "j/k ↑↓: Navigate  Enter: Toggle Images  m: Menu  Esc/q: Quit"
             else
@@ -225,6 +239,12 @@ fn editHelp(field: EditField) []const u8 {
     };
 }
 
+fn cycleHelp(field: CycleField) []const u8 {
+    return switch (field) {
+        .image_protocol => "j/k ↑↓: Navigate  Enter: Change Image Protocol  m: Menu  Esc/q: Quit",
+    };
+}
+
 fn fieldIndex(field: EditField) usize {
     return switch (field) {
         .list_width => list_width_index,
@@ -235,12 +255,13 @@ fn fieldIndex(field: EditField) usize {
     };
 }
 
-const list_width_index: usize = 7;
-const thread_width_index: usize = 8;
-const detail_width_index: usize = 9;
-const username_index: usize = 10;
-const token_index: usize = 11;
 const show_images_index: usize = 6;
+const image_protocol_index: usize = 7;
+const list_width_index: usize = 8;
+const thread_width_index: usize = 9;
+const detail_width_index: usize = 10;
+const username_index: usize = 11;
+const token_index: usize = 12;
 
 fn valueFor(surface: *chasen.Surface, index: usize, config: config_mod.Config, config_path: ?[]const u8) ![]const u8 {
     return switch (index) {
@@ -251,12 +272,13 @@ fn valueFor(surface: *chasen.Surface, index: usize, config: config_mod.Config, c
         4 => config.interface.list_density,
         5 => config.interface.date_format,
         6 => if (config.display.show_images) "ON" else "OFF",
-        7 => try std.fmt.allocPrint(surface.frameAllocator(), "{d}", .{config.display.list_width}),
-        8 => try std.fmt.allocPrint(surface.frameAllocator(), "{d}", .{config.display.thread_width}),
-        9 => try std.fmt.allocPrint(surface.frameAllocator(), "{d}", .{config.display.detail_width}),
-        10 => config.collection.default_username orelse "(not set)",
-        11 => try maskedToken(surface, config.apiClientToken()),
-        12 => config_path orelse "(unknown)",
+        7 => @tagName(config.display.image_protocol),
+        8 => try std.fmt.allocPrint(surface.frameAllocator(), "{d}", .{config.display.list_width}),
+        9 => try std.fmt.allocPrint(surface.frameAllocator(), "{d}", .{config.display.thread_width}),
+        10 => try std.fmt.allocPrint(surface.frameAllocator(), "{d}", .{config.display.detail_width}),
+        11 => config.collection.default_username orelse "(not set)",
+        12 => try maskedToken(surface, config.apiClientToken()),
+        13 => config_path orelse "(unknown)",
         else => "",
     };
 }
@@ -302,7 +324,7 @@ fn itemLabels() []const []const u8 {
 test "settings state exposes the configured settings rows" {
     const state: State = .{};
 
-    try std.testing.expectEqual(@as(usize, 13), state.list.items.len);
+    try std.testing.expectEqual(@as(usize, 14), state.list.items.len);
     try std.testing.expectEqualStrings("Color Theme", state.list.items[0]);
     try std.testing.expectEqualStrings("", state.list.items[state.list.items.len - 1]);
 }
@@ -343,5 +365,14 @@ test "settings exposes show images focused row" {
     for (0..show_images_index) |_| state.updateList(.move_next);
 
     try std.testing.expect(state.isShowImagesFocused());
+    try std.testing.expect(state.focusedEditField() == null);
+}
+
+test "settings exposes image protocol cycle row" {
+    var state: State = .{};
+
+    for (0..image_protocol_index) |_| state.updateList(.move_next);
+
+    try std.testing.expectEqual(CycleField.image_protocol, state.focusedCycleField().?);
     try std.testing.expect(state.focusedEditField() == null);
 }

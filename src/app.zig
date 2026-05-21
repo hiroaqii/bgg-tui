@@ -176,6 +176,7 @@ pub const App = struct {
         settings_width_submit,
         settings_width_cancel,
         settings_show_images_toggle,
+        settings_cycle_next: screens.settings.CycleField,
         settings_list: ui.List.Msg,
         terminal_resized: chasen.Size,
         menu: ui.Menu.Msg,
@@ -411,6 +412,7 @@ pub const App = struct {
             .settings_width_submit => try self.submitSettingsWidth(ctx),
             .settings_width_cancel => self.cancelSettingsWidthEdit(),
             .settings_show_images_toggle => try self.toggleSettingsShowImages(ctx),
+            .settings_cycle_next => |field| try self.cycleSettingsField(ctx, field),
             .settings_list => |list_msg| self.settings.updateList(list_msg),
             .terminal_resized => |size| self.handleResize(size),
             .menu => |menu_msg| switch (menu_msg) {
@@ -684,6 +686,7 @@ pub const App = struct {
                 .key_press => |key| {
                     if (key.matches(chasen.Key.enter, .{})) {
                         if (self.settings.isShowImagesFocused()) return .settings_show_images_toggle;
+                        if (self.settings.focusedCycleField()) |field| return .{ .settings_cycle_next = field };
                         if (self.settings.focusedEditField()) |field| {
                             return switch (field) {
                                 .token => .settings_token_start,
@@ -1222,6 +1225,15 @@ pub const App = struct {
 
     fn toggleSettingsShowImages(self: *App, ctx: *chasen.Ctx(Msg)) !void {
         self.config.display.show_images = !self.config.display.show_images;
+        if (self.config_path) |path| {
+            try config_mod.saveConfig(ctx.allocator(), ctx.io(), path, self.config);
+        }
+    }
+
+    fn cycleSettingsField(self: *App, ctx: *chasen.Ctx(Msg), field: screens.settings.CycleField) !void {
+        switch (field) {
+            .image_protocol => self.config.display.image_protocol = nextImageProtocol(self.config.display.image_protocol),
+        }
         if (self.config_path) |path| {
             try config_mod.saveConfig(ctx.allocator(), ctx.io(), path, self.config);
         }
@@ -3180,6 +3192,14 @@ fn parseSettingsWidth(text: []const u8) !u16 {
     return value;
 }
 
+fn nextImageProtocol(current: config_mod.ImageProtocol) config_mod.ImageProtocol {
+    return switch (current) {
+        .auto => .kitty,
+        .kitty => .off,
+        .off => .auto,
+    };
+}
+
 test "app initializes with main menu screen" {
     const app = App.create(.{ .api = .{ .token = "token" } }, .{});
 
@@ -3263,7 +3283,7 @@ test "footer hint matches screen key handling" {
 
     app.screen = .settings;
     try std.testing.expectEqualStrings("Up/Down: move  m: menu  Esc/q: quit", app.footerHint());
-    for (0..7) |_| app.settings.updateList(.move_next);
+    for (0..8) |_| app.settings.updateList(.move_next);
     try std.testing.expectEqualStrings("Up/Down: move  Enter: edit list width  m: menu  Esc/q: quit", app.footerHint());
     app.settings.updateList(.move_next);
     try std.testing.expectEqualStrings("Up/Down: move  Enter: edit thread width  m: menu  Esc/q: quit", app.footerHint());
@@ -4084,6 +4104,39 @@ test "settings show images toggle saves config when path is available" {
     defer loaded.deinit(std.testing.allocator);
 
     try std.testing.expect(!loaded.config.display.show_images);
+}
+
+test "settings image protocol cycles through supported values" {
+    var app = App.create(.{ .display = .{ .image_protocol = .auto } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.cycleSettingsField(&tc.ctx, .image_protocol);
+    try std.testing.expectEqual(config_mod.ImageProtocol.kitty, app.config.display.image_protocol);
+
+    try app.cycleSettingsField(&tc.ctx, .image_protocol);
+    try std.testing.expectEqual(config_mod.ImageProtocol.off, app.config.display.image_protocol);
+
+    try app.cycleSettingsField(&tc.ctx, .image_protocol);
+    try std.testing.expectEqual(config_mod.ImageProtocol.auto, app.config.display.image_protocol);
+}
+
+test "settings image protocol cycle saves config when path is available" {
+    const path = ".zig-cache/test-bgg-tui-settings-image-protocol/config.toml";
+
+    var app = App.create(.{ .display = .{ .image_protocol = .auto } }, .{ .config_path = path });
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{
+        .ctx = .{ ._allocator = std.testing.allocator, ._io = std.testing.io },
+    };
+    try app.cycleSettingsField(&tc.ctx, .image_protocol);
+
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    var loaded = try config_mod.loadConfig(std.testing.allocator, std.testing.io, path, &env);
+    defer loaded.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(config_mod.ImageProtocol.kitty, loaded.config.display.image_protocol);
 }
 
 test "hot games state owns labels for loaded games" {
