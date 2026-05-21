@@ -104,7 +104,7 @@ pub const App = struct {
     thread_request_id: u64 = 0,
     browser_request_id: u64 = 0,
     settings: screens.settings.State = .{},
-    terminal_height: u16 = forum_screen_max_size.height,
+    terminal_size: chasen.Size = forum_screen_max_size,
     menu: ui.Menu = ui.Menu.init(.{ .items = &menu_items }),
     shell: ui.Panel = ui.Panel.init(.{}),
 
@@ -336,12 +336,7 @@ pub const App = struct {
             },
             .game_detail_loaded => |result| try self.finishGameDetail(result),
             .game_detail_move_prev => self.game_detail.moveUp(),
-            .game_detail_move_next => {
-                const detail_layout = screens.detail.layout(screenBodyHeightForTerminal(self.terminal_height), self.config.interface.list_density, .{
-                    .outer_reserved_rows = detail_outer_reserved_rows,
-                });
-                self.game_detail.moveDown(detail_layout.content_height);
-            },
+            .game_detail_move_next => self.game_detail.moveDown(self.game_detail.visible_height),
             .game_detail_open_browser => try self.openGameInBrowser(ctx),
             .forum_open => try self.startForumList(ctx),
             .forums_loaded => |result| try self.finishForumList(result),
@@ -1575,6 +1570,7 @@ pub const App = struct {
         self.detail_back_screen = back_screen;
         self.screen = .game_detail;
         self.game_detail.deinit(self.allocator.?);
+        self.game_detail.setVisibleHeight(detailLayoutForTerminal(self).content_height);
 
         const token = self.config.apiClientToken() orelse {
             self.game_detail.setFailed("BGG API token is required");
@@ -1607,7 +1603,10 @@ pub const App = struct {
         }
 
         switch (task_result.result) {
-            .ok => |games| try self.game_detail.setLoaded(self.allocator.?, games, self.config.display.detail_width),
+            .ok => |games| {
+                try self.game_detail.setLoaded(self.allocator.?, games, self.config.display.detail_width);
+                self.game_detail.setVisibleHeight(detailLayoutForTerminal(self).content_height);
+            },
             .failed => |message| self.game_detail.setFailed(message),
         }
     }
@@ -1832,7 +1831,10 @@ pub const App = struct {
     }
 
     fn handleResize(self: *App, size: chasen.Size) void {
-        self.terminal_height = size.height;
+        self.terminal_size = size;
+        if (self.screen == .game_detail) {
+            self.game_detail.setVisibleHeight(detailLayoutForTerminal(self).content_height);
+        }
         if (self.screen == .thread) {
             self.thread.setVisibleHeight(threadLayoutForTerminal(self).content_height);
         }
@@ -3106,7 +3108,7 @@ fn threadLayout(area_height: u16, density: []const u8) screens.thread.Layout {
 }
 
 fn threadLayoutForTerminal(self: *const App) screens.thread.Layout {
-    return threadLayout(screenBodyHeightForTerminal(self.terminal_height), self.config.interface.list_density);
+    return threadLayout(screenBodySizeForTerminal(self.terminal_size).height, self.config.interface.list_density);
 }
 
 fn detailLayout(area_height: u16, density: []const u8) screens.detail.Layout {
@@ -3116,8 +3118,22 @@ fn detailLayout(area_height: u16, density: []const u8) screens.detail.Layout {
     return screens.detail.layout(area_height, density, .{ .outer_reserved_rows = detail_outer_reserved_rows });
 }
 
-fn screenBodyHeightForTerminal(terminal_height: u16) u16 {
-    return @max(@as(u16, 1), terminal_height -| 3);
+fn detailLayoutForTerminal(self: *const App) screens.detail.Layout {
+    return detailLayout(screenBodySizeForTerminal(self.terminal_size).height, self.config.interface.list_density);
+}
+
+fn screenBodySizeForTerminal(terminal_size: chasen.Size) chasen.Size {
+    const shell_rect = chasen.Rect{
+        .col = 0,
+        .row = 0,
+        .width = terminal_size.width,
+        .height = terminal_size.height -| 1,
+    };
+    const body_rect = ui.Panel.contentRectFor(shell_rect, .all(1));
+    return .{
+        .width = body_rect.width,
+        .height = @max(@as(u16, 1), body_rect.height),
+    };
 }
 
 fn surfaceRect(surface: *const chasen.Surface) chasen.Rect {
@@ -3236,6 +3252,13 @@ test "app starts on setup token screen without configured token" {
 
     try std.testing.expectEqual(Screen.setup_token, app.screen);
     try std.testing.expectEqual(@as(?[]const u8, null), app.config.apiClientToken());
+}
+
+test "screen body size follows shell panel content rect" {
+    const body_size = screenBodySizeForTerminal(.{ .width = 80, .height = 10 });
+
+    try std.testing.expectEqual(@as(u16, 76), body_size.width);
+    try std.testing.expectEqual(@as(u16, 5), body_size.height);
 }
 
 test "menu indexes map to screens" {
@@ -3799,6 +3822,29 @@ test "thread scroll uses resized body height" {
 
     for (0..10) |_| app.thread.moveDown(threadLayoutForTerminal(&app).content_height);
     try std.testing.expectEqual(app.thread.maxScroll(threadLayoutForTerminal(&app).content_height), app.thread.scroll);
+}
+
+test "detail scroll uses resized body height" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    app.screen = .game_detail;
+    app.handleResize(.{ .width = 80, .height = 10 });
+    try std.testing.expectEqual(detailLayoutForTerminal(&app).content_height, app.game_detail.visible_height);
+
+    const text = try std.testing.allocator.dupe(u8, "0\n1\n2\n3\n4\n5\n6\n7\n8\n9");
+    app.game_detail.rendered_text = text;
+    const lines = try std.testing.allocator.alloc([]const u8, 10);
+    for (lines, 0..) |*line, index| {
+        line.* = text[index * 2 .. index * 2 + 1];
+    }
+    app.game_detail.lines = lines;
+    app.game_detail.load_state = .loaded;
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    for (0..10) |_| try app.update(.game_detail_move_next, &tc.ctx);
+    try std.testing.expectEqual(app.game_detail.maxScroll(detailLayoutForTerminal(&app).content_height), app.game_detail.scroll);
 }
 
 test "loaded thread o opens browser" {

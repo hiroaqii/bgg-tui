@@ -20,6 +20,7 @@ pub const State = struct {
     rendered_text: []u8 = "",
     lines: []const []const u8 = &.{},
     scroll: usize = 0,
+    visible_height: usize = 1,
     browser_error_url: []u8 = "",
 
     pub fn setLoading(self: *State) void {
@@ -45,6 +46,11 @@ pub const State = struct {
     pub fn moveDown(self: *State, visible_height: usize) void {
         const max = self.maxScroll(visible_height);
         if (self.scroll < max) self.scroll += 1;
+    }
+
+    pub fn setVisibleHeight(self: *State, visible_height: usize) void {
+        self.visible_height = @max(visible_height, 1);
+        self.scroll = @min(self.scroll, self.maxScroll(self.visible_height));
     }
 
     pub fn visibleRange(self: *const State, visible_height: usize) ui.Viewport.Range {
@@ -82,6 +88,7 @@ pub const State = struct {
         self.lines = &.{};
         self.rendered_text = "";
         self.scroll = 0;
+        self.visible_height = 1;
         self.load_state = .idle;
     }
 
