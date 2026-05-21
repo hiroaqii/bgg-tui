@@ -7,6 +7,7 @@ const bgg_endpoint = @import("bgg/endpoint.zig");
 const bgg_error = @import("bgg/error.zig");
 const bgg_model = @import("bgg/model.zig");
 const bgg_xml = @import("bgg/xml.zig");
+const browser = @import("browser.zig");
 const config_mod = @import("config.zig");
 const format = @import("format.zig");
 const labels_mod = @import("labels.zig");
@@ -93,6 +94,7 @@ pub const App = struct {
     thread_list_request_id: u64 = 0,
     thread: screens.thread.State = .{},
     thread_request_id: u64 = 0,
+    browser_request_id: u64 = 0,
     terminal_height: u16 = forum_screen_max_size.height,
     menu: ui.Menu = ui.Menu.init(.{ .items = &menu_items }),
     shell: ui.Panel = ui.Panel.init(.{}),
@@ -143,6 +145,8 @@ pub const App = struct {
         thread_move_prev,
         thread_move_next,
         thread_sort_toggle,
+        thread_open_browser,
+        browser_opened: BrowserOpenTaskResult,
         thread_back_to_forums,
         terminal_resized: chasen.Size,
         menu: ui.Menu.Msg,
@@ -312,6 +316,8 @@ pub const App = struct {
             .thread_move_prev => self.thread.moveUp(),
             .thread_move_next => self.thread.moveDown(self.thread.visible_height),
             .thread_sort_toggle => try self.thread.toggleSort(self.allocator.?),
+            .thread_open_browser => try self.openThreadInBrowser(ctx),
+            .browser_opened => |result| try self.finishBrowserOpen(result),
             .thread_back_to_forums => self.backToThreadList(),
             .terminal_resized => |size| self.handleResize(size),
             .menu => |menu_msg| switch (menu_msg) {
@@ -474,6 +480,7 @@ pub const App = struct {
                         if (key.matches(chasen.Key.up, .{}) or key.codepoint == 'k') return .thread_move_prev;
                         if (key.matches(chasen.Key.down, .{}) or key.codepoint == 'j') return .thread_move_next;
                         if (key.codepoint == 's') return .thread_sort_toggle;
+                        if (key.codepoint == 'o') return .thread_open_browser;
                     }
                 },
                 else => {},
@@ -937,7 +944,9 @@ pub const App = struct {
                 });
                 self.drawThreadBody(&body_area);
 
-                if (self.thread.maxScroll(body_area.size().height) > 0 and area.size().height >= 3) {
+                if (self.thread.browser_error_url.len > 0) {
+                    try self.drawThreadManualOpenHint(&area, area.size().height -| 2);
+                } else if (self.thread.maxScroll(body_area.size().height) > 0 and area.size().height >= 3) {
                     _ = try area.printAt(0, area.size().height -| 2, .{ .dim = true }, "({d}/{d})", .{
                         self.thread.scroll + 1,
                         self.thread.maxScroll(body_area.size().height) + 1,
@@ -1423,6 +1432,7 @@ pub const App = struct {
         if (visible_index >= self.forums.thread_page.threads.len) return;
         const thread = self.forums.thread_page.threads[visible_index];
         self.thread_request_id +%= 1;
+        self.browser_request_id +%= 1;
         const request_id = self.thread_request_id;
 
         self.thread.startLoad(self.allocator.?, thread.id, self.config.display.thread_width);
@@ -1466,8 +1476,46 @@ pub const App = struct {
 
     fn backToThreadList(self: *App) void {
         self.thread_request_id +%= 1;
+        self.browser_request_id +%= 1;
         self.thread.deinit(self.allocator.?);
         self.screen = .forums;
+    }
+
+    fn openThreadInBrowser(self: *App, ctx: *chasen.Ctx(Msg)) !void {
+        if (self.thread.load_state != .loaded or self.thread.thread_id == 0) return;
+
+        const url = try formatOwnedText(ctx.allocator(), format.writeBggThreadUrl, .{self.thread.thread_id});
+        errdefer ctx.allocator().free(url);
+
+        self.browser_request_id +%= 1;
+        const request_id = self.browser_request_id;
+
+        const task = try ctx.allocator().create(BrowserOpenTask);
+        errdefer ctx.allocator().destroy(task);
+        task.* = .{ .url = url, .request_id = request_id };
+
+        ctx.spawnWith(task, BrowserOpenTask.run) catch |err| {
+            ctx.allocator().free(url);
+            return err;
+        };
+    }
+
+    fn finishBrowserOpen(self: *App, task_result: BrowserOpenTaskResult) !void {
+        if (task_result.request_id != self.browser_request_id) {
+            switch (task_result.result) {
+                .ok => {},
+                .failed => |url| self.allocator.?.free(url),
+            }
+            return;
+        }
+
+        switch (task_result.result) {
+            .ok => self.thread.clearBrowserErrorUrl(self.allocator.?),
+            .failed => |url| {
+                defer self.allocator.?.free(url);
+                try self.thread.setBrowserErrorUrl(self.allocator.?, url);
+            },
+        }
     }
 
     fn handleResize(self: *App, size: chasen.Size) void {
@@ -1535,6 +1583,11 @@ pub const App = struct {
                 .{};
             _ = surface.textAt(0, row, line, style);
         }
+    }
+
+    fn drawThreadManualOpenHint(self: *const App, surface: *chasen.Surface, row: u16) !void {
+        if (row >= surface.size().height) return;
+        _ = try surface.printAt(0, row, .{ .dim = true }, "Open manually: {s}", .{self.thread.browser_error_url});
     }
 
     fn threadBodyHeight(self: *const App) usize {
@@ -1654,7 +1707,7 @@ pub const App = struct {
                 .forum_list => "Up/Down: move  Enter: threads  b: detail  Esc/m: menu  q: quit",
                 .thread_list => "Up/Down: move  Enter: read  n/p: page  b: forums  Esc/m: menu  q: quit",
             },
-            .thread => "j/k Up/Down: scroll  s: sort  b: back  Esc/m: menu  q: quit",
+            .thread => "j/k Up/Down: scroll  s: sort  o: open BGG  b: back  Esc/m: menu  q: quit",
             .collection => switch (self.collection.load_state) {
                 .idle, .failed => "Enter: load  Esc: menu",
                 .loading => "Esc: menu",
@@ -2170,6 +2223,16 @@ const ThreadTaskResult = struct {
     result: ThreadResult,
 };
 
+const BrowserOpenResult = union(enum) {
+    ok,
+    failed: []u8,
+};
+
+const BrowserOpenTaskResult = struct {
+    request_id: u64,
+    result: BrowserOpenResult,
+};
+
 const ListSortMode = enum {
     source,
     name_asc,
@@ -2322,6 +2385,30 @@ const ThreadTask = struct {
         return .{ .thread_loaded = .{
             .request_id = task.request_id,
             .result = loadThread(allocator, io, task.token, task.thread_id) catch |err| .{ .failed = @errorName(err) },
+        } };
+    }
+};
+
+const BrowserOpenTask = struct {
+    url: []u8,
+    request_id: u64,
+
+    fn run(ctx_ptr: *anyopaque, allocator: std.mem.Allocator, io: std.Io) App.Msg {
+        const task: *BrowserOpenTask = @ptrCast(@alignCast(ctx_ptr));
+        defer {
+            allocator.destroy(task);
+        }
+
+        browser.openUrl(io, task.url) catch {
+            return .{ .browser_opened = .{
+                .request_id = task.request_id,
+                .result = .{ .failed = task.url },
+            } };
+        };
+        allocator.free(task.url);
+        return .{ .browser_opened = .{
+            .request_id = task.request_id,
+            .result = .ok,
         } };
     }
 };
@@ -2529,6 +2616,14 @@ fn listLineText(allocator: std.mem.Allocator, label: []const u8, values: []const
 }
 
 fn formatText(allocator: std.mem.Allocator, write_fn: anytype, args: anytype) ![]const u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+
+    try @call(.auto, write_fn, .{&out.writer} ++ args);
+    return try out.toOwnedSlice();
+}
+
+fn formatOwnedText(allocator: std.mem.Allocator, write_fn: anytype, args: anytype) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(allocator);
     errdefer out.deinit();
 
@@ -2762,7 +2857,7 @@ test "footer hint matches screen key handling" {
     try std.testing.expectEqualStrings("Up/Down: move  Enter: read  n/p: page  b: forums  Esc/m: menu  q: quit", app.footerHint());
 
     app.screen = .thread;
-    try std.testing.expectEqualStrings("j/k Up/Down: scroll  s: sort  b: back  Esc/m: menu  q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("j/k Up/Down: scroll  s: sort  o: open BGG  b: back  Esc/m: menu  q: quit", app.footerHint());
 
     app.screen = .collection;
     try std.testing.expectEqualStrings("Enter: load  Esc: menu", app.footerHint());
@@ -3241,6 +3336,62 @@ test "thread scroll uses resized body height" {
 
     for (0..10) |_| app.thread.moveDown(app.thread.visible_height);
     try std.testing.expectEqual(app.thread.maxScroll(5), app.thread.scroll);
+}
+
+test "loaded thread o opens browser" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.screen = .thread;
+    app.thread.thread_id = 100;
+    app.thread.load_state = .loaded;
+
+    const msg = app.handleEvent(.{ .key_press = .{ .codepoint = 'o' } }).?;
+    try std.testing.expect(msg == .thread_open_browser);
+}
+
+test "stale browser failure does not update current thread" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    app.browser_request_id = 2;
+    try app.finishBrowserOpen(.{
+        .request_id = 1,
+        .result = .{ .failed = try std.testing.allocator.dupe(u8, "https://boardgamegeek.com/thread/1") },
+    });
+
+    try std.testing.expectEqualStrings("", app.thread.browser_error_url);
+}
+
+test "opening another thread invalidates in-flight browser result" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    const threads = try std.testing.allocator.alloc(bgg_model.ThreadSummary, 1);
+    threads[0] = .{
+        .id = 2,
+        .subject = try std.testing.allocator.dupe(u8, "Next thread"),
+        .author = try std.testing.allocator.dupe(u8, "hiro"),
+    };
+    try app.forums.setThreadsLoaded(std.testing.allocator, .{
+        .threads = threads,
+        .page = 1,
+        .total_pages = 1,
+    });
+
+    app.browser_request_id = 7;
+    const next_thread = app.forums.thread_page.threads[0];
+    app.thread_request_id +%= 1;
+    app.browser_request_id +%= 1;
+    app.thread.startLoad(std.testing.allocator, next_thread.id, app.config.display.thread_width);
+    app.screen = .thread;
+    try std.testing.expectEqual(@as(u64, 8), app.browser_request_id);
+
+    try app.finishBrowserOpen(.{
+        .request_id = 7,
+        .result = .{ .failed = try std.testing.allocator.dupe(u8, "https://boardgamegeek.com/thread/1") },
+    });
+    try std.testing.expectEqualStrings("", app.thread.browser_error_url);
 }
 
 test "game detail view hides cursor left by previous screen" {

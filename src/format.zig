@@ -285,6 +285,11 @@ pub fn writeBggGameUrl(writer: *std.Io.Writer, game_id: u32) std.Io.Writer.Error
     try writer.print("https://boardgamegeek.com/boardgame/{d}", .{game_id});
 }
 
+/// Writes the canonical BGG thread URL for a forum thread id.
+pub fn writeBggThreadUrl(writer: *std.Io.Writer, thread_id: u32) std.Io.Writer.Error!void {
+    try writer.print("https://boardgamegeek.com/thread/{d}", .{thread_id});
+}
+
 /// Parses a config string into a supported date format.
 pub fn dateFormatFromConfig(value: []const u8) DateFormatError!DateFormat {
     if (std.mem.eql(u8, value, "yyyy-mm-dd") or std.mem.eql(u8, value, "YYYY-MM-DD")) return .yyyy_mm_dd;
@@ -675,6 +680,10 @@ test "format collection statuses" {
 
 test "format bgg game url" {
     try expectFormatted("https://boardgamegeek.com/boardgame/13", writeBggGameUrl, .{@as(u32, 13)});
+}
+
+test "format bgg thread url" {
+    try expectFormatted("https://boardgamegeek.com/thread/100", writeBggThreadUrl, .{@as(u32, 100)});
 }
 
 test "calculate display width for ascii and common wide text" {

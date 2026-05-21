@@ -22,6 +22,7 @@ pub const State = struct {
     sort_newest: bool = false,
     wrap_width: usize = 90,
     visible_height: usize = 1,
+    browser_error_url: []u8 = "",
 
     pub fn startLoad(self: *State, allocator: std.mem.Allocator, thread_id: u32, wrap_width: usize) void {
         self.deinit(allocator);
@@ -64,6 +65,16 @@ pub const State = struct {
         self.scroll = 0;
     }
 
+    pub fn setBrowserErrorUrl(self: *State, allocator: std.mem.Allocator, url: []const u8) !void {
+        allocator.free(self.browser_error_url);
+        self.browser_error_url = try allocator.dupe(u8, url);
+    }
+
+    pub fn clearBrowserErrorUrl(self: *State, allocator: std.mem.Allocator) void {
+        allocator.free(self.browser_error_url);
+        self.browser_error_url = "";
+    }
+
     pub fn visibleRange(self: *const State, visible_height: usize) struct { start: usize, end: usize } {
         if (visible_height == 0 or self.lines.len == 0) return .{ .start = 0, .end = 0 };
         const start = @min(self.scroll, self.lines.len - 1);
@@ -99,6 +110,7 @@ pub const State = struct {
     }
 
     fn clearThread(self: *State, allocator: std.mem.Allocator) void {
+        self.clearBrowserErrorUrl(allocator);
         allocator.free(self.lines);
         allocator.free(self.rendered_text);
         if (self.thread) |thread| bgg_xml.freeThread(allocator, thread);

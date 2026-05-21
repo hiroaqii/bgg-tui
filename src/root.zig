@@ -3,6 +3,7 @@ pub const version = "0.0.0";
 
 pub const app = @import("app.zig");
 pub const bgg = @import("bgg/root.zig");
+pub const browser = @import("browser.zig");
 pub const config = @import("config.zig");
 pub const format = @import("format.zig");
 pub const labels = @import("labels.zig");
@@ -13,6 +14,7 @@ pub const screens = @import("screens/root.zig");
 test {
     _ = app;
     _ = bgg;
+    _ = browser;
     _ = config;
     _ = format;
     _ = labels;
