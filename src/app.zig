@@ -60,6 +60,7 @@ pub const Screen = enum {
     search_results,
     game_detail,
     forums,
+    thread,
     collection,
     settings,
 };
@@ -90,6 +91,9 @@ pub const App = struct {
     forums: screens.forum.State = .{},
     forum_request_id: u64 = 0,
     thread_list_request_id: u64 = 0,
+    thread: screens.thread.State = .{},
+    thread_request_id: u64 = 0,
+    terminal_height: u16 = forum_screen_max_size.height,
     menu: ui.Menu = ui.Menu.init(.{ .items = &menu_items }),
     shell: ui.Panel = ui.Panel.init(.{}),
 
@@ -134,6 +138,13 @@ pub const App = struct {
         forum_back_to_list,
         forum_next_page,
         forum_previous_page,
+        thread_open: usize,
+        thread_loaded: ThreadTaskResult,
+        thread_move_prev,
+        thread_move_next,
+        thread_sort_toggle,
+        thread_back_to_forums,
+        terminal_resized: chasen.Size,
         menu: ui.Menu.Msg,
         hot_list: ui.List.Msg,
         hot_sort_toggle,
@@ -290,12 +301,19 @@ pub const App = struct {
             .forum_threads_loaded => |result| try self.finishForumThreads(result),
             .forum_thread_list => |list_msg| switch (list_msg) {
                 .move_prev, .move_next => self.forums.updateThreadList(list_msg),
-                .activate => {},
+                .activate => |index| try self.startThread(ctx, index),
             },
             .forum_back_to_detail => try self.showScreen(.game_detail, ctx),
             .forum_back_to_list => self.backToForumList(),
             .forum_next_page => try self.openForumPage(ctx, self.forums.thread_page.page + 1),
             .forum_previous_page => try self.openForumPage(ctx, self.forums.thread_page.page -| 1),
+            .thread_open => |index| try self.startThread(ctx, index),
+            .thread_loaded => |result| try self.finishThread(result),
+            .thread_move_prev => self.thread.moveUp(),
+            .thread_move_next => self.thread.moveDown(self.thread.visible_height),
+            .thread_sort_toggle => try self.thread.toggleSort(self.allocator.?),
+            .thread_back_to_forums => self.backToThreadList(),
+            .terminal_resized => |size| self.handleResize(size),
             .menu => |menu_msg| switch (menu_msg) {
                 .move_prev, .move_next => self.menu.update(menu_msg),
                 .activate => |index| {
@@ -353,6 +371,10 @@ pub const App = struct {
     }
 
     pub fn handleEvent(self: *const App, event: chasen.Event) ?Msg {
+        if (event == .winsize) {
+            return .{ .terminal_resized = .{ .width = event.winsize.cols, .height = event.winsize.rows } };
+        }
+
         if (self.screen == .setup_token) {
             switch (event) {
                 .key_press => |key| if (key.matches(chasen.Key.escape, .{})) return .quit,
@@ -435,6 +457,23 @@ pub const App = struct {
                         if (self.forums.thread_list.handleEvent(event)) |msg| return .{ .forum_thread_list = msg };
                     } else if (self.forums.mode == .forum_list) {
                         if (self.forums.forum_list.handleEvent(event)) |msg| return .{ .forum_list = msg };
+                    }
+                },
+                else => {},
+            }
+            return null;
+        }
+
+        if (self.screen == .thread) {
+            switch (event) {
+                .key_press => |key| {
+                    if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'm') return .{ .show_screen = .main_menu };
+                    if (key.codepoint == 'q') return .quit;
+                    if (key.codepoint == 'b') return .thread_back_to_forums;
+                    if (self.thread.load_state == .loaded) {
+                        if (key.matches(chasen.Key.up, .{}) or key.codepoint == 'k') return .thread_move_prev;
+                        if (key.matches(chasen.Key.down, .{}) or key.codepoint == 'j') return .thread_move_next;
+                        if (key.codepoint == 's') return .thread_sort_toggle;
                     }
                 },
                 else => {},
@@ -554,6 +593,7 @@ pub const App = struct {
             .search_results => try self.viewSearchResults(sfc),
             .game_detail => try self.viewGameDetail(sfc),
             .forums => try self.viewForums(sfc),
+            .thread => try self.viewThread(sfc),
             .collection => try self.viewCollection(sfc),
             .settings => self.viewPlaceholder(sfc, "Settings", "Minimum settings screen is pending."),
         }
@@ -870,6 +910,45 @@ pub const App = struct {
         _ = area.textAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
     }
 
+    fn viewThread(self: *const App, sfc: *chasen.Surface) !void {
+        var area = threadSurface(sfc, self.config.display.thread_width);
+
+        switch (self.thread.load_state) {
+            .idle, .loading => {
+                area.hideCursor();
+                _ = area.textAt(0, 0, "Thread", .{ .bold = true, .fg = .{ .index = 14 } });
+                _ = area.textAt(0, 2, "Loading thread...", .{ .fg = .gray });
+            },
+            .failed => |message| {
+                area.hideCursor();
+                _ = area.textAt(0, 0, "Thread", .{ .bold = true, .fg = .{ .index = 14 } });
+                _ = area.textAt(0, 2, "Could not load thread.", .{ .fg = .{ .index = 9 } });
+                _ = area.textAt(0, 4, message, .{ .fg = .gray });
+            },
+            .loaded => {
+                _ = area.textAt(0, 0, self.thread.subject(), .{ .bold = true, .fg = .{ .index = 14 } });
+                _ = try area.printAt(0, 1, .{ .dim = true }, "{d} posts · {s}", .{ self.thread.postCount(), self.thread.sortLabel() });
+
+                var body_area = area.child(.{
+                    .col = 0,
+                    .row = 3,
+                    .width = area.size().width,
+                    .height = area.size().height -| 5,
+                });
+                self.drawThreadBody(&body_area);
+
+                if (self.thread.maxScroll(body_area.size().height) > 0 and area.size().height >= 3) {
+                    _ = try area.printAt(0, area.size().height -| 2, .{ .dim = true }, "({d}/{d})", .{
+                        self.thread.scroll + 1,
+                        self.thread.maxScroll(body_area.size().height) + 1,
+                    });
+                }
+            },
+        }
+
+        _ = area.textAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
+    }
+
     fn submitToken(self: *App, ctx: *chasen.Ctx(Msg)) !void {
         const input = if (self.setup_token_input) |*input| input else return;
         const token = std.mem.trim(u8, input.text(), " \t\r\n");
@@ -921,6 +1000,7 @@ pub const App = struct {
         self.collection.deinit(self.allocator.?);
         self.game_detail.deinit(self.allocator.?);
         self.forums.deinit(self.allocator.?);
+        self.thread.deinit(self.allocator.?);
     }
 
     fn startHotFilter(self: *App) !void {
@@ -1339,6 +1419,64 @@ pub const App = struct {
         self.forums.backToForumList(self.allocator.?);
     }
 
+    fn startThread(self: *App, ctx: *chasen.Ctx(Msg), visible_index: usize) !void {
+        if (visible_index >= self.forums.thread_page.threads.len) return;
+        const thread = self.forums.thread_page.threads[visible_index];
+        self.thread_request_id +%= 1;
+        const request_id = self.thread_request_id;
+
+        self.thread.startLoad(self.allocator.?, thread.id, self.config.display.thread_width);
+        self.thread.setVisibleHeight(self.threadBodyHeight());
+        self.screen = .thread;
+
+        const token = self.config.apiClientToken() orelse {
+            self.thread.setFailed("BGG API token is required");
+            return;
+        };
+
+        const task = try ctx.allocator().create(ThreadTask);
+        errdefer ctx.allocator().destroy(task);
+        task.* = .{
+            .token = try ctx.allocator().dupe(u8, token),
+            .thread_id = thread.id,
+            .request_id = request_id,
+        };
+        errdefer ctx.allocator().free(task.token);
+
+        ctx.spawnWith(task, ThreadTask.run) catch |err| {
+            self.thread.setFailed("Could not start thread loading task");
+            return err;
+        };
+    }
+
+    fn finishThread(self: *App, task_result: ThreadTaskResult) !void {
+        if (task_result.request_id != self.thread_request_id) {
+            switch (task_result.result) {
+                .ok => |thread| bgg_xml.freeThread(self.allocator.?, thread),
+                .failed => {},
+            }
+            return;
+        }
+
+        switch (task_result.result) {
+            .ok => |thread| try self.thread.setLoaded(self.allocator.?, thread),
+            .failed => |message| self.thread.setFailed(message),
+        }
+    }
+
+    fn backToThreadList(self: *App) void {
+        self.thread_request_id +%= 1;
+        self.thread.deinit(self.allocator.?);
+        self.screen = .forums;
+    }
+
+    fn handleResize(self: *App, size: chasen.Size) void {
+        self.terminal_height = size.height;
+        if (self.screen == .thread) {
+            self.thread.setVisibleHeight(self.threadBodyHeight());
+        }
+    }
+
     fn drawListPosition(self: *const App, surface: *chasen.Surface, list: *const ui.List) !void {
         _ = self;
         const item_count = list.items.len;
@@ -1384,6 +1522,23 @@ pub const App = struct {
                 _ = surface.textAt(4, row + 1, meta, .{ .dim = true });
             }
         }
+    }
+
+    fn drawThreadBody(self: *const App, surface: *chasen.Surface) void {
+        const range = self.thread.visibleRange(surface.size().height);
+        for (self.thread.lines[range.start..range.end], 0..) |line, index| {
+            const row: u16 = @intCast(index);
+            if (row >= surface.size().height) break;
+            const style: chasen.TextStyle = if (std.mem.startsWith(u8, line, ">") or std.mem.startsWith(u8, line, "─"))
+                .{ .dim = true }
+            else
+                .{};
+            _ = surface.textAt(0, row, line, style);
+        }
+    }
+
+    fn threadBodyHeight(self: *const App) usize {
+        return threadBodyHeightForTerminal(self.terminal_height);
     }
 
     fn drawEmptyState(self: *const App, surface: *chasen.Surface, row: u16, title: []const u8, message: []const u8) void {
@@ -1497,8 +1652,9 @@ pub const App = struct {
             .game_detail => "f: forums  b/Esc: back  m: menu  q: quit",
             .forums => switch (self.forums.mode) {
                 .forum_list => "Up/Down: move  Enter: threads  b: detail  Esc/m: menu  q: quit",
-                .thread_list => "Up/Down: move  n/p: page  b: forums  Esc/m: menu  q: quit",
+                .thread_list => "Up/Down: move  Enter: read  n/p: page  b: forums  Esc/m: menu  q: quit",
             },
+            .thread => "j/k Up/Down: scroll  s: sort  b: back  Esc/m: menu  q: quit",
             .collection => switch (self.collection.load_state) {
                 .idle, .failed => "Enter: load  Esc: menu",
                 .loading => "Esc: menu",
@@ -2004,6 +2160,16 @@ const ForumThreadsTaskResult = struct {
     result: ForumThreadsResult,
 };
 
+const ThreadResult = union(enum) {
+    ok: bgg_model.Thread,
+    failed: []const u8,
+};
+
+const ThreadTaskResult = struct {
+    request_id: u64,
+    result: ThreadResult,
+};
+
 const ListSortMode = enum {
     source,
     name_asc,
@@ -2141,6 +2307,25 @@ const ForumThreadsTask = struct {
     }
 };
 
+const ThreadTask = struct {
+    token: []const u8,
+    thread_id: u32,
+    request_id: u64,
+
+    fn run(ctx_ptr: *anyopaque, allocator: std.mem.Allocator, io: std.Io) App.Msg {
+        const task: *ThreadTask = @ptrCast(@alignCast(ctx_ptr));
+        defer {
+            allocator.free(task.token);
+            allocator.destroy(task);
+        }
+
+        return .{ .thread_loaded = .{
+            .request_id = task.request_id,
+            .result = loadThread(allocator, io, task.token, task.thread_id) catch |err| .{ .failed = @errorName(err) },
+        } };
+    }
+};
+
 fn loadHotGames(allocator: std.mem.Allocator, io: std.Io, token: []const u8) !HotGamesResult {
     var client = bgg_client.Client.init(allocator, io, .{ .token = token });
     defer client.deinit();
@@ -2269,6 +2454,27 @@ fn loadForumThreads(allocator: std.mem.Allocator, io: std.Io, token: []const u8,
                 else => return .{ .failed = apiErrorMessage(bgg_error.classifyParseError(parse_error)) },
             };
             return .{ .ok = threads };
+        },
+        .api_error => |err| return .{ .failed = apiErrorMessage(err) },
+    }
+}
+
+fn loadThread(allocator: std.mem.Allocator, io: std.Io, token: []const u8, thread_id: u32) !ThreadResult {
+    var client = bgg_client.Client.init(allocator, io, .{ .token = token });
+    defer client.deinit();
+
+    const path = try bgg_endpoint.thread(allocator, thread_id);
+    defer allocator.free(path);
+
+    const result = try client.getPath(path, .generic);
+    switch (result) {
+        .ok => |response| {
+            defer response.deinit(allocator);
+            const thread = bgg_xml.parseThreadResponse(allocator, response.body) catch |parse_error| switch (parse_error) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => return .{ .failed = apiErrorMessage(bgg_error.classifyParseError(parse_error)) },
+            };
+            return .{ .ok = thread };
         },
         .api_error => |err| return .{ .failed = apiErrorMessage(err) },
     }
@@ -2418,6 +2624,17 @@ fn forumSurface(surface: *chasen.Surface) chasen.Surface {
     return surface.child(ui.layout.center(surfaceRect(surface), forum_screen_max_size));
 }
 
+fn threadSurface(surface: *chasen.Surface, configured_width: u16) chasen.Surface {
+    return surface.child(ui.layout.center(surfaceRect(surface), .{
+        .width = configured_width,
+        .height = forum_screen_max_size.height,
+    }));
+}
+
+fn threadBodyHeightForTerminal(terminal_height: u16) usize {
+    return @max(@as(usize, 1), @as(usize, @min(terminal_height, forum_screen_max_size.height)) -| 5);
+}
+
 fn surfaceRect(surface: *const chasen.Surface) chasen.Rect {
     const size = surface.size();
     return .{ .col = 0, .row = 0, .width = size.width, .height = size.height };
@@ -2442,6 +2659,7 @@ fn screenTitle(screen: Screen) []const u8 {
         .search_results => "search results",
         .game_detail => "game detail",
         .forums => "forums",
+        .thread => "thread",
         .collection => "collection",
         .settings => "settings",
     };
@@ -2508,6 +2726,7 @@ test "screen titles match status labels" {
     try std.testing.expectEqualStrings("search results", screenTitle(.search_results));
     try std.testing.expectEqualStrings("game detail", screenTitle(.game_detail));
     try std.testing.expectEqualStrings("forums", screenTitle(.forums));
+    try std.testing.expectEqualStrings("thread", screenTitle(.thread));
     try std.testing.expectEqualStrings("collection", screenTitle(.collection));
     try std.testing.expectEqualStrings("settings", screenTitle(.settings));
 }
@@ -2540,7 +2759,10 @@ test "footer hint matches screen key handling" {
     app.forums.mode = .forum_list;
     try std.testing.expectEqualStrings("Up/Down: move  Enter: threads  b: detail  Esc/m: menu  q: quit", app.footerHint());
     app.forums.mode = .thread_list;
-    try std.testing.expectEqualStrings("Up/Down: move  n/p: page  b: forums  Esc/m: menu  q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down: move  Enter: read  n/p: page  b: forums  Esc/m: menu  q: quit", app.footerHint());
+
+    app.screen = .thread;
+    try std.testing.expectEqualStrings("j/k Up/Down: scroll  s: sort  b: back  Esc/m: menu  q: quit", app.footerHint());
 
     app.screen = .collection;
     try std.testing.expectEqualStrings("Enter: load  Esc: menu", app.footerHint());
@@ -2997,6 +3219,28 @@ test "forum back to list invalidates in-flight thread load" {
 
     try std.testing.expectEqual(screens.forum.Mode.forum_list, app.forums.mode);
     try std.testing.expect(app.forums.thread_page.threads.len == 0);
+}
+
+test "thread scroll uses resized body height" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    app.screen = .thread;
+    app.handleResize(.{ .width = 80, .height = 10 });
+    try std.testing.expectEqual(@as(usize, 5), app.thread.visible_height);
+
+    const text = try std.testing.allocator.dupe(u8, "0\n1\n2\n3\n4\n5\n6\n7\n8\n9");
+    app.thread.rendered_text = text;
+    const lines = try std.testing.allocator.alloc([]const u8, 10);
+    for (lines, 0..) |*line, index| {
+        line.* = text[index * 2 .. index * 2 + 1];
+    }
+    app.thread.lines = lines;
+    app.thread.load_state = .loaded;
+
+    for (0..10) |_| app.thread.moveDown(app.thread.visible_height);
+    try std.testing.expectEqual(app.thread.maxScroll(5), app.thread.scroll);
 }
 
 test "game detail view hides cursor left by previous screen" {
