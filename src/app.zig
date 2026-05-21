@@ -19,6 +19,8 @@ const screens = @import("screens/root.zig");
 const main_menu_size = chasen.Size{ .width = 48, .height = 12 };
 const setup_token_size = chasen.Size{ .width = 56, .height = 9 };
 const placeholder_size = chasen.Size{ .width = 56, .height = 6 };
+const search_input_size = chasen.Size{ .width = 56, .height = 9 };
+const collection_input_size = chasen.Size{ .width = 56, .height = 9 };
 const list_screen_max_size = chasen.Size{ .width = 72, .height = 34 };
 const forum_screen_max_size = chasen.Size{ .width = 88, .height = 34 };
 const detail_outer_reserved_rows: u16 = 3;
@@ -813,18 +815,17 @@ pub const App = struct {
 
         switch (self.hot_games.load_state) {
             .idle, .loading => {
-                _ = area.borrowTextAt(0, 2, "Loading BoardGameGeek hot games...", .{ .fg = .gray });
+                self.drawCenteredGuidance(&area, "Hot Games", "Loading BoardGameGeek hot games...");
             },
             .failed => |message| {
-                _ = area.borrowTextAt(0, 2, "Could not load hot games.", .{ .fg = .{ .index = 9 } });
-                _ = area.borrowTextAt(0, 4, message, .{ .fg = .gray });
+                self.drawCenteredGuidance(&area, "Could not load hot games.", message);
             },
             .loaded => {
                 if (self.hot_games.list.items.len == 0) {
-                    self.drawEmptyState(&area, 2, "No hot games", "BGG did not return any hot games.");
+                    self.drawCenteredGuidance(&area, "No hot games", "BGG did not return any hot games.");
                 } else if (self.hot_games.filter_active and self.hot_games.filter.labels.len == 0) {
                     try self.drawHotFilterInput(&area);
-                    self.drawEmptyState(&area, 6, "No matches", "No hot games match the filter.");
+                    self.drawCenteredGuidanceKeepingCursor(&area, "No matches", "No hot games match the filter.");
                 } else {
                     const body_row = if (self.hot_games.filter_active) list_filtered_body_row else list_body_row;
                     if (self.hot_games.filter_active) try self.drawHotFilterInput(&area);
@@ -848,7 +849,7 @@ pub const App = struct {
     }
 
     fn viewSearch(self: *const App, sfc: *chasen.Surface) !void {
-        var area = constrainedListSurface(sfc);
+        var area = centeredSurface(sfc, search_input_size);
         _ = area.borrowTextAt(0, 0, "Search Games", .{ .bold = true, .fg = .{ .index = 14 } });
 
         if (self.search_input) |*input| {
@@ -858,14 +859,13 @@ pub const App = struct {
 
         switch (self.search.load_state) {
             .idle => {
-                self.drawGuidance(&area, 4, "Ready to search", "Enter at least 3 characters and press Enter.");
+                self.drawGuidance(&area, 4, "Search board games", "Enter at least 3 characters and press Enter.");
             },
             .loading => {
-                _ = area.borrowTextAt(0, 4, "Search request is running...", .{ .fg = .gray });
+                self.drawGuidance(&area, 4, "Search board games", "Search request is running...");
             },
             .failed => |message| {
-                _ = area.borrowTextAt(0, 4, "Could not search games.", .{ .fg = .{ .index = 9 } });
-                _ = area.borrowTextAt(0, 6, message, .{ .fg = .gray });
+                self.drawGuidance(&area, 4, "Could not search games.", message);
             },
             .loaded => {
                 self.drawGuidance(&area, 4, "Search complete", "Press Enter to run a new search.");
@@ -881,22 +881,20 @@ pub const App = struct {
 
         switch (self.search.load_state) {
             .idle => {
-                self.drawEmptyState(&area, 2, "No search yet", "Run a search to see matching board games.");
+                self.drawCenteredGuidance(&area, "No search yet", "Run a search to see matching board games.");
             },
             .loading => {
-                area.hideCursor();
-                _ = area.borrowTextAt(0, 2, "Searching BoardGameGeek...", .{ .fg = .gray });
+                self.drawCenteredGuidance(&area, "Search Results", "Searching BoardGameGeek...");
             },
             .failed => |message| {
-                _ = area.borrowTextAt(0, 2, "Could not search games.", .{ .fg = .{ .index = 9 } });
-                _ = area.borrowTextAt(0, 4, message, .{ .fg = .gray });
+                self.drawCenteredGuidance(&area, "Could not search games.", message);
             },
             .loaded => {
                 if (self.search.list.items.len == 0) {
-                    self.drawEmptyState(&area, 2, "No results", "No games matched the current query.");
+                    self.drawCenteredGuidance(&area, "No results", "No games matched the current query.");
                 } else if (self.search.filter_active and self.search.filter.labels.len == 0) {
                     try self.drawSearchFilterInput(&area);
-                    self.drawEmptyState(&area, 6, "No matches", "No search results match the filter.");
+                    self.drawCenteredGuidanceKeepingCursor(&area, "No matches", "No search results match the filter.");
                 } else {
                     const body_row = if (self.search.filter_active) list_filtered_body_row else list_body_row;
                     if (self.search.filter_active) try self.drawSearchFilterInput(&area);
@@ -920,34 +918,35 @@ pub const App = struct {
     }
 
     fn viewCollection(self: *const App, sfc: *chasen.Surface) !void {
-        var area = constrainedListSurface(sfc);
+        var area = switch (self.collection.load_state) {
+            .idle, .failed => centeredSurface(sfc, collection_input_size),
+            else => constrainedListSurface(sfc),
+        };
         _ = area.borrowTextAt(0, 0, "Collection", .{ .bold = true, .fg = .{ .index = 14 } });
 
         switch (self.collection.load_state) {
             .idle => {
                 try self.drawCollectionUsernameInput(&area);
-                self.drawGuidance(&area, 4, "Ready to load collection", "Enter a BGG username and press Enter.");
+                self.drawGuidance(&area, 4, "Load collection", "Enter a BGG username and press Enter.");
             },
             .loading => {
-                area.hideCursor();
-                _ = area.borrowTextAt(0, 2, "Loading BoardGameGeek collection...", .{ .fg = .gray });
+                self.drawCenteredGuidance(&area, "Collection", "Loading BoardGameGeek collection...");
             },
             .failed => |message| {
                 try self.drawCollectionUsernameInput(&area);
-                _ = area.borrowTextAt(0, 4, "Could not load collection.", .{ .fg = .{ .index = 9 } });
-                _ = area.borrowTextAt(0, 6, message, .{ .fg = .gray });
+                self.drawGuidance(&area, 4, "Could not load collection.", message);
             },
             .loaded => {
                 self.drawCollectionStatusBar(&area);
                 if (self.collection.list.items.len == 0) {
                     if (self.collection.statusFilteredEmpty()) {
-                        self.drawEmptyState(&area, collection_body_row, "No status matches", "No collection items match the selected statuses.");
+                        self.drawCenteredGuidance(&area, "No status matches", "No collection items match the selected statuses.");
                     } else {
-                        self.drawEmptyState(&area, collection_body_row, "No collection items", "BGG did not return any games for this collection.");
+                        self.drawCenteredGuidance(&area, "No collection items", "BGG did not return any games for this collection.");
                     }
                 } else if (self.collection.filter_active and self.collection.filter.labels.len == 0) {
                     try self.drawCollectionFilterInput(&area);
-                    self.drawEmptyState(&area, 6, "No matches", "No collection items match the filter.");
+                    self.drawCenteredGuidanceKeepingCursor(&area, "No matches", "No collection items match the filter.");
                 } else {
                     const body_row = if (self.collection.filter_active) list_filtered_body_row else collection_body_row;
                     if (self.collection.filter_active) try self.drawCollectionFilterInput(&area);
@@ -980,13 +979,10 @@ pub const App = struct {
 
         switch (self.game_detail.load_state) {
             .idle, .loading => {
-                _ = area.borrowTextAt(0, 0, "Game Details", .{ .bold = true, .fg = .{ .index = 14 } });
-                _ = area.borrowTextAt(0, 2, "Loading game detail...", .{ .fg = .gray });
+                self.drawCenteredGuidance(&area, "Game Details", "Loading game detail...");
             },
             .failed => |message| {
-                _ = area.borrowTextAt(0, 0, "Game Details", .{ .bold = true, .fg = .{ .index = 14 } });
-                _ = area.borrowTextAt(0, 2, "Could not load game detail.", .{ .fg = .{ .index = 9 } });
-                _ = area.borrowTextAt(0, 4, message, .{ .fg = .gray });
+                self.drawCenteredGuidance(&area, "Could not load game detail.", message);
             },
             .loaded => {
                 const detail_layout = detailLayout(area.size().height, self.config.interface.list_density);
@@ -1021,14 +1017,13 @@ pub const App = struct {
 
         switch (self.forums.load_state) {
             .idle, .loading_forums => {
-                area.hideCursor();
-                _ = try area.printAt(0, 0, .{ .bold = true, .fg = .{ .index = 14 } }, "{s} - Forums", .{self.forums.game_name});
-                _ = area.borrowTextAt(0, 2, "Loading BoardGameGeek forums...", .{ .fg = .gray });
+                const title = try std.fmt.allocPrint(area.frameAllocator(), "{s} - Forums", .{self.forums.game_name});
+                self.drawCenteredGuidance(&area, title, "Loading BoardGameGeek forums...");
             },
             .forums_loaded => {
                 _ = try area.printAt(0, 0, .{ .bold = true, .fg = .{ .index = 14 } }, "{s} - Forums", .{self.forums.game_name});
                 if (self.forums.forum_list.items.len == 0) {
-                    self.drawEmptyState(&area, 2, "No forums", "BGG did not return forums for this game.");
+                    self.drawCenteredGuidance(&area, "No forums", "BGG did not return forums for this game.");
                 } else {
                     var list_area = area.child(.{
                         .col = 0,
@@ -1043,15 +1038,13 @@ pub const App = struct {
                 }
             },
             .loading_threads => {
-                area.hideCursor();
-                _ = area.borrowTextAt(0, 0, self.forumThreadTitle(), .{ .bold = true, .fg = .{ .index = 14 } });
-                _ = area.borrowTextAt(0, 2, "Loading BoardGameGeek threads...", .{ .fg = .gray });
+                self.drawCenteredGuidance(&area, self.forumThreadTitle(), "Loading BoardGameGeek threads...");
             },
             .threads_loaded => {
                 _ = area.borrowTextAt(0, 0, self.forumThreadTitle(), .{ .bold = true, .fg = .{ .index = 14 } });
                 _ = try area.printAt(0, list_position_row, .{ .dim = true }, "Page {d} / {d}", .{ self.forums.thread_page.page, self.forums.thread_page.total_pages });
                 if (self.forums.thread_list.items.len == 0) {
-                    self.drawEmptyState(&area, list_body_row, "No threads", "BGG did not return threads for this forum page.");
+                    self.drawCenteredGuidance(&area, "No threads", "BGG did not return threads for this forum page.");
                 } else {
                     var list_area = area.child(.{
                         .col = 0,
@@ -1063,10 +1056,7 @@ pub const App = struct {
                 }
             },
             .failed => |message| {
-                area.hideCursor();
-                _ = area.borrowTextAt(0, 0, "Forums", .{ .bold = true, .fg = .{ .index = 14 } });
-                _ = area.borrowTextAt(0, 2, "Could not load forums.", .{ .fg = .{ .index = 9 } });
-                _ = area.borrowTextAt(0, 4, message, .{ .fg = .gray });
+                self.drawCenteredGuidance(&area, "Could not load forums.", message);
             },
         }
 
@@ -1078,15 +1068,10 @@ pub const App = struct {
 
         switch (self.thread.load_state) {
             .idle, .loading => {
-                area.hideCursor();
-                _ = area.borrowTextAt(0, 0, "Thread", .{ .bold = true, .fg = .{ .index = 14 } });
-                _ = area.borrowTextAt(0, 2, "Loading thread...", .{ .fg = .gray });
+                self.drawCenteredGuidance(&area, "Thread", "Loading thread...");
             },
             .failed => |message| {
-                area.hideCursor();
-                _ = area.borrowTextAt(0, 0, "Thread", .{ .bold = true, .fg = .{ .index = 14 } });
-                _ = area.borrowTextAt(0, 2, "Could not load thread.", .{ .fg = .{ .index = 9 } });
-                _ = area.borrowTextAt(0, 4, message, .{ .fg = .gray });
+                self.drawCenteredGuidance(&area, "Could not load thread.", message);
             },
             .loaded => {
                 const thread_layout = threadLayout(area.size().height, self.config.interface.list_density);
@@ -1899,6 +1884,36 @@ pub const App = struct {
         _ = self;
         _ = surface.borrowTextAt(0, row, title, .{ .bold = true, .fg = .gray });
         _ = surface.borrowTextAt(0, row + 1, message, .{ .fg = .gray });
+    }
+
+    fn drawCenteredGuidance(self: *const App, surface: *chasen.Surface, title: []const u8, message: []const u8) void {
+        _ = self;
+        surface.hideCursor();
+        drawCenteredGuidanceText(surface, title, message);
+    }
+
+    fn drawCenteredGuidanceKeepingCursor(self: *const App, surface: *chasen.Surface, title: []const u8, message: []const u8) void {
+        _ = self;
+        drawCenteredGuidanceText(surface, title, message);
+    }
+
+    fn drawCenteredGuidanceText(surface: *chasen.Surface, title: []const u8, message: []const u8) void {
+        const size = surface.size();
+        if (size.width == 0 or size.height == 0) return;
+
+        const title_row = if (size.height > 2) (size.height - 2) / 2 else 0;
+        drawCenteredText(surface, title_row, title, .{ .bold = true, .fg = .gray });
+        if (title_row + 1 < size.height) {
+            drawCenteredText(surface, title_row + 1, message, .{ .fg = .gray });
+        }
+    }
+
+    fn drawCenteredText(surface: *chasen.Surface, row: u16, text: []const u8, style: chasen.TextStyle) void {
+        if (row >= surface.size().height) return;
+        const width = surface.size().width;
+        const text_width = chasen.text.displayWidth(text);
+        const col: u16 = if (text_width >= width) 0 else @intCast((width - text_width) / 2);
+        _ = surface.borrowTextAt(col, row, text, style);
     }
 
     fn drawHotFilterInput(self: *const App, surface: *chasen.Surface) !void {
