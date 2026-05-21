@@ -95,6 +95,7 @@ pub const App = struct {
     thread: screens.thread.State = .{},
     thread_request_id: u64 = 0,
     browser_request_id: u64 = 0,
+    settings: screens.settings.State = .{},
     terminal_height: u16 = forum_screen_max_size.height,
     menu: ui.Menu = ui.Menu.init(.{ .items = &menu_items }),
     shell: ui.Panel = ui.Panel.init(.{}),
@@ -151,6 +152,7 @@ pub const App = struct {
         thread_open_browser,
         browser_opened: BrowserOpenTaskResult,
         thread_back_to_forums,
+        settings_list: ui.List.Msg,
         terminal_resized: chasen.Size,
         menu: ui.Menu.Msg,
         hot_list: ui.List.Msg,
@@ -325,6 +327,7 @@ pub const App = struct {
             .thread_open_browser => try self.openThreadInBrowser(ctx),
             .browser_opened => |result| try self.finishBrowserOpen(result),
             .thread_back_to_forums => self.backToThreadList(),
+            .settings_list => |list_msg| self.settings.updateList(list_msg),
             .terminal_resized => |size| self.handleResize(size),
             .menu => |menu_msg| switch (menu_msg) {
                 .move_prev, .move_next => self.menu.update(menu_msg),
@@ -594,6 +597,9 @@ pub const App = struct {
             // Menu owns only cursor movement and activation; App maps activation to screens.
             if (self.menu.handleEvent(event)) |msg| return .{ .menu = msg };
         }
+        if (self.screen == .settings) {
+            if (self.settings.handleEvent(event)) |msg| return .{ .settings_list = msg };
+        }
         if (self.screen == .hot_games) {
             if (self.hot_games.handleEvent(event)) |msg| return .{ .hot_list = msg };
         }
@@ -611,7 +617,7 @@ pub const App = struct {
             .forums => try self.viewForums(sfc),
             .thread => try self.viewThread(sfc),
             .collection => try self.viewCollection(sfc),
-            .settings => self.viewPlaceholder(sfc, "Settings", "Minimum settings screen is pending."),
+            .settings => try self.viewSettings(sfc),
         }
     }
 
@@ -654,6 +660,11 @@ pub const App = struct {
         _ = area.borrowTextAt(0, 0, title, .{ .bold = true, .fg = .{ .index = 14 } });
         _ = area.borrowTextAt(0, 2, message, .{ .fg = .gray });
         _ = area.borrowTextAt(0, 4, self.footerHint(), .{ .dim = true });
+    }
+
+    fn viewSettings(self: *const App, sfc: *chasen.Surface) !void {
+        var area = centeredSurface(sfc, screens.settings.required_size);
+        try self.settings.view(&area, self.config, self.config_path);
     }
 
     fn viewHotGames(self: *const App, sfc: *chasen.Surface) !void {
@@ -1750,7 +1761,7 @@ pub const App = struct {
                 else
                     "Up/Down: move  Enter: detail  /: filter  s: status  r: refresh  u: user  Esc/m: menu  q: quit",
             },
-            .settings => "m: menu  Esc/q: quit",
+            .settings => "Up/Down: move  m: menu  Esc/q: quit",
         };
     }
 };
@@ -2887,6 +2898,9 @@ test "footer hint matches screen key handling" {
     app.collection.filter_active = true;
     try std.testing.expectEqualStrings("Type: filter  Up/Down: move  Enter: detail  Esc: clear", app.footerHint());
     app.collection.filter_active = false;
+
+    app.screen = .settings;
+    try std.testing.expectEqualStrings("Up/Down: move  m: menu  Esc/q: quit", app.footerHint());
 }
 
 test "setup token submit hint reflects save availability" {
