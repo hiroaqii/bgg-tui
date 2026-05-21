@@ -3,6 +3,7 @@ const chasen = @import("chasen");
 const ui = @import("chasen_ui");
 
 const config_mod = @import("../config.zig");
+const style_mod = @import("../style.zig");
 
 const Kind = enum {
     text,
@@ -113,6 +114,7 @@ pub const State = struct {
         surface: *chasen.Surface,
         config: config_mod.Config,
         config_path: ?[]const u8,
+        theme: style_mod.Theme,
         token_input: ?*const ui.PasswordInput,
         username_input: ?*const ui.TextInput,
         width_input: ?*const ui.TextInput,
@@ -121,7 +123,7 @@ pub const State = struct {
         if (size.width == 0 or size.height == 0) return;
 
         if (self.editing == null) surface.hideCursor();
-        _ = surface.borrowTextAt(0, 0, "Settings", .{ .bold = true, .fg = .{ .index = 14 } });
+        _ = surface.borrowTextAt(0, 0, "Settings", theme.title);
 
         var row: u16 = 2;
         var current_section: []const u8 = "";
@@ -130,12 +132,12 @@ pub const State = struct {
                 current_section = item.section;
                 if (index > 0) row += 1;
                 if (row >= size.height) return;
-                _ = surface.borrowTextAt(0, row, item.section, .{ .fg = .gray });
+                _ = surface.borrowTextAt(0, row, item.section, theme.muted);
                 row += 1;
             }
             if (row >= size.height) return;
 
-            try drawItem(surface, row, index, item, current_section, config, config_path, self.list.focus.isFocused(index), self.editing, token_input, username_input, width_input);
+            try drawItem(surface, row, index, item, current_section, config, config_path, theme, self.list.focus.isFocused(index), self.editing, token_input, username_input, width_input);
             row += 1;
         }
 
@@ -150,7 +152,7 @@ pub const State = struct {
                 "j/k ↑↓: Navigate  Enter: Toggle Images  m: Menu  Esc/q: Quit"
             else
                 "j/k ↑↓: Navigate  m: Menu  Esc/q: Quit";
-            _ = surface.borrowTextAt(0, row +| 1, help, .{ .dim = true });
+            _ = surface.borrowTextAt(0, row +| 1, help, theme.subtle);
         }
     }
 };
@@ -163,13 +165,14 @@ fn drawItem(
     section: []const u8,
     config: config_mod.Config,
     config_path: ?[]const u8,
+    theme: style_mod.Theme,
     focused: bool,
     editing: ?EditField,
     token_input: ?*const ui.PasswordInput,
     username_input: ?*const ui.TextInput,
     width_input: ?*const ui.TextInput,
 ) !void {
-    const label_style: chasen.TextStyle = if (focused) .{ .bold = true, .fg = .{ .index = 14 } } else .{};
+    const label_style: chasen.TextStyle = if (focused) theme.focused else .{};
     const cursor = if (focused) "> " else "  ";
 
     _ = surface.borrowTextAt(0, row, cursor, .{ .dim = !focused });

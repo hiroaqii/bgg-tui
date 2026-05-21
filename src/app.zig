@@ -14,6 +14,7 @@ const labels_mod = @import("labels.zig");
 const list_filter = @import("list_filter.zig");
 const list_view = @import("list_view.zig");
 const screens = @import("screens/root.zig");
+const style_mod = @import("style.zig");
 
 // Keep top-level screens centered until a screen needs its own full-page layout.
 const main_menu_size = chasen.Size{ .width = 48, .height = 12 };
@@ -445,7 +446,9 @@ pub const App = struct {
         });
         const shell_frame = ui.Panel.frame(&shell_area, .{
             .title = "BoardGameGeek",
-            .border = .rounded,
+            .border = self.panelBorder(),
+            .border_style = self.theme().border,
+            .title_style = self.theme().title,
         });
         shell_frame.view();
 
@@ -764,24 +767,24 @@ pub const App = struct {
 
     fn viewSetupToken(self: *const App, sfc: *chasen.Surface) void {
         var area = centeredSurface(sfc, setup_token_size);
-        _ = area.borrowTextAt(0, 0, "Setup BGG API token", .{ .bold = true, .fg = .{ .index = 14 } });
-        _ = area.borrowTextAt(0, 2, "BGG API access requires a token.", .{ .fg = .gray });
-        _ = area.borrowTextAt(0, 3, "Enter a token to continue to the main menu.", .{ .fg = .gray });
+        _ = area.borrowTextAt(0, 0, "Setup BGG API token", self.titleStyle());
+        _ = area.borrowTextAt(0, 2, "BGG API access requires a token.", self.mutedStyle());
+        _ = area.borrowTextAt(0, 3, "Enter a token to continue to the main menu.", self.mutedStyle());
 
         if (self.setup_token_input) |*input| {
             var input_area = area.child(.{ .col = 0, .row = 5, .width = @min(area.size().width, 48), .height = 1 });
             input.view(&input_area, .{});
         }
 
-        _ = area.borrowTextAt(0, 7, setupTokenSubmitHint(self.config_path), .{ .dim = true });
+        _ = area.borrowTextAt(0, 7, setupTokenSubmitHint(self.config_path), self.subtleStyle());
     }
 
     fn viewMainMenu(self: *const App, sfc: *chasen.Surface) !void {
         var area = centeredSurface(sfc, main_menu_size);
         const token_status = if (self.config.apiClientToken() == null) "missing" else "configured";
-        ui.message_block.drawCenteredText(&area, 0, "Main menu", .{ .bold = true });
+        ui.message_block.drawCenteredText(&area, 0, "Main menu", self.titleStyle());
         const token_text = try std.fmt.allocPrint(area.frameAllocator(), "BGG API token: {s}", .{token_status});
-        ui.message_block.drawCenteredText(&area, 2, token_text, .{ .fg = .gray });
+        ui.message_block.drawCenteredText(&area, 2, token_text, self.mutedStyle());
 
         const menu_width = mainMenuContentWidth();
         const menu_col: u16 = if (menu_width >= area.size().width) 0 else @intCast((area.size().width - menu_width) / 2);
@@ -793,17 +796,17 @@ pub const App = struct {
         });
         self.menu.view(&menu_area, .{
             .shortcut_col = main_menu_shortcut_col,
-            .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
+            .focused_style = self.focusedStyle(),
         });
 
-        ui.message_block.drawCenteredText(&area, 10, self.footerHint(), .{ .dim = true });
+        ui.message_block.drawCenteredText(&area, 10, self.footerHint(), self.subtleStyle());
     }
 
     fn viewPlaceholder(self: *const App, sfc: *chasen.Surface, title: []const u8, message: []const u8) void {
         var area = centeredSurface(sfc, placeholder_size);
-        _ = area.borrowTextAt(0, 0, title, .{ .bold = true, .fg = .{ .index = 14 } });
-        _ = area.borrowTextAt(0, 2, message, .{ .fg = .gray });
-        _ = area.borrowTextAt(0, 4, self.footerHint(), .{ .dim = true });
+        _ = area.borrowTextAt(0, 0, title, self.titleStyle());
+        _ = area.borrowTextAt(0, 2, message, self.mutedStyle());
+        _ = area.borrowTextAt(0, 4, self.footerHint(), self.subtleStyle());
     }
 
     fn viewSettings(self: *const App, sfc: *chasen.Surface) !void {
@@ -811,12 +814,12 @@ pub const App = struct {
         const token_input = if (self.settings_token_input) |*input| input else null;
         const username_input = if (self.settings_username_input) |*input| input else null;
         const width_input = if (self.settings_width_input) |*input| input else null;
-        try self.settings.view(&area, self.config, self.config_path, token_input, username_input, width_input);
+        try self.settings.view(&area, self.config, self.config_path, self.theme(), token_input, username_input, width_input);
     }
 
     fn viewHotGames(self: *const App, sfc: *chasen.Surface) !void {
         var area = constrainedListSurface(sfc);
-        _ = try area.printAt(0, 0, .{ .bold = true, .fg = .{ .index = 14 } }, "Hot Games ({s})", .{self.hot_games.sort_mode.label(.hot_games)});
+        _ = try area.printAt(0, 0, self.titleStyle(), "Hot Games ({s})", .{self.hot_games.sort_mode.label(.hot_games)});
 
         switch (self.hot_games.load_state) {
             .idle, .loading => {
@@ -842,7 +845,7 @@ pub const App = struct {
                         .height = area.size().height -| (body_row + 1 + list_footer_gap),
                     });
                     list_view.viewListWithDensity(list, &list_area, .{
-                        .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
+                        .focused_style = self.focusedStyle(),
                     }, self.listDensity());
                     try self.drawListPosition(&area, list);
                     self.drawSortMode(&area, self.hot_games.sort_mode.label(.hot_games));
@@ -850,12 +853,12 @@ pub const App = struct {
             },
         }
 
-        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
+        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), self.subtleStyle());
     }
 
     fn viewSearch(self: *const App, sfc: *chasen.Surface) !void {
         var area = centeredSurface(sfc, search_input_size);
-        _ = area.borrowTextAt(0, 0, "Search Games", .{ .bold = true, .fg = .{ .index = 14 } });
+        _ = area.borrowTextAt(0, 0, "Search Games", self.titleStyle());
 
         if (self.search_input) |*input| {
             var input_area = area.child(.{ .col = 0, .row = 2, .width = @min(area.size().width, 48), .height = 1 });
@@ -877,12 +880,12 @@ pub const App = struct {
             },
         }
 
-        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
+        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), self.subtleStyle());
     }
 
     fn viewSearchResults(self: *const App, sfc: *chasen.Surface) !void {
         var area = constrainedListSurface(sfc);
-        _ = try area.printAt(0, 0, .{ .bold = true, .fg = .{ .index = 14 } }, "Search Results ({s})", .{self.search.sort_mode.label(.search_results)});
+        _ = try area.printAt(0, 0, self.titleStyle(), "Search Results ({s})", .{self.search.sort_mode.label(.search_results)});
 
         switch (self.search.load_state) {
             .idle => {
@@ -911,7 +914,7 @@ pub const App = struct {
                         .height = area.size().height -| (body_row + 1 + list_footer_gap),
                     });
                     list_view.viewListWithDensity(list, &list_area, .{
-                        .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
+                        .focused_style = self.focusedStyle(),
                     }, self.listDensity());
                     try self.drawListPosition(&area, list);
                     self.drawSortMode(&area, self.search.sort_mode.label(.search_results));
@@ -919,7 +922,7 @@ pub const App = struct {
             },
         }
 
-        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
+        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), self.subtleStyle());
     }
 
     fn viewCollection(self: *const App, sfc: *chasen.Surface) !void {
@@ -927,7 +930,7 @@ pub const App = struct {
             .idle, .failed => centeredSurface(sfc, collection_input_size),
             else => constrainedListSurface(sfc),
         };
-        _ = area.borrowTextAt(0, 0, "Collection", .{ .bold = true, .fg = .{ .index = 14 } });
+        _ = area.borrowTextAt(0, 0, "Collection", self.titleStyle());
 
         switch (self.collection.load_state) {
             .idle => {
@@ -964,7 +967,7 @@ pub const App = struct {
                         .height = area.size().height -| (body_row + 1 + picker_height),
                     });
                     list_view.viewListWithDensity(list, &list_area, .{
-                        .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
+                        .focused_style = self.focusedStyle(),
                     }, self.listDensity());
                     try self.drawListPosition(&area, list);
                 }
@@ -975,7 +978,7 @@ pub const App = struct {
             },
         }
 
-        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
+        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), self.subtleStyle());
     }
 
     fn viewGameDetail(self: *const App, sfc: *chasen.Surface) !void {
@@ -1014,7 +1017,7 @@ pub const App = struct {
         }
 
         const detail_layout = detailLayout(area.size().height, self.config.interface.list_density);
-        _ = area.borrowTextAt(0, detail_layout.footer_row, self.footerHint(), .{ .dim = true });
+        _ = area.borrowTextAt(0, detail_layout.footer_row, self.footerHint(), self.subtleStyle());
     }
 
     fn viewForums(self: *const App, sfc: *chasen.Surface) !void {
@@ -1031,18 +1034,18 @@ pub const App = struct {
                 } else {
                     var forum_area = forumListSurface(&area, self.forums.forum_list.items.len);
                     const title = try std.fmt.allocPrint(forum_area.frameAllocator(), "{s} - Forums", .{self.forums.game_name});
-                    ui.message_block.drawCenteredText(&forum_area, 0, title, .{ .bold = true, .fg = .{ .index = 14 } });
+                    ui.message_block.drawCenteredText(&forum_area, 0, title, self.titleStyle());
                     try self.drawCenteredListPosition(&forum_area, &self.forums.forum_list);
                     try self.drawCenteredForumList(&forum_area);
-                    ui.message_block.drawCenteredText(&forum_area, forum_area.size().height -| 1, self.footerHint(), .{ .dim = true });
+                    ui.message_block.drawCenteredText(&forum_area, forum_area.size().height -| 1, self.footerHint(), self.subtleStyle());
                 }
             },
             .loading_threads => {
                 self.drawCenteredGuidance(&area, self.forumThreadTitle(), "Loading BoardGameGeek threads...");
             },
             .threads_loaded => {
-                _ = area.borrowTextAt(0, 0, self.forumThreadTitle(), .{ .bold = true, .fg = .{ .index = 14 } });
-                _ = try area.printAt(0, list_position_row, .{ .dim = true }, "Page {d} / {d}", .{ self.forums.thread_page.page, self.forums.thread_page.total_pages });
+                _ = area.borrowTextAt(0, 0, self.forumThreadTitle(), self.titleStyle());
+                _ = try area.printAt(0, list_position_row, self.subtleStyle(), "Page {d} / {d}", .{ self.forums.thread_page.page, self.forums.thread_page.total_pages });
                 if (self.forums.thread_list.items.len == 0) {
                     self.drawCenteredGuidance(&area, "No threads", "BGG did not return threads for this forum page.");
                 } else {
@@ -1061,7 +1064,7 @@ pub const App = struct {
         }
 
         if (self.forums.load_state != .forums_loaded or self.forums.forum_list.items.len == 0) {
-            _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
+            _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), self.subtleStyle());
         }
     }
 
@@ -1077,8 +1080,8 @@ pub const App = struct {
             },
             .loaded => {
                 const thread_layout = threadLayout(area.size().height, self.config.interface.list_density);
-                _ = area.borrowTextAt(0, thread_layout.title_row, self.thread.subject(), .{ .bold = true, .fg = .{ .index = 14 } });
-                _ = try area.printAt(0, thread_layout.meta_row, .{ .dim = true }, "{d} posts · {s}", .{ self.thread.postCount(), self.thread.sortLabel() });
+                _ = area.borrowTextAt(0, thread_layout.title_row, self.thread.subject(), self.titleStyle());
+                _ = try area.printAt(0, thread_layout.meta_row, self.subtleStyle(), "{d} posts · {s}", .{ self.thread.postCount(), self.thread.sortLabel() });
 
                 var body_area = area.child(.{
                     .col = 0,
@@ -1091,7 +1094,7 @@ pub const App = struct {
                 if (self.thread.browser_error_url.len > 0) {
                     try self.drawManualOpenHint(&area, thread_layout.scroll_row, self.thread.browser_error_url);
                 } else if (self.thread.maxScroll(thread_layout.content_height) > 0 and area.size().height >= 3) {
-                    _ = try area.printAt(0, thread_layout.scroll_row, .{ .dim = true }, "({d}/{d})", .{
+                    _ = try area.printAt(0, thread_layout.scroll_row, self.subtleStyle(), "({d}/{d})", .{
                         self.thread.scroll + 1,
                         self.thread.maxScroll(thread_layout.content_height) + 1,
                     });
@@ -1100,7 +1103,7 @@ pub const App = struct {
         }
 
         const thread_layout = threadLayout(area.size().height, self.config.interface.list_density);
-        _ = area.borrowTextAt(0, thread_layout.footer_row, self.footerHint(), .{ .dim = true });
+        _ = area.borrowTextAt(0, thread_layout.footer_row, self.footerHint(), self.subtleStyle());
     }
 
     fn submitToken(self: *App, ctx: *chasen.Ctx(Msg)) !void {
@@ -1832,27 +1835,24 @@ pub const App = struct {
     }
 
     fn drawListPosition(self: *const App, surface: *chasen.Surface, list: *const ui.List) !void {
-        _ = self;
         const item_count = list.items.len;
         if (item_count == 0 or surface.size().height < 2) return;
 
         const text = try list_view.focusedPositionText(surface.frameAllocator(), list.focusedIndex(), item_count);
-        _ = surface.borrowTextAt(0, list_position_row, text, .{ .dim = true });
+        _ = surface.borrowTextAt(0, list_position_row, text, self.subtleStyle());
     }
 
     fn drawCenteredListPosition(self: *const App, surface: *chasen.Surface, list: *const ui.List) !void {
-        _ = self;
         const item_count = list.items.len;
         if (item_count == 0 or surface.size().height < 2) return;
 
         const text = try list_view.focusedPositionText(surface.frameAllocator(), list.focusedIndex(), item_count);
-        ui.message_block.drawCenteredText(surface, list_position_row, text, .{ .dim = true });
+        ui.message_block.drawCenteredText(surface, list_position_row, text, self.subtleStyle());
     }
 
     fn drawSortMode(self: *const App, surface: *chasen.Surface, label: []const u8) void {
-        _ = self;
         if (surface.size().width <= 12 or surface.size().height <= list_position_row) return;
-        _ = surface.borrowTextAt(10, list_position_row, label, .{ .dim = true });
+        _ = surface.borrowTextAt(10, list_position_row, label, self.subtleStyle());
     }
 
     fn forumThreadTitle(self: *const App) []const u8 {
@@ -1878,11 +1878,11 @@ pub const App = struct {
             const focused = global_index == focused_index;
             const marker = if (focused) ">" else " ";
             _ = surface.borrowTextAt(0, row, marker, .{});
-            _ = surface.borrowTextAt(2, row, thread.subject, if (focused) .{ .bold = true, .fg = .{ .index = 14 } } else .{});
+            _ = surface.borrowTextAt(2, row, thread.subject, if (focused) self.focusedStyle() else .{});
 
             if (row + 1 < surface.size().height) {
                 const meta = try screens.forum.threadMetaText(surface.frameAllocator(), thread);
-                _ = surface.borrowTextAt(4, row + 1, meta, .{ .dim = true });
+                _ = surface.borrowTextAt(4, row + 1, meta, self.subtleStyle());
             }
         }
     }
@@ -1896,7 +1896,7 @@ pub const App = struct {
             if (row >= surface.size().height) break;
             const marker = if (index == focused_index) "> " else "  ";
             const text = try std.fmt.allocPrint(surface.frameAllocator(), "{s}{s}", .{ marker, item });
-            _ = surface.borrowTextAt(content_col, row, text, if (index == focused_index) .{ .bold = true, .fg = .{ .index = 14 } } else .{});
+            _ = surface.borrowTextAt(content_col, row, text, if (index == focused_index) self.focusedStyle() else .{});
         }
     }
 
@@ -1935,9 +1935,8 @@ pub const App = struct {
     }
 
     fn drawGuidance(self: *const App, surface: *chasen.Surface, row: u16, title: []const u8, message: []const u8) void {
-        _ = self;
-        _ = surface.borrowTextAt(0, row, title, .{ .bold = true, .fg = .gray });
-        _ = surface.borrowTextAt(0, row + 1, message, .{ .fg = .gray });
+        _ = surface.borrowTextAt(0, row, title, self.mutedTitleStyle());
+        _ = surface.borrowTextAt(0, row + 1, message, self.mutedStyle());
     }
 
     fn drawCenteredGuidance(self: *const App, surface: *chasen.Surface, title: []const u8, message: []const u8) void {
@@ -1953,7 +1952,7 @@ pub const App = struct {
     }
 
     fn drawHotFilterInput(self: *const App, surface: *chasen.Surface) !void {
-        _ = surface.borrowTextAt(0, list_filter_row, "Filter:", .{ .dim = true });
+        _ = surface.borrowTextAt(0, list_filter_row, "Filter:", self.subtleStyle());
         if (self.hot_filter_input) |*input| {
             var input_area = surface.child(.{
                 .col = 8,
@@ -1966,7 +1965,7 @@ pub const App = struct {
     }
 
     fn drawSearchFilterInput(self: *const App, surface: *chasen.Surface) !void {
-        _ = surface.borrowTextAt(0, list_filter_row, "Filter:", .{ .dim = true });
+        _ = surface.borrowTextAt(0, list_filter_row, "Filter:", self.subtleStyle());
         if (self.search_filter_input) |*input| {
             var input_area = surface.child(.{
                 .col = 8,
@@ -1979,7 +1978,7 @@ pub const App = struct {
     }
 
     fn drawCollectionUsernameInput(self: *const App, surface: *chasen.Surface) !void {
-        _ = surface.borrowTextAt(0, 2, "User:", .{ .dim = true });
+        _ = surface.borrowTextAt(0, 2, "User:", self.subtleStyle());
         if (self.collection_username_input) |*input| {
             var input_area = surface.child(.{
                 .col = 6,
@@ -1992,7 +1991,7 @@ pub const App = struct {
     }
 
     fn drawCollectionFilterInput(self: *const App, surface: *chasen.Surface) !void {
-        _ = surface.borrowTextAt(0, list_filter_row, "Filter:", .{ .dim = true });
+        _ = surface.borrowTextAt(0, list_filter_row, "Filter:", self.subtleStyle());
         if (self.collection_filter_input) |*input| {
             var input_area = surface.child(.{
                 .col = 8,
@@ -2007,20 +2006,20 @@ pub const App = struct {
     fn drawCollectionStatusBar(self: *const App, surface: *chasen.Surface) void {
         if (surface.size().height <= collection_status_bar_row) return;
         const text = collectionStatusSummary(surface.frameAllocator(), self.collection_status_mask) catch "Status: -";
-        _ = surface.borrowTextAt(0, collection_status_bar_row, text, .{ .dim = true });
+        _ = surface.borrowTextAt(0, collection_status_bar_row, text, self.subtleStyle());
     }
 
     fn drawCollectionStatusPicker(self: *const App, surface: *chasen.Surface, start_row: u16) void {
         if (surface.size().height <= start_row) return;
 
-        _ = surface.borrowTextAt(0, start_row, "Status Filter", .{ .bold = true, .fg = .gray });
+        _ = surface.borrowTextAt(0, start_row, "Status Filter", self.mutedTitleStyle());
         for (collection_status_labels, 0..) |label, index| {
             const row: u16 = @intCast(start_row + 1 + index);
             if (row >= surface.size().height) return;
             const cursor = if (self.collection_status_cursor == index) "> " else "  ";
             const checked = if ((self.collection_status_mask & collectionStatusBit(index)) != 0) "[x]" else "[ ]";
             _ = surface.borrowTextAt(0, row, cursor, .{ .bold = self.collection_status_cursor == index });
-            _ = surface.borrowTextAt(2, row, checked, .{ .fg = if ((self.collection_status_mask & collectionStatusBit(index)) != 0) .{ .index = 14 } else .gray });
+            _ = surface.borrowTextAt(2, row, checked, .{ .fg = if ((self.collection_status_mask & collectionStatusBit(index)) != 0) self.theme().accent else .gray });
             _ = surface.borrowTextAt(6, row, label, .{});
         }
 
@@ -2028,12 +2027,42 @@ pub const App = struct {
         if (clear_row < surface.size().height) {
             const cursor = if (self.collection_status_cursor == collection_picker_clear_index) "> " else "  ";
             _ = surface.borrowTextAt(0, clear_row, cursor, .{ .bold = self.collection_status_cursor == collection_picker_clear_index });
-            _ = surface.borrowTextAt(6, clear_row, "Show All (clear)", .{ .fg = .gray });
+            _ = surface.borrowTextAt(6, clear_row, "Show All (clear)", self.mutedStyle());
         }
     }
 
     fn listDensity(self: *const App) list_view.Density {
         return list_view.Density.fromConfig(self.config.interface.list_density);
+    }
+
+    fn theme(self: *const App) style_mod.Theme {
+        return style_mod.Theme.fromName(self.config.interface.color_theme);
+    }
+
+    fn panelBorder(self: *const App) ui.Panel.Border {
+        return style_mod.borderFromName(self.config.interface.border_style);
+    }
+
+    fn titleStyle(self: *const App) chasen.TextStyle {
+        return self.theme().title;
+    }
+
+    fn focusedStyle(self: *const App) chasen.TextStyle {
+        return self.theme().focused;
+    }
+
+    fn mutedStyle(self: *const App) chasen.TextStyle {
+        return self.theme().muted;
+    }
+
+    fn mutedTitleStyle(self: *const App) chasen.TextStyle {
+        var style = self.theme().muted;
+        style.bold = true;
+        return style;
+    }
+
+    fn subtleStyle(self: *const App) chasen.TextStyle {
+        return self.theme().subtle;
     }
 
     fn footerHint(self: *const App) []const u8 {
@@ -3207,10 +3236,10 @@ fn parseSettingsWidth(text: []const u8) !u16 {
     return value;
 }
 
-const color_theme_values = [_][]const u8{ "default", "blue", "orange", "green" };
+const color_theme_values = [_][]const u8{ "default", "blue", "orange", "mono", "matcha" };
 const transition_values = [_][]const u8{ "none", "fade", "glitch", "dissolve", "sweep", "lines", "lines-cross", "random" };
 const selection_values = [_][]const u8{ "none", "wave", "blink", "glitch" };
-const border_style_values = [_][]const u8{ "none", "rounded", "thick", "double", "block" };
+const border_style_values = [_][]const u8{ "none", "rounded", "thick", "double", "block", "ascii" };
 const list_density_values = [_][]const u8{ "compact", "normal", "comfortable", "relaxed" };
 const date_format_values = [_][]const u8{ "yyyy-mm-dd", "yyyy/mm/dd", "relative", "YYYY-MM-DD" };
 
@@ -4649,4 +4678,26 @@ test "constrained list surface shrinks for small terminals" {
 
     try std.testing.expectEqual(@as(u16, 40), area.size().width);
     try std.testing.expectEqual(@as(u16, 12), area.size().height);
+}
+
+test "centered surface shrinks for narrow terminals" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(36, 10);
+    defer ts.deinit();
+
+    const area = centeredSurface(&ts.surface, .{ .width = 72, .height = 27 });
+
+    try std.testing.expectEqual(@as(u16, 36), area.size().width);
+    try std.testing.expectEqual(@as(u16, 10), area.size().height);
+}
+
+test "detail surface clamps configured width to available width" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(50, 16);
+    defer ts.deinit();
+
+    const area = detailSurface(&ts.surface, 120);
+
+    try std.testing.expectEqual(@as(u16, 50), area.size().width);
+    try std.testing.expectEqual(@as(u16, 16), area.size().height);
 }

@@ -77,12 +77,12 @@ pub const Config = struct {
         try validateWidth(config.display.list_width);
         try validateWidth(config.display.thread_width);
         try validateWidth(config.display.detail_width);
-        if (!isOneOf(config.interface.color_theme, &.{ "default", "blue", "orange", "green" })) return error.InvalidColorTheme;
+        if (!isOneOf(config.interface.color_theme, &.{ "default", "blue", "orange", "mono", "matcha" })) return error.InvalidColorTheme;
         if (!isOneOf(config.interface.transition, &.{ "none", "fade", "glitch", "dissolve", "sweep", "lines", "lines-cross", "random" })) return error.InvalidTransition;
         if (!isOneOf(config.interface.selection, &.{ "none", "wave", "blink", "glitch" })) return error.InvalidSelection;
         if (!isOneOf(config.interface.list_density, &.{ "compact", "normal", "comfortable", "relaxed" })) return error.InvalidListDensity;
         if (!isOneOf(config.interface.date_format, &.{ "yyyy-mm-dd", "yyyy/mm/dd", "relative", "YYYY-MM-DD" })) return error.InvalidDateFormat;
-        if (!isOneOf(config.interface.border_style, &.{ "none", "rounded", "thick", "double", "block" })) return error.InvalidBorderStyle;
+        if (!isOneOf(config.interface.border_style, &.{ "none", "rounded", "thick", "double", "block", "ascii" })) return error.InvalidBorderStyle;
     }
 };
 
@@ -771,13 +771,13 @@ test "config validates setting ranges and string option values" {
 }
 
 test "config validation accepts documented theme and border values" {
-    inline for (.{ "default", "blue", "orange", "green" }) |theme| {
+    inline for (.{ "default", "blue", "orange", "mono", "matcha" }) |theme| {
         var config = Config.defaults();
         config.interface.color_theme = theme;
         try config.validate();
     }
 
-    inline for (.{ "none", "rounded", "thick", "double", "block" }) |border| {
+    inline for (.{ "none", "rounded", "thick", "double", "block", "ascii" }) |border| {
         var config = Config.defaults();
         config.interface.border_style = border;
         try config.validate();
