@@ -409,7 +409,7 @@ const TextRenderer = struct {
     fn writeTextByte(self: *TextRenderer, byte: u8) !void {
         if (byte == '\r') return;
         if (byte == '\n') {
-            try self.newline(1);
+            try self.newline(self.newline_count + 1);
             return;
         }
         if (std.ascii.isWhitespace(byte)) {
@@ -758,6 +758,13 @@ test "convert paragraphs and line breaks to text" {
     defer std.testing.allocator.free(text);
 
     try std.testing.expectEqualStrings("First line\nSecond line\n\nNext", text);
+}
+
+test "preserve blank lines from decoded bgg description text" {
+    const text = try toText(std.testing.allocator, "First paragraph.\n\nSecond paragraph.", .{ .wrap_width = 72 });
+    defer std.testing.allocator.free(text);
+
+    try std.testing.expectEqualStrings("First paragraph.\n\nSecond paragraph.", text);
 }
 
 test "convert blockquote and BGG quote markup to quoted text" {
