@@ -43,13 +43,15 @@ pub const Density = enum {
 pub fn visibleRange(item_count: usize, focused_index: usize, visible_height: usize) Range {
     if (item_count == 0 or visible_height == 0) return .{ .start = 0, .end = 0 };
 
-    const clamped_focus = @min(focused_index, item_count - 1);
     const clamped_height = @min(visible_height, item_count);
-    const start = if (clamped_focus < clamped_height) 0 else clamped_focus - clamped_height + 1;
-    return .{
-        .start = start,
-        .end = @min(item_count, start + clamped_height),
-    };
+    const start = ui.Viewport.offsetKeepingIndexVisible(item_count, clamped_height, 0, focused_index);
+    const range = ui.Viewport.init(.{
+        .total = item_count,
+        .height = clamped_height,
+        .offset = start,
+    }).visibleRange();
+
+    return .{ .start = range.start, .end = range.end };
 }
 
 pub fn viewList(list: *const ui.List, surface: *chasen.Surface, opts: ui.List.ViewOptions) void {

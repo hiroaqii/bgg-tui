@@ -4,6 +4,7 @@ const bgg_html = @import("../bgg/html.zig");
 const bgg_model = @import("../bgg/model.zig");
 const bgg_xml = @import("../bgg/xml.zig");
 const format = @import("../format.zig");
+const ui = @import("chasen_ui");
 
 pub const LoadState = union(enum) {
     idle,
@@ -75,15 +76,20 @@ pub const State = struct {
         self.browser_error_url = "";
     }
 
-    pub fn visibleRange(self: *const State, visible_height: usize) struct { start: usize, end: usize } {
-        if (visible_height == 0 or self.lines.len == 0) return .{ .start = 0, .end = 0 };
-        const start = @min(self.scroll, self.lines.len - 1);
-        return .{ .start = start, .end = @min(self.lines.len, start + visible_height) };
+    pub fn visibleRange(self: *const State, visible_height: usize) ui.Viewport.Range {
+        return ui.Viewport.init(.{
+            .total = self.lines.len,
+            .height = visible_height,
+            .offset = self.scroll,
+        }).visibleRange();
     }
 
     pub fn maxScroll(self: *const State, visible_height: usize) usize {
-        if (visible_height == 0 or self.lines.len <= visible_height) return 0;
-        return self.lines.len - visible_height;
+        return ui.Viewport.init(.{
+            .total = self.lines.len,
+            .height = visible_height,
+            .offset = self.scroll,
+        }).maxOffset();
     }
 
     pub fn postCount(self: *const State) usize {
