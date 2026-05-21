@@ -778,9 +778,9 @@ pub const App = struct {
     fn viewMainMenu(self: *const App, sfc: *chasen.Surface) !void {
         var area = centeredSurface(sfc, main_menu_size);
         const token_status = if (self.config.apiClientToken() == null) "missing" else "configured";
-        drawCenteredText(&area, 0, "Main menu", .{ .bold = true });
+        ui.message_block.drawCenteredText(&area, 0, "Main menu", .{ .bold = true });
         const token_text = try std.fmt.allocPrint(area.frameAllocator(), "BGG API token: {s}", .{token_status});
-        drawCenteredText(&area, 2, token_text, .{ .fg = .gray });
+        ui.message_block.drawCenteredText(&area, 2, token_text, .{ .fg = .gray });
 
         const menu_width = mainMenuContentWidth();
         const menu_col: u16 = if (menu_width >= area.size().width) 0 else @intCast((area.size().width - menu_width) / 2);
@@ -795,7 +795,7 @@ pub const App = struct {
             .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
         });
 
-        drawCenteredText(&area, 10, self.footerHint(), .{ .dim = true });
+        ui.message_block.drawCenteredText(&area, 10, self.footerHint(), .{ .dim = true });
     }
 
     fn viewPlaceholder(self: *const App, sfc: *chasen.Surface, title: []const u8, message: []const u8) void {
@@ -1030,10 +1030,10 @@ pub const App = struct {
                 } else {
                     var forum_area = forumListSurface(&area, self.forums.forum_list.items.len);
                     const title = try std.fmt.allocPrint(forum_area.frameAllocator(), "{s} - Forums", .{self.forums.game_name});
-                    drawCenteredText(&forum_area, 0, title, .{ .bold = true, .fg = .{ .index = 14 } });
+                    ui.message_block.drawCenteredText(&forum_area, 0, title, .{ .bold = true, .fg = .{ .index = 14 } });
                     try self.drawCenteredListPosition(&forum_area, &self.forums.forum_list);
                     try self.drawCenteredForumList(&forum_area);
-                    drawCenteredText(&forum_area, forum_area.size().height -| 1, self.footerHint(), .{ .dim = true });
+                    ui.message_block.drawCenteredText(&forum_area, forum_area.size().height -| 1, self.footerHint(), .{ .dim = true });
                 }
             },
             .loading_threads => {
@@ -1825,7 +1825,7 @@ pub const App = struct {
         if (item_count == 0 or surface.size().height < 2) return;
 
         const text = try list_view.focusedPositionText(surface.frameAllocator(), list.focusedIndex(), item_count);
-        drawCenteredText(surface, list_position_row, text, .{ .dim = true });
+        ui.message_block.drawCenteredText(surface, list_position_row, text, .{ .dim = true });
     }
 
     fn drawSortMode(self: *const App, surface: *chasen.Surface, label: []const u8) void {
@@ -1921,32 +1921,14 @@ pub const App = struct {
 
     fn drawCenteredGuidance(self: *const App, surface: *chasen.Surface, title: []const u8, message: []const u8) void {
         _ = self;
-        surface.hideCursor();
-        drawCenteredGuidanceText(surface, title, message);
+        const block = ui.MessageBlock.init(.{ .title = title, .message = message });
+        block.view(surface, .{});
     }
 
     fn drawCenteredGuidanceKeepingCursor(self: *const App, surface: *chasen.Surface, title: []const u8, message: []const u8) void {
         _ = self;
-        drawCenteredGuidanceText(surface, title, message);
-    }
-
-    fn drawCenteredGuidanceText(surface: *chasen.Surface, title: []const u8, message: []const u8) void {
-        const size = surface.size();
-        if (size.width == 0 or size.height == 0) return;
-
-        const title_row = if (size.height > 2) (size.height - 2) / 2 else 0;
-        drawCenteredText(surface, title_row, title, .{ .bold = true, .fg = .gray });
-        if (title_row + 1 < size.height) {
-            drawCenteredText(surface, title_row + 1, message, .{ .fg = .gray });
-        }
-    }
-
-    fn drawCenteredText(surface: *chasen.Surface, row: u16, text: []const u8, style: chasen.TextStyle) void {
-        if (row >= surface.size().height) return;
-        const width = surface.size().width;
-        const text_width = chasen.text.displayWidth(text);
-        const col: u16 = if (text_width >= width) 0 else @intCast((width - text_width) / 2);
-        _ = surface.borrowTextAt(col, row, text, style);
+        const block = ui.MessageBlock.init(.{ .title = title, .message = message });
+        block.view(surface, .{ .hide_cursor = false });
     }
 
     fn drawHotFilterInput(self: *const App, surface: *chasen.Surface) !void {
