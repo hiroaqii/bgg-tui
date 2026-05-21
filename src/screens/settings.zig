@@ -72,6 +72,10 @@ pub const State = struct {
         };
     }
 
+    pub fn isShowImagesFocused(self: *const State) bool {
+        return self.list.focusedIndex() == show_images_index;
+    }
+
     pub fn handleEvent(self: *const State, event: chasen.Event) ?ui.List.Msg {
         if (event == .key_press) {
             if (event.key_press.codepoint == 'k') return .move_prev;
@@ -116,6 +120,8 @@ pub const State = struct {
                 "Enter: Save  Esc: Cancel"
             else if (self.focusedEditField()) |field|
                 editHelp(field)
+            else if (self.isShowImagesFocused())
+                "j/k ↑↓: Navigate  Enter: Toggle Images  m: Menu  Esc/q: Quit"
             else
                 "j/k ↑↓: Navigate  m: Menu  Esc/q: Quit";
             _ = surface.borrowTextAt(0, row +| 1, help, .{ .dim = true });
@@ -234,6 +240,7 @@ const thread_width_index: usize = 8;
 const detail_width_index: usize = 9;
 const username_index: usize = 10;
 const token_index: usize = 11;
+const show_images_index: usize = 6;
 
 fn valueFor(surface: *chasen.Surface, index: usize, config: config_mod.Config, config_path: ?[]const u8) ![]const u8 {
     return switch (index) {
@@ -328,4 +335,13 @@ test "settings focused edit field includes width rows" {
     try std.testing.expectEqual(EditField.thread_width, state.focusedEditField().?);
     state.updateList(.move_next);
     try std.testing.expectEqual(EditField.detail_width, state.focusedEditField().?);
+}
+
+test "settings exposes show images focused row" {
+    var state: State = .{};
+
+    for (0..show_images_index) |_| state.updateList(.move_next);
+
+    try std.testing.expect(state.isShowImagesFocused());
+    try std.testing.expect(state.focusedEditField() == null);
 }

@@ -175,6 +175,7 @@ pub const App = struct {
         settings_width_paste: []const u8,
         settings_width_submit,
         settings_width_cancel,
+        settings_show_images_toggle,
         settings_list: ui.List.Msg,
         terminal_resized: chasen.Size,
         menu: ui.Menu.Msg,
@@ -409,6 +410,7 @@ pub const App = struct {
             },
             .settings_width_submit => try self.submitSettingsWidth(ctx),
             .settings_width_cancel => self.cancelSettingsWidthEdit(),
+            .settings_show_images_toggle => try self.toggleSettingsShowImages(ctx),
             .settings_list => |list_msg| self.settings.updateList(list_msg),
             .terminal_resized => |size| self.handleResize(size),
             .menu => |menu_msg| switch (menu_msg) {
@@ -681,6 +683,7 @@ pub const App = struct {
             switch (event) {
                 .key_press => |key| {
                     if (key.matches(chasen.Key.enter, .{})) {
+                        if (self.settings.isShowImagesFocused()) return .settings_show_images_toggle;
                         if (self.settings.focusedEditField()) |field| {
                             return switch (field) {
                                 .token => .settings_token_start,
@@ -1215,6 +1218,13 @@ pub const App = struct {
             input.update(.clear) catch {};
         }
         self.settings.stopEditing();
+    }
+
+    fn toggleSettingsShowImages(self: *App, ctx: *chasen.Ctx(Msg)) !void {
+        self.config.display.show_images = !self.config.display.show_images;
+        if (self.config_path) |path| {
+            try config_mod.saveConfig(ctx.allocator(), ctx.io(), path, self.config);
+        }
     }
 
     fn deinitOwnedState(self: *App) void {
@@ -4046,6 +4056,34 @@ test "settings width edit cancel clears input without changing width" {
     try std.testing.expect(app.settings.editing == null);
     try std.testing.expectEqual(@as(u16, 90), app.config.display.detail_width);
     try std.testing.expectEqualStrings("", app.settings_width_input.?.text());
+}
+
+test "settings show images toggle flips display config" {
+    var app = App.create(.{ .display = .{ .show_images = true } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.toggleSettingsShowImages(&tc.ctx);
+
+    try std.testing.expect(!app.config.display.show_images);
+}
+
+test "settings show images toggle saves config when path is available" {
+    const path = ".zig-cache/test-bgg-tui-settings-show-images/config.toml";
+
+    var app = App.create(.{ .display = .{ .show_images = true } }, .{ .config_path = path });
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{
+        .ctx = .{ ._allocator = std.testing.allocator, ._io = std.testing.io },
+    };
+    try app.toggleSettingsShowImages(&tc.ctx);
+
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    var loaded = try config_mod.loadConfig(std.testing.allocator, std.testing.io, path, &env);
+    defer loaded.deinit(std.testing.allocator);
+
+    try std.testing.expect(!loaded.config.display.show_images);
 }
 
 test "hot games state owns labels for loaded games" {
