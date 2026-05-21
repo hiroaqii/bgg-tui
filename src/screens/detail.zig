@@ -397,14 +397,51 @@ pub fn lineStyle(line: []const u8) chasen.TextStyle {
     return .{};
 }
 
+pub const Layout = struct {
+    content_row: u16,
+    content_height: usize,
+    scroll_row: u16,
+    footer_row: u16,
+};
+
+pub const LayoutOptions = struct {
+    outer_reserved_rows: u16 = 0,
+};
+
+pub fn layout(area_height: u16, density: []const u8, options: LayoutOptions) Layout {
+    if (area_height == 0) {
+        return .{ .content_row = 0, .content_height = 1, .scroll_row = 0, .footer_row = 0 };
+    }
+
+    const top = contentTopPadding(area_height, density);
+    const max_visible = if (area_height > top + 3) area_height - top - 3 else 1;
+    const effective_height = area_height + options.outer_reserved_rows;
+    const visible = @max(@as(usize, 1), @min(contentHeight(effective_height, density), @as(usize, max_visible)));
+    const visible_u16: u16 = @intCast(@min(visible, std.math.maxInt(u16)));
+    const scroll_row = @min(area_height - 1, top + visible_u16);
+
+    return .{
+        .content_row = top,
+        .content_height = visible,
+        .scroll_row = scroll_row,
+        .footer_row = @min(area_height - 1, scroll_row + 2),
+    };
+}
+
 pub fn contentHeight(area_height: u16, density: []const u8) usize {
-    const overhead: usize = if (std.mem.eql(u8, density, "compact"))
-        8
-    else if (std.mem.eql(u8, density, "relaxed"))
-        16
-    else
-        12;
-    return @max(@as(usize, 1), @as(usize, area_height) -| overhead);
+    return @max(@as(usize, 1), @as(usize, area_height) -| densityOverhead(density));
+}
+
+fn contentTopPadding(area_height: u16, density: []const u8) u16 {
+    const overhead = densityOverhead(density);
+    const preferred = @as(u16, @intCast((overhead -| 2) / 3));
+    return @min(preferred, area_height -| 1);
+}
+
+fn densityOverhead(density: []const u8) usize {
+    if (std.mem.eql(u8, density, "compact")) return 8;
+    if (std.mem.eql(u8, density, "relaxed")) return 16;
+    return 12;
 }
 
 test "game detail state owns loaded game result" {
@@ -481,6 +518,21 @@ test "detail content height follows density overhead" {
     try std.testing.expectEqual(@as(usize, 18), contentHeight(30, "normal"));
     try std.testing.expectEqual(@as(usize, 14), contentHeight(30, "relaxed"));
     try std.testing.expectEqual(@as(usize, 1), contentHeight(5, "normal"));
+}
+
+test "detail layout keeps content and footer positions consistent" {
+    const normal = layout(47, "normal", .{});
+    try std.testing.expectEqual(@as(u16, 3), normal.content_row);
+    try std.testing.expectEqual(@as(usize, 35), normal.content_height);
+    try std.testing.expectEqual(@as(u16, 38), normal.scroll_row);
+    try std.testing.expectEqual(@as(u16, 40), normal.footer_row);
+
+    const compensated = layout(44, "normal", .{ .outer_reserved_rows = 3 });
+    try std.testing.expectEqual(@as(usize, 35), compensated.content_height);
+
+    const small = layout(5, "normal", .{});
+    try std.testing.expect(small.content_height >= 1);
+    try std.testing.expect(small.footer_row < 5);
 }
 
 test "detail line style does not dim wrapped metadata lines" {

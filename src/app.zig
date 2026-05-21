@@ -20,8 +20,8 @@ const main_menu_size = chasen.Size{ .width = 48, .height = 12 };
 const setup_token_size = chasen.Size{ .width = 56, .height = 9 };
 const placeholder_size = chasen.Size{ .width = 56, .height = 6 };
 const list_screen_max_size = chasen.Size{ .width = 72, .height = 34 };
-const detail_screen_max_height: u16 = 34;
 const forum_screen_max_size = chasen.Size{ .width = 88, .height = 34 };
+const detail_outer_reserved_rows: u16 = 3;
 
 // List screens follow the Go version's vertical rhythm:
 // row 0 title, row 1 blank, row 2 position, row 3 blank, row 4 list body.
@@ -330,7 +330,12 @@ pub const App = struct {
             },
             .game_detail_loaded => |result| try self.finishGameDetail(result),
             .game_detail_move_prev => self.game_detail.moveUp(),
-            .game_detail_move_next => self.game_detail.moveDown(screens.detail.contentHeight(@min(self.terminal_height, detail_screen_max_height), self.config.interface.list_density)),
+            .game_detail_move_next => {
+                const detail_layout = screens.detail.layout(screenBodyHeightForTerminal(self.terminal_height), self.config.interface.list_density, .{
+                    .outer_reserved_rows = detail_outer_reserved_rows,
+                });
+                self.game_detail.moveDown(detail_layout.content_height);
+            },
             .game_detail_open_browser => try self.openGameInBrowser(ctx),
             .forum_open => try self.startForumList(ctx),
             .forums_loaded => |result| try self.finishForumList(result),
@@ -983,30 +988,31 @@ pub const App = struct {
                 _ = area.borrowTextAt(0, 4, message, .{ .fg = .gray });
             },
             .loaded => {
+                const detail_layout = detailLayout(area.size().height, self.config.interface.list_density);
                 if (self.game_detail.games.len == 0) {
-                    self.drawEmptyState(&area, 2, "No detail", "BGG did not return game detail.");
+                    self.drawEmptyState(&area, detail_layout.content_row, "No detail", "BGG did not return game detail.");
                 } else {
-                    const content_height = screens.detail.contentHeight(area.size().height, self.config.interface.list_density);
-                    const range = self.game_detail.visibleRange(content_height);
+                    const range = self.game_detail.visibleRange(detail_layout.content_height);
                     for (self.game_detail.lines[range.start..range.end], 0..) |line, index| {
-                        const row: u16 = @intCast(index);
-                        if (row >= content_height) break;
+                        const row = detail_layout.content_row + @as(u16, @intCast(index));
+                        if (index >= detail_layout.content_height or row >= area.size().height) break;
                         _ = area.borrowTextAt(0, row, line, screens.detail.lineStyle(line));
                     }
 
                     if (self.game_detail.browser_error_url.len > 0) {
-                        try self.drawManualOpenHint(&area, area.size().height -| 2, self.game_detail.browser_error_url);
-                    } else if (self.game_detail.maxScroll(content_height) > 0 and area.size().height >= 3) {
-                        _ = try area.printAt(0, area.size().height -| 2, .{ .dim = true }, "({d}/{d})", .{
+                        try self.drawManualOpenHint(&area, detail_layout.scroll_row, self.game_detail.browser_error_url);
+                    } else if (self.game_detail.maxScroll(detail_layout.content_height) > 0 and area.size().height >= 3) {
+                        _ = try area.printAt(0, detail_layout.scroll_row, .{ .dim = true }, "({d}/{d})", .{
                             self.game_detail.scroll + 1,
-                            self.game_detail.maxScroll(content_height) + 1,
+                            self.game_detail.maxScroll(detail_layout.content_height) + 1,
                         });
                     }
                 }
             },
         }
 
-        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
+        const detail_layout = detailLayout(area.size().height, self.config.interface.list_density);
+        _ = area.borrowTextAt(0, detail_layout.footer_row, self.footerHint(), .{ .dim = true });
     }
 
     fn viewForums(self: *const App, sfc: *chasen.Surface) !void {
@@ -2991,9 +2997,11 @@ fn centeredSurface(surface: *chasen.Surface, size: chasen.Size) chasen.Surface {
 }
 
 fn detailSurface(surface: *chasen.Surface, configured_width: u16) chasen.Surface {
+    // Detail is long-form content, so it uses the available body height while
+    // still constraining width through the user's display setting.
     return surface.child(ui.layout.center(surfaceRect(surface), .{
         .width = configured_width,
-        .height = detail_screen_max_height,
+        .height = surface.size().height,
     }));
 }
 
@@ -3014,6 +3022,17 @@ fn threadSurface(surface: *chasen.Surface, configured_width: u16) chasen.Surface
 
 fn threadBodyHeightForTerminal(terminal_height: u16) usize {
     return @max(@as(usize, 1), @as(usize, @min(terminal_height, forum_screen_max_size.height)) -| 5);
+}
+
+fn detailLayout(area_height: u16, density: []const u8) screens.detail.Layout {
+    // The Go version computed detail density from full terminal height. Chasen
+    // renders inside a panel plus global status row, so compensate for that
+    // outer chrome while keeping Detail's child surface as the drawing boundary.
+    return screens.detail.layout(area_height, density, .{ .outer_reserved_rows = detail_outer_reserved_rows });
+}
+
+fn screenBodyHeightForTerminal(terminal_height: u16) u16 {
+    return @max(@as(u16, 1), terminal_height -| 3);
 }
 
 fn surfaceRect(surface: *const chasen.Surface) chasen.Rect {
