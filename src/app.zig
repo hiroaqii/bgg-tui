@@ -1112,9 +1112,7 @@ pub const App = struct {
         self.config.api.token = self.owned_token;
         // Persist only after the token is owned by App so config can safely
         // borrow the value for both this session and TOML serialization.
-        if (self.config_path) |path| {
-            try config_mod.saveConfig(ctx.allocator(), ctx.io(), path, self.config);
-        }
+        try self.saveConfigIfAvailable(ctx);
         try input.update(.clear);
         self.screen = .main_menu;
     }
@@ -1133,9 +1131,7 @@ pub const App = struct {
             if (self.owned_token) |old| self.allocator.?.free(old);
             self.owned_token = try self.allocator.?.dupe(u8, token);
             self.config.api.token = self.owned_token;
-            if (self.config_path) |path| {
-                try config_mod.saveConfig(ctx.allocator(), ctx.io(), path, self.config);
-            }
+            try self.saveConfigIfAvailable(ctx);
         }
         try input.update(.clear);
         self.settings.stopEditing();
@@ -1171,9 +1167,7 @@ pub const App = struct {
             self.owned_default_username = owned_username;
             self.config.collection.default_username = owned_username;
         }
-        if (self.config_path) |path| {
-            try config_mod.saveConfig(ctx.allocator(), ctx.io(), path, self.config);
-        }
+        try self.saveConfigIfAvailable(ctx);
         try input.update(.clear);
         self.settings.stopEditing();
     }
@@ -1203,9 +1197,7 @@ pub const App = struct {
             .detail_width => self.config.display.detail_width = value,
             else => return,
         }
-        if (self.config_path) |path| {
-            try config_mod.saveConfig(ctx.allocator(), ctx.io(), path, self.config);
-        }
+        try self.saveConfigIfAvailable(ctx);
         try input.update(.clear);
         self.settings.stopEditing();
     }
@@ -1219,9 +1211,7 @@ pub const App = struct {
 
     fn toggleSettingsShowImages(self: *App, ctx: *chasen.Ctx(Msg)) !void {
         self.config.display.show_images = !self.config.display.show_images;
-        if (self.config_path) |path| {
-            try config_mod.saveConfig(ctx.allocator(), ctx.io(), path, self.config);
-        }
+        try self.saveConfigIfAvailable(ctx);
     }
 
     fn cycleSettingsField(self: *App, ctx: *chasen.Ctx(Msg), field: screens.settings.CycleField) !void {
@@ -1234,9 +1224,12 @@ pub const App = struct {
             .date_format => self.config.interface.date_format = nextCycleValue(self.config.interface.date_format, &date_format_values),
             .image_protocol => self.config.display.image_protocol = nextImageProtocol(self.config.display.image_protocol),
         }
-        if (self.config_path) |path| {
-            try config_mod.saveConfig(ctx.allocator(), ctx.io(), path, self.config);
-        }
+        try self.saveConfigIfAvailable(ctx);
+    }
+
+    fn saveConfigIfAvailable(self: *const App, ctx: *chasen.Ctx(Msg)) !void {
+        const path = self.config_path orelse return;
+        try config_mod.saveConfig(ctx.allocator(), ctx.io(), path, self.config);
     }
 
     fn deinitOwnedState(self: *App) void {
@@ -1388,9 +1381,7 @@ pub const App = struct {
             }
         }
         self.config.collection.status_filter.mask = self.collection_status_mask;
-        if (self.config_path) |path| {
-            try config_mod.saveConfig(ctx.allocator(), ctx.io(), path, self.config);
-        }
+        try self.saveConfigIfAvailable(ctx);
         try self.collection.applyStatusFilter(self.allocator.?, self.collection_status_mask);
     }
 

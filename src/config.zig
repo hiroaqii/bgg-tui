@@ -245,6 +245,12 @@ pub fn loadConfig(
 }
 
 /// Parses the fixed bgg-tui config schema from TOML-like input.
+///
+/// Supported subset: section headers, `key = value` assignments, booleans,
+/// unsigned integers, plain quoted strings without escapes, and arrays of
+/// plain quoted strings for collection status filters. `#` starts a comment
+/// only outside quoted strings. This is intentionally not a general TOML
+/// parser; unsupported syntax should fail before settings grows more keys.
 /// String values are borrowed from `input`; callers must keep the input buffer
 /// alive for as long as the returned `Config` is used.
 pub fn parseToml(input: []const u8) ParseError!Config {
@@ -266,12 +272,34 @@ pub fn parseToml(input: []const u8) ParseError!Config {
         const value = std.mem.trim(u8, line[separator_index + 1 ..], " \t\r");
         if (key.len == 0 or value.len == 0) return error.InvalidKeyValue;
 
-        switch (section) {
-            .root => return error.UnknownKey,
-            .api => try parseApiValue(&config.api, key, value),
-            .display => try parseDisplayValue(&config.display, key, value),
-            .collection => try parseCollectionValue(&config.collection, key, value),
-            .interface => try parseInterfaceValue(&config.interface, key, value),
+        switch (try parseKey(section, key)) {
+            .api => |parsed_key| switch (parsed_key) {
+                .token => config.api.token = try parseString(value),
+            },
+            .display => |parsed_key| switch (parsed_key) {
+                .show_images => config.display.show_images = try parseBool(value),
+                .image_protocol => config.display.image_protocol = try parseEnum(ImageProtocol, value),
+                .list_width => config.display.list_width = try parseU16(value),
+                .thread_width => config.display.thread_width = try parseU16(value),
+                .detail_width => config.display.detail_width = try parseU16(value),
+            },
+            .collection => |parsed_key| switch (parsed_key) {
+                .default_username => config.collection.default_username = nonEmptyTrimmed(try parseString(value)),
+                .status_filter => config.collection.status_filter = try parseStatusFilter(value),
+                .show_only_owned => {
+                    // Deprecated Go config compatibility. The Zig schema stores
+                    // the same intent as a named status filter.
+                    if (try parseBool(value)) config.collection.status_filter = .{ .mask = collectionStatusBit(.own) };
+                },
+            },
+            .interface => |parsed_key| switch (parsed_key) {
+                .color_theme => config.interface.color_theme = try parseString(value),
+                .transition => config.interface.transition = try parseString(value),
+                .selection => config.interface.selection = try parseString(value),
+                .list_density => config.interface.list_density = try parseString(value),
+                .date_format => config.interface.date_format = try parseString(value),
+                .border_style => config.interface.border_style = try parseString(value),
+            },
         }
     }
 
@@ -464,8 +492,21 @@ const Section = enum {
 
 fn trimWhitespaceAndComment(line: []const u8) []const u8 {
     const without_cr = std.mem.trim(u8, line, "\r");
-    const comment_index = std.mem.indexOfScalar(u8, without_cr, '#') orelse without_cr.len;
+    const comment_index = commentStart(without_cr);
     return std.mem.trim(u8, without_cr[0..comment_index], " \t\r");
+}
+
+fn commentStart(line: []const u8) usize {
+    var in_string = false;
+    var i: usize = 0;
+    while (i < line.len) : (i += 1) {
+        switch (line[i]) {
+            '"' => in_string = !in_string,
+            '#' => if (!in_string) return i,
+            else => {},
+        }
+    }
+    return line.len;
 }
 
 fn parseSection(line: []const u8) ParseError!Section {
@@ -478,60 +519,33 @@ fn parseSection(line: []const u8) ParseError!Section {
     return error.UnknownSection;
 }
 
-fn parseApiValue(api: *Api, key: []const u8, value: []const u8) ParseError!void {
-    if (std.mem.eql(u8, key, "token")) {
-        api.token = try parseString(value);
-        return;
-    }
-    return error.UnknownKey;
+const ApiKey = enum { token };
+const DisplayKey = enum { show_images, image_protocol, list_width, thread_width, detail_width };
+const CollectionKey = enum { default_username, status_filter, show_only_owned };
+const InterfaceKey = enum { color_theme, transition, selection, list_density, date_format, border_style };
+
+const ConfigKey = union(enum) {
+    api: ApiKey,
+    display: DisplayKey,
+    collection: CollectionKey,
+    interface: InterfaceKey,
+};
+
+fn parseKey(section: Section, key: []const u8) ParseError!ConfigKey {
+    return switch (section) {
+        .root => error.UnknownKey,
+        .api => .{ .api = lookupKey(ApiKey, key) orelse return error.UnknownKey },
+        .display => .{ .display = lookupKey(DisplayKey, key) orelse return error.UnknownKey },
+        .collection => .{ .collection = lookupKey(CollectionKey, key) orelse return error.UnknownKey },
+        .interface => .{ .interface = lookupKey(InterfaceKey, key) orelse return error.UnknownKey },
+    };
 }
 
-fn parseDisplayValue(display: *Display, key: []const u8, value: []const u8) ParseError!void {
-    if (std.mem.eql(u8, key, "show_images")) {
-        display.show_images = try parseBool(value);
-    } else if (std.mem.eql(u8, key, "image_protocol")) {
-        display.image_protocol = try parseEnum(ImageProtocol, value);
-    } else if (std.mem.eql(u8, key, "list_width")) {
-        display.list_width = try parseU16(value);
-    } else if (std.mem.eql(u8, key, "thread_width")) {
-        display.thread_width = try parseU16(value);
-    } else if (std.mem.eql(u8, key, "detail_width")) {
-        display.detail_width = try parseU16(value);
-    } else {
-        return error.UnknownKey;
+fn lookupKey(comptime T: type, key: []const u8) ?T {
+    inline for (std.meta.fields(T)) |field| {
+        if (std.mem.eql(u8, key, field.name)) return @enumFromInt(field.value);
     }
-}
-
-fn parseCollectionValue(collection: *Collection, key: []const u8, value: []const u8) ParseError!void {
-    if (std.mem.eql(u8, key, "default_username")) {
-        collection.default_username = nonEmptyTrimmed(try parseString(value));
-    } else if (std.mem.eql(u8, key, "status_filter")) {
-        collection.status_filter = try parseStatusFilter(value);
-    } else if (std.mem.eql(u8, key, "show_only_owned")) {
-        // Deprecated Go config compatibility. The Zig schema stores the same
-        // intent as a named status filter.
-        if (try parseBool(value)) collection.status_filter = .{ .mask = collectionStatusBit(.own) };
-    } else {
-        return error.UnknownKey;
-    }
-}
-
-fn parseInterfaceValue(interface: *Interface, key: []const u8, value: []const u8) ParseError!void {
-    if (std.mem.eql(u8, key, "color_theme")) {
-        interface.color_theme = try parseString(value);
-    } else if (std.mem.eql(u8, key, "transition")) {
-        interface.transition = try parseString(value);
-    } else if (std.mem.eql(u8, key, "selection")) {
-        interface.selection = try parseString(value);
-    } else if (std.mem.eql(u8, key, "list_density")) {
-        interface.list_density = try parseString(value);
-    } else if (std.mem.eql(u8, key, "date_format")) {
-        interface.date_format = try parseString(value);
-    } else if (std.mem.eql(u8, key, "border_style")) {
-        interface.border_style = try parseString(value);
-    } else {
-        return error.UnknownKey;
-    }
+    return null;
 }
 
 fn parseString(value: []const u8) ParseError![]const u8 {
@@ -720,6 +734,22 @@ test "config parser rejects unknown keys and escaped strings" {
         \\[api]
         \\token = "token\n"
     ));
+}
+
+test "config parser ignores comments outside quoted strings only" {
+    const config = try parseToml(
+        \\[api]
+        \\token = "abc#123" # inline comment
+        \\
+        \\[collection]
+        \\status_filter = ["owned", "wishlist"] # keep array value intact
+    );
+
+    try std.testing.expectEqualStrings("abc#123", config.apiClientToken().?);
+    try std.testing.expectEqual(
+        collectionStatusBit(.own) | collectionStatusBit(.wishlist),
+        config.collection.status_filter.mask,
+    );
 }
 
 test "config validates setting ranges and string option values" {
