@@ -143,6 +143,55 @@ pub const State = struct {
     }
 };
 
+pub const Layout = struct {
+    title_row: u16,
+    meta_row: u16,
+    content_row: u16,
+    content_height: usize,
+    scroll_row: u16,
+    footer_row: u16,
+};
+
+pub const LayoutOptions = struct {
+    outer_reserved_rows: u16 = 0,
+};
+
+pub fn layout(area_height: u16, density: []const u8, options: LayoutOptions) Layout {
+    if (area_height == 0) {
+        return .{ .title_row = 0, .meta_row = 0, .content_row = 0, .content_height = 1, .scroll_row = 0, .footer_row = 0 };
+    }
+
+    const content_row: u16 = 3;
+    const max_visible = if (area_height > content_row + 3) area_height - content_row - 3 else 1;
+    const effective_height = area_height + options.outer_reserved_rows;
+    const visible = @max(@as(usize, 1), @min(contentHeight(effective_height, density), @as(usize, max_visible)));
+    const visible_u16: u16 = @intCast(@min(visible, std.math.maxInt(u16)));
+    const scroll_row = @min(area_height - 1, content_row + visible_u16);
+
+    return .{
+        .title_row = 0,
+        .meta_row = 1,
+        .content_row = content_row,
+        .content_height = visible,
+        .scroll_row = scroll_row,
+        .footer_row = @min(area_height - 1, scroll_row + 2),
+    };
+}
+
+pub fn contentHeight(area_height: u16, density: []const u8) usize {
+    return @max(@as(usize, 1), @as(usize, area_height) -| densityOverhead(density) -| threadExtraOverhead());
+}
+
+fn densityOverhead(density: []const u8) usize {
+    if (std.mem.eql(u8, density, "compact")) return 8;
+    if (std.mem.eql(u8, density, "relaxed")) return 16;
+    return 12;
+}
+
+fn threadExtraOverhead() usize {
+    return 2;
+}
+
 fn renderArticles(allocator: std.mem.Allocator, articles: []const bgg_model.Article, wrap_width: usize) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(allocator);
     errdefer out.deinit();
@@ -283,4 +332,18 @@ test "thread sort toggles newest first and resets scroll" {
     try std.testing.expect(state.sort_newest);
     try std.testing.expectEqual(@as(usize, 0), state.scroll);
     try std.testing.expectEqual(@as(u32, 2), state.thread.?.articles[0].id);
+}
+
+test "thread layout uses available height with outer chrome compensation" {
+    const normal = layout(44, "normal", .{ .outer_reserved_rows = 3 });
+    try std.testing.expectEqual(@as(u16, 0), normal.title_row);
+    try std.testing.expectEqual(@as(u16, 1), normal.meta_row);
+    try std.testing.expectEqual(@as(u16, 3), normal.content_row);
+    try std.testing.expectEqual(@as(usize, 33), normal.content_height);
+    try std.testing.expectEqual(@as(u16, 36), normal.scroll_row);
+    try std.testing.expectEqual(@as(u16, 38), normal.footer_row);
+
+    const small = layout(5, "normal", .{});
+    try std.testing.expect(small.content_height >= 1);
+    try std.testing.expect(small.footer_row < 5);
 }

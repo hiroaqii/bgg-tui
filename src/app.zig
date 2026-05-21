@@ -22,6 +22,7 @@ const placeholder_size = chasen.Size{ .width = 56, .height = 6 };
 const list_screen_max_size = chasen.Size{ .width = 72, .height = 34 };
 const forum_screen_max_size = chasen.Size{ .width = 88, .height = 34 };
 const detail_outer_reserved_rows: u16 = 3;
+const thread_outer_reserved_rows: u16 = 3;
 
 // List screens follow the Go version's vertical rhythm:
 // row 0 title, row 1 blank, row 2 position, row 3 blank, row 4 list body.
@@ -355,7 +356,7 @@ pub const App = struct {
             .thread_open => |index| try self.startThread(ctx, index),
             .thread_loaded => |result| try self.finishThread(result),
             .thread_move_prev => self.thread.moveUp(),
-            .thread_move_next => self.thread.moveDown(self.thread.visible_height),
+            .thread_move_next => self.thread.moveDown(threadLayoutForTerminal(self).content_height),
             .thread_sort_toggle => try self.thread.toggleSort(self.allocator.?),
             .thread_open_browser => try self.openThreadInBrowser(ctx),
             .browser_opened => |result| try self.finishBrowserOpen(result),
@@ -1088,29 +1089,31 @@ pub const App = struct {
                 _ = area.borrowTextAt(0, 4, message, .{ .fg = .gray });
             },
             .loaded => {
-                _ = area.borrowTextAt(0, 0, self.thread.subject(), .{ .bold = true, .fg = .{ .index = 14 } });
-                _ = try area.printAt(0, 1, .{ .dim = true }, "{d} posts · {s}", .{ self.thread.postCount(), self.thread.sortLabel() });
+                const thread_layout = threadLayout(area.size().height, self.config.interface.list_density);
+                _ = area.borrowTextAt(0, thread_layout.title_row, self.thread.subject(), .{ .bold = true, .fg = .{ .index = 14 } });
+                _ = try area.printAt(0, thread_layout.meta_row, .{ .dim = true }, "{d} posts · {s}", .{ self.thread.postCount(), self.thread.sortLabel() });
 
                 var body_area = area.child(.{
                     .col = 0,
-                    .row = 3,
+                    .row = thread_layout.content_row,
                     .width = area.size().width,
-                    .height = area.size().height -| 5,
+                    .height = @intCast(@min(thread_layout.content_height, std.math.maxInt(u16))),
                 });
                 self.drawThreadBody(&body_area);
 
                 if (self.thread.browser_error_url.len > 0) {
-                    try self.drawManualOpenHint(&area, area.size().height -| 2, self.thread.browser_error_url);
-                } else if (self.thread.maxScroll(body_area.size().height) > 0 and area.size().height >= 3) {
-                    _ = try area.printAt(0, area.size().height -| 2, .{ .dim = true }, "({d}/{d})", .{
+                    try self.drawManualOpenHint(&area, thread_layout.scroll_row, self.thread.browser_error_url);
+                } else if (self.thread.maxScroll(thread_layout.content_height) > 0 and area.size().height >= 3) {
+                    _ = try area.printAt(0, thread_layout.scroll_row, .{ .dim = true }, "({d}/{d})", .{
                         self.thread.scroll + 1,
-                        self.thread.maxScroll(body_area.size().height) + 1,
+                        self.thread.maxScroll(thread_layout.content_height) + 1,
                     });
                 }
             },
         }
 
-        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
+        const thread_layout = threadLayout(area.size().height, self.config.interface.list_density);
+        _ = area.borrowTextAt(0, thread_layout.footer_row, self.footerHint(), .{ .dim = true });
     }
 
     fn submitToken(self: *App, ctx: *chasen.Ctx(Msg)) !void {
@@ -1726,7 +1729,7 @@ pub const App = struct {
         const request_id = self.thread_request_id;
 
         self.thread.startLoad(self.allocator.?, thread.id, self.config.display.thread_width);
-        self.thread.setVisibleHeight(self.threadBodyHeight());
+        self.thread.setVisibleHeight(threadLayoutForTerminal(self).content_height);
         self.screen = .thread;
 
         const token = self.config.apiClientToken() orelse {
@@ -1817,7 +1820,7 @@ pub const App = struct {
     fn handleResize(self: *App, size: chasen.Size) void {
         self.terminal_height = size.height;
         if (self.screen == .thread) {
-            self.thread.setVisibleHeight(self.threadBodyHeight());
+            self.thread.setVisibleHeight(threadLayoutForTerminal(self).content_height);
         }
     }
 
@@ -1885,10 +1888,6 @@ pub const App = struct {
         _ = self;
         if (row >= surface.size().height) return;
         _ = try surface.printAt(0, row, .{ .dim = true }, "Open manually: {s}", .{url});
-    }
-
-    fn threadBodyHeight(self: *const App) usize {
-        return threadBodyHeightForTerminal(self.terminal_height);
     }
 
     fn drawEmptyState(self: *const App, surface: *chasen.Surface, row: u16, title: []const u8, message: []const u8) void {
@@ -3014,14 +3013,20 @@ fn forumSurface(surface: *chasen.Surface) chasen.Surface {
 }
 
 fn threadSurface(surface: *chasen.Surface, configured_width: u16) chasen.Surface {
+    // Threads are long-form content like Detail, so height follows the available
+    // body while width remains user-configurable.
     return surface.child(ui.layout.center(surfaceRect(surface), .{
         .width = configured_width,
-        .height = forum_screen_max_size.height,
+        .height = surface.size().height,
     }));
 }
 
-fn threadBodyHeightForTerminal(terminal_height: u16) usize {
-    return @max(@as(usize, 1), @as(usize, @min(terminal_height, forum_screen_max_size.height)) -| 5);
+fn threadLayout(area_height: u16, density: []const u8) screens.thread.Layout {
+    return screens.thread.layout(area_height, density, .{ .outer_reserved_rows = thread_outer_reserved_rows });
+}
+
+fn threadLayoutForTerminal(self: *const App) screens.thread.Layout {
+    return threadLayout(screenBodyHeightForTerminal(self.terminal_height), self.config.interface.list_density);
 }
 
 fn detailLayout(area_height: u16, density: []const u8) screens.detail.Layout {
@@ -3677,7 +3682,7 @@ test "thread scroll uses resized body height" {
 
     app.screen = .thread;
     app.handleResize(.{ .width = 80, .height = 10 });
-    try std.testing.expectEqual(@as(usize, 5), app.thread.visible_height);
+    try std.testing.expectEqual(threadLayoutForTerminal(&app).content_height, app.thread.visible_height);
 
     const text = try std.testing.allocator.dupe(u8, "0\n1\n2\n3\n4\n5\n6\n7\n8\n9");
     app.thread.rendered_text = text;
@@ -3688,8 +3693,8 @@ test "thread scroll uses resized body height" {
     app.thread.lines = lines;
     app.thread.load_state = .loaded;
 
-    for (0..10) |_| app.thread.moveDown(app.thread.visible_height);
-    try std.testing.expectEqual(app.thread.maxScroll(5), app.thread.scroll);
+    for (0..10) |_| app.thread.moveDown(threadLayoutForTerminal(&app).content_height);
+    try std.testing.expectEqual(app.thread.maxScroll(threadLayoutForTerminal(&app).content_height), app.thread.scroll);
 }
 
 test "loaded thread o opens browser" {
