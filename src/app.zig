@@ -106,8 +106,6 @@ pub const App = struct {
     settings: screens.settings.State = .{},
     terminal_size: chasen.Size = forum_screen_max_size,
     menu: ui.Menu = ui.Menu.init(.{ .items = &menu_items }),
-    shell: ui.Panel = ui.Panel.init(.{}),
-
     pub const Msg = union(enum) {
         setup_token_input: ui.PasswordInput.Msg,
         setup_token_paste: []const u8,
@@ -444,12 +442,13 @@ pub const App = struct {
             .width = size.width,
             .height = status_row,
         });
-        self.shell.view(&shell_area, .{
+        const shell_frame = ui.Panel.frame(&shell_area, .{
             .title = "BoardGameGeek",
             .border = .rounded,
         });
+        shell_frame.view();
 
-        var body_area = shell_area.child(ui.Panel.contentRect(&shell_area, .{}));
+        var body_area = shell_frame.contentSurface();
         try self.viewCurrentScreen(&body_area);
 
         var status_area = sfc.child(.{
