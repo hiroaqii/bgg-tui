@@ -77,6 +77,7 @@ pub const App = struct {
     search_filter_input: ?ui.TextInput = null,
     collection_username_input: ?ui.TextInput = null,
     collection_filter_input: ?ui.TextInput = null,
+    settings_token_input: ?ui.PasswordInput = null,
     owned_token: ?[]u8 = null,
     hot_games: HotGamesState = .{},
     search: SearchState = .{},
@@ -152,6 +153,11 @@ pub const App = struct {
         thread_open_browser,
         browser_opened: BrowserOpenTaskResult,
         thread_back_to_forums,
+        settings_token_start,
+        settings_token_input: ui.PasswordInput.Msg,
+        settings_token_paste: []const u8,
+        settings_token_submit,
+        settings_token_cancel,
         settings_list: ui.List.Msg,
         terminal_resized: chasen.Size,
         menu: ui.Menu.Msg,
@@ -195,6 +201,9 @@ pub const App = struct {
         });
         self.collection_filter_input = try ui.TextInput.init(ctx.allocator(), .{
             .placeholder = "Filter collection",
+        });
+        self.settings_token_input = try ui.PasswordInput.init(ctx.allocator(), .{
+            .placeholder = "Enter API token",
         });
     }
 
@@ -327,6 +336,21 @@ pub const App = struct {
             .thread_open_browser => try self.openThreadInBrowser(ctx),
             .browser_opened => |result| try self.finishBrowserOpen(result),
             .thread_back_to_forums => self.backToThreadList(),
+            .settings_token_start => try self.startSettingsTokenEdit(),
+            .settings_token_input => |input_msg| {
+                if (input_msg == .submit) {
+                    try self.submitSettingsToken(ctx);
+                } else if (self.settings_token_input) |*input| {
+                    try input.update(input_msg);
+                }
+            },
+            .settings_token_paste => |text| {
+                if (self.settings_token_input) |*input| {
+                    try insertPastedCodepoints(input, text);
+                }
+            },
+            .settings_token_submit => try self.submitSettingsToken(ctx),
+            .settings_token_cancel => self.cancelSettingsTokenEdit(),
             .settings_list => |list_msg| self.settings.updateList(list_msg),
             .terminal_resized => |size| self.handleResize(size),
             .menu => |menu_msg| switch (menu_msg) {
@@ -555,6 +579,33 @@ pub const App = struct {
             return null;
         }
 
+        if (self.screen == .settings) {
+            if (self.settings.editing_token) {
+                switch (event) {
+                    .key_press => |key| {
+                        if (key.matches(chasen.Key.escape, .{})) return .settings_token_cancel;
+                        if (key.matches(chasen.Key.enter, .{})) return .settings_token_submit;
+                    },
+                    .paste => |text| return .{ .settings_token_paste = text },
+                    else => {},
+                }
+                if (self.settings_token_input) |*input| {
+                    if (input.handleEvent(event)) |msg| return .{ .settings_token_input = msg };
+                }
+                return null;
+            }
+            switch (event) {
+                .key_press => |key| {
+                    if (key.matches(chasen.Key.enter, .{}) and self.settings.canEditFocusedToken()) return .settings_token_start;
+                    if (key.codepoint == 'm') return .{ .show_screen = .main_menu };
+                    if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'q') return .quit;
+                },
+                else => {},
+            }
+            if (self.settings.handleEvent(event)) |msg| return .{ .settings_list = msg };
+            return null;
+        }
+
         if (self.screen == .hot_games) {
             if (self.hot_games.filter_active) {
                 switch (event) {
@@ -596,9 +647,6 @@ pub const App = struct {
         if (self.screen == .main_menu) {
             // Menu owns only cursor movement and activation; App maps activation to screens.
             if (self.menu.handleEvent(event)) |msg| return .{ .menu = msg };
-        }
-        if (self.screen == .settings) {
-            if (self.settings.handleEvent(event)) |msg| return .{ .settings_list = msg };
         }
         if (self.screen == .hot_games) {
             if (self.hot_games.handleEvent(event)) |msg| return .{ .hot_list = msg };
@@ -664,7 +712,8 @@ pub const App = struct {
 
     fn viewSettings(self: *const App, sfc: *chasen.Surface) !void {
         var area = centeredSurface(sfc, screens.settings.required_size);
-        try self.settings.view(&area, self.config, self.config_path);
+        const token_input = if (self.settings_token_input) |*input| input else null;
+        try self.settings.view(&area, self.config, self.config_path, token_input);
     }
 
     fn viewHotGames(self: *const App, sfc: *chasen.Surface) !void {
@@ -990,6 +1039,35 @@ pub const App = struct {
         self.screen = .main_menu;
     }
 
+    fn startSettingsTokenEdit(self: *App) !void {
+        if (self.settings_token_input) |*input| {
+            try input.update(.clear);
+        }
+        self.settings.startTokenEdit();
+    }
+
+    fn submitSettingsToken(self: *App, ctx: *chasen.Ctx(Msg)) !void {
+        const input = if (self.settings_token_input) |*input| input else return;
+        const token = std.mem.trim(u8, input.text(), " \t\r\n");
+        if (token.len > 0) {
+            if (self.owned_token) |old| self.allocator.?.free(old);
+            self.owned_token = try self.allocator.?.dupe(u8, token);
+            self.config.api.token = self.owned_token;
+            if (self.config_path) |path| {
+                try config_mod.saveConfig(ctx.allocator(), ctx.io(), path, self.config);
+            }
+        }
+        try input.update(.clear);
+        self.settings.stopEditing();
+    }
+
+    fn cancelSettingsTokenEdit(self: *App) void {
+        if (self.settings_token_input) |*input| {
+            input.update(.clear) catch {};
+        }
+        self.settings.stopEditing();
+    }
+
     fn deinitOwnedState(self: *App) void {
         if (self.setup_token_input) |*input| {
             input.deinit();
@@ -1014,6 +1092,10 @@ pub const App = struct {
         if (self.collection_filter_input) |*input| {
             input.deinit();
             self.collection_filter_input = null;
+        }
+        if (self.settings_token_input) |*input| {
+            input.deinit();
+            self.settings_token_input = null;
         }
         if (self.owned_token) |token| {
             self.allocator.?.free(token);
@@ -1761,7 +1843,12 @@ pub const App = struct {
                 else
                     "Up/Down: move  Enter: detail  /: filter  s: status  r: refresh  u: user  Esc/m: menu  q: quit",
             },
-            .settings => "Up/Down: move  m: menu  Esc/q: quit",
+            .settings => if (self.settings.editing_token)
+                "Enter: save  Esc: cancel"
+            else if (self.settings.canEditFocusedToken())
+                "Up/Down: move  Enter: edit token  m: menu  Esc/q: quit"
+            else
+                "Up/Down: move  m: menu  Esc/q: quit",
         };
     }
 };
@@ -2901,6 +2988,11 @@ test "footer hint matches screen key handling" {
 
     app.screen = .settings;
     try std.testing.expectEqualStrings("Up/Down: move  m: menu  Esc/q: quit", app.footerHint());
+    for (0..11) |_| app.settings.updateList(.move_next);
+    try std.testing.expectEqualStrings("Up/Down: move  Enter: edit token  m: menu  Esc/q: quit", app.footerHint());
+    app.settings.startTokenEdit();
+    try std.testing.expectEqualStrings("Enter: save  Esc: cancel", app.footerHint());
+    app.settings.stopEditing();
 }
 
 test "setup token submit hint reflects save availability" {
@@ -3489,6 +3581,60 @@ test "submit token saves config when path is available" {
     defer loaded.deinit(std.testing.allocator);
 
     try std.testing.expectEqualStrings("saved-token", loaded.config.apiClientToken().?);
+}
+
+test "settings token edit saves token and stays on settings" {
+    var app = App.create(.{ .api = .{ .token = "old-token" } }, .{});
+    app.allocator = std.testing.allocator;
+    app.screen = .settings;
+    app.settings_token_input = try ui.PasswordInput.init(std.testing.allocator, .{ .value = "  new-token  " });
+    app.settings.startTokenEdit();
+    defer app.deinitOwnedState();
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.submitSettingsToken(&tc.ctx);
+
+    try std.testing.expectEqual(Screen.settings, app.screen);
+    try std.testing.expect(!app.settings.editing_token);
+    try std.testing.expectEqualStrings("new-token", app.config.apiClientToken().?);
+    try std.testing.expectEqualStrings("", app.settings_token_input.?.text());
+}
+
+test "settings token edit saves config when path is available" {
+    const path = ".zig-cache/test-bgg-tui-settings-token/config.toml";
+
+    var app = App.create(.{}, .{ .config_path = path });
+    app.allocator = std.testing.allocator;
+    app.settings_token_input = try ui.PasswordInput.init(std.testing.allocator, .{ .value = "settings-token" });
+    app.settings.startTokenEdit();
+    defer app.deinitOwnedState();
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{
+        .ctx = .{ ._allocator = std.testing.allocator, ._io = std.testing.io },
+    };
+    try app.submitSettingsToken(&tc.ctx);
+
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    var loaded = try config_mod.loadConfig(std.testing.allocator, std.testing.io, path, &env);
+    defer loaded.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("settings-token", loaded.config.apiClientToken().?);
+}
+
+test "settings token edit cancel clears input without changing token" {
+    var app = App.create(.{ .api = .{ .token = "old-token" } }, .{});
+    app.allocator = std.testing.allocator;
+    app.settings_token_input = try ui.PasswordInput.init(std.testing.allocator, .{ .value = "new-token" });
+    app.settings.startTokenEdit();
+    defer app.deinitOwnedState();
+
+    app.cancelSettingsTokenEdit();
+
+    try std.testing.expect(!app.settings.editing_token);
+    try std.testing.expectEqualStrings("old-token", app.config.apiClientToken().?);
+    try std.testing.expectEqualStrings("", app.settings_token_input.?.text());
 }
 
 test "hot games state owns labels for loaded games" {

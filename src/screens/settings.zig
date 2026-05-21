@@ -39,9 +39,22 @@ pub const required_size = chasen.Size{ .width = 72, .height = 26 };
 
 pub const State = struct {
     list: ui.List = ui.List.init(.{ .items = itemLabels() }),
+    editing_token: bool = false,
 
     pub fn updateList(self: *State, msg: ui.List.Msg) void {
         self.list.update(msg);
+    }
+
+    pub fn startTokenEdit(self: *State) void {
+        self.editing_token = true;
+    }
+
+    pub fn stopEditing(self: *State) void {
+        self.editing_token = false;
+    }
+
+    pub fn canEditFocusedToken(self: *const State) bool {
+        return self.list.focusedIndex() == token_index;
     }
 
     pub fn handleEvent(self: *const State, event: chasen.Event) ?ui.List.Msg {
@@ -52,11 +65,17 @@ pub const State = struct {
         return self.list.handleEvent(event);
     }
 
-    pub fn view(self: *const State, surface: *chasen.Surface, config: config_mod.Config, config_path: ?[]const u8) !void {
+    pub fn view(
+        self: *const State,
+        surface: *chasen.Surface,
+        config: config_mod.Config,
+        config_path: ?[]const u8,
+        token_input: ?*const ui.PasswordInput,
+    ) !void {
         const size = surface.size();
         if (size.width == 0 or size.height == 0) return;
 
-        surface.hideCursor();
+        if (!self.editing_token) surface.hideCursor();
         _ = surface.borrowTextAt(0, 0, "Settings", .{ .bold = true, .fg = .{ .index = 14 } });
 
         var row: u16 = 2;
@@ -71,12 +90,18 @@ pub const State = struct {
             }
             if (row >= size.height) return;
 
-            try drawItem(surface, row, index, item, current_section, config, config_path, self.list.focus.isFocused(index));
+            try drawItem(surface, row, index, item, current_section, config, config_path, self.list.focus.isFocused(index), self.editing_token, token_input);
             row += 1;
         }
 
         if (row < size.height) {
-            _ = surface.borrowTextAt(0, row +| 1, "j/k ↑↓: Navigate  m: Menu  Esc/q: Quit", .{ .dim = true });
+            const help = if (self.editing_token)
+                "Enter: Save  Esc: Cancel"
+            else if (self.canEditFocusedToken())
+                "j/k ↑↓: Navigate  Enter: Edit Token  m: Menu  Esc/q: Quit"
+            else
+                "j/k ↑↓: Navigate  m: Menu  Esc/q: Quit";
+            _ = surface.borrowTextAt(0, row +| 1, help, .{ .dim = true });
         }
     }
 };
@@ -90,6 +115,8 @@ fn drawItem(
     config: config_mod.Config,
     config_path: ?[]const u8,
     focused: bool,
+    editing_token: bool,
+    token_input: ?*const ui.PasswordInput,
 ) !void {
     const label_style: chasen.TextStyle = if (focused) .{ .bold = true, .fg = .{ .index = 14 } } else .{};
     const cursor = if (focused) "> " else "  ";
@@ -105,6 +132,18 @@ fn drawItem(
     _ = surface.borrowTextAt(2, row, item.label, label_style);
     const value_col: u16 = @intCast(2 + sectionWidth(section) + 2);
     _ = surface.borrowTextAt(value_col - 2, row, ":", .{});
+    if (index == token_index and editing_token) {
+        if (token_input) |input| {
+            var input_area = surface.child(.{
+                .col = value_col,
+                .row = row,
+                .width = surface.size().width -| value_col,
+                .height = 1,
+            });
+            input.view(&input_area, .{});
+        }
+        return;
+    }
     switch (item.kind) {
         .cycle, .toggle => {
             _ = surface.borrowTextAt(value_col, row, "[", .{});
@@ -114,6 +153,8 @@ fn drawItem(
         .text, .info => _ = surface.borrowTextAt(value_col, row, value, .{}),
     }
 }
+
+const token_index: usize = 11;
 
 fn valueFor(surface: *chasen.Surface, index: usize, config: config_mod.Config, config_path: ?[]const u8) ![]const u8 {
     return switch (index) {
