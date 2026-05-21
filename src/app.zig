@@ -30,6 +30,7 @@ const thread_outer_reserved_rows: u16 = 3;
 // row 0 title, row 1 blank, row 2 position, row 3 blank, row 4 list body.
 const list_position_row: u16 = 2;
 const list_body_row: u16 = 4;
+const list_footer_gap: u16 = 1;
 const list_filter_row: u16 = 4;
 const list_filtered_body_row: u16 = 6;
 const collection_status_bar_row: u16 = 3;
@@ -838,7 +839,7 @@ pub const App = struct {
                         .col = 0,
                         .row = body_row,
                         .width = area.size().width,
-                        .height = area.size().height -| (body_row + 1),
+                        .height = area.size().height -| (body_row + 1 + list_footer_gap),
                     });
                     list_view.viewListWithDensity(list, &list_area, .{
                         .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
@@ -907,7 +908,7 @@ pub const App = struct {
                         .col = 0,
                         .row = body_row,
                         .width = area.size().width,
-                        .height = area.size().height -| (body_row + 1),
+                        .height = area.size().height -| (body_row + 1 + list_footer_gap),
                     });
                     list_view.viewListWithDensity(list, &list_area, .{
                         .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
