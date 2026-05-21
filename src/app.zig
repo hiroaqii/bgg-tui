@@ -617,22 +617,22 @@ pub const App = struct {
 
     fn viewSetupToken(self: *const App, sfc: *chasen.Surface) void {
         var area = centeredSurface(sfc, setup_token_size);
-        _ = area.textAt(0, 0, "Setup BGG API token", .{ .bold = true, .fg = .{ .index = 14 } });
-        _ = area.textAt(0, 2, "BGG API access requires a token.", .{ .fg = .gray });
-        _ = area.textAt(0, 3, "Enter a token to continue to the main menu.", .{ .fg = .gray });
+        _ = area.borrowTextAt(0, 0, "Setup BGG API token", .{ .bold = true, .fg = .{ .index = 14 } });
+        _ = area.borrowTextAt(0, 2, "BGG API access requires a token.", .{ .fg = .gray });
+        _ = area.borrowTextAt(0, 3, "Enter a token to continue to the main menu.", .{ .fg = .gray });
 
         if (self.setup_token_input) |*input| {
             var input_area = area.child(.{ .col = 0, .row = 5, .width = @min(area.size().width, 48), .height = 1 });
             input.view(&input_area, .{});
         }
 
-        _ = area.textAt(0, 7, setupTokenSubmitHint(self.config_path), .{ .dim = true });
+        _ = area.borrowTextAt(0, 7, setupTokenSubmitHint(self.config_path), .{ .dim = true });
     }
 
     fn viewMainMenu(self: *const App, sfc: *chasen.Surface) !void {
         var area = centeredSurface(sfc, main_menu_size);
         const token_status = if (self.config.apiClientToken() == null) "missing" else "configured";
-        _ = area.textAt(0, 0, "Main menu", .{ .bold = true });
+        _ = area.borrowTextAt(0, 0, "Main menu", .{ .bold = true });
         _ = try area.printAt(0, 2, .{ .fg = .gray }, "BGG API token: {s}", .{token_status});
 
         var menu_area = area.child(.{
@@ -646,14 +646,14 @@ pub const App = struct {
             .focused_style = .{ .bold = true, .fg = .{ .index = 14 } },
         });
 
-        _ = area.textAt(0, 10, self.footerHint(), .{ .dim = true });
+        _ = area.borrowTextAt(0, 10, self.footerHint(), .{ .dim = true });
     }
 
     fn viewPlaceholder(self: *const App, sfc: *chasen.Surface, title: []const u8, message: []const u8) void {
         var area = centeredSurface(sfc, placeholder_size);
-        _ = area.textAt(0, 0, title, .{ .bold = true, .fg = .{ .index = 14 } });
-        _ = area.textAt(0, 2, message, .{ .fg = .gray });
-        _ = area.textAt(0, 4, self.footerHint(), .{ .dim = true });
+        _ = area.borrowTextAt(0, 0, title, .{ .bold = true, .fg = .{ .index = 14 } });
+        _ = area.borrowTextAt(0, 2, message, .{ .fg = .gray });
+        _ = area.borrowTextAt(0, 4, self.footerHint(), .{ .dim = true });
     }
 
     fn viewHotGames(self: *const App, sfc: *chasen.Surface) !void {
@@ -662,11 +662,11 @@ pub const App = struct {
 
         switch (self.hot_games.load_state) {
             .idle, .loading => {
-                _ = area.textAt(0, 2, "Loading BoardGameGeek hot games...", .{ .fg = .gray });
+                _ = area.borrowTextAt(0, 2, "Loading BoardGameGeek hot games...", .{ .fg = .gray });
             },
             .failed => |message| {
-                _ = area.textAt(0, 2, "Could not load hot games.", .{ .fg = .{ .index = 9 } });
-                _ = area.textAt(0, 4, message, .{ .fg = .gray });
+                _ = area.borrowTextAt(0, 2, "Could not load hot games.", .{ .fg = .{ .index = 9 } });
+                _ = area.borrowTextAt(0, 4, message, .{ .fg = .gray });
             },
             .loaded => {
                 if (self.hot_games.list.items.len == 0) {
@@ -693,12 +693,12 @@ pub const App = struct {
             },
         }
 
-        _ = area.textAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
+        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
     }
 
     fn viewSearch(self: *const App, sfc: *chasen.Surface) !void {
         var area = constrainedListSurface(sfc);
-        _ = area.textAt(0, 0, "Search Games", .{ .bold = true, .fg = .{ .index = 14 } });
+        _ = area.borrowTextAt(0, 0, "Search Games", .{ .bold = true, .fg = .{ .index = 14 } });
 
         if (self.search_input) |*input| {
             var input_area = area.child(.{ .col = 0, .row = 2, .width = @min(area.size().width, 48), .height = 1 });
@@ -710,18 +710,18 @@ pub const App = struct {
                 self.drawGuidance(&area, 4, "Ready to search", "Enter at least 3 characters and press Enter.");
             },
             .loading => {
-                _ = area.textAt(0, 4, "Search request is running...", .{ .fg = .gray });
+                _ = area.borrowTextAt(0, 4, "Search request is running...", .{ .fg = .gray });
             },
             .failed => |message| {
-                _ = area.textAt(0, 4, "Could not search games.", .{ .fg = .{ .index = 9 } });
-                _ = area.textAt(0, 6, message, .{ .fg = .gray });
+                _ = area.borrowTextAt(0, 4, "Could not search games.", .{ .fg = .{ .index = 9 } });
+                _ = area.borrowTextAt(0, 6, message, .{ .fg = .gray });
             },
             .loaded => {
                 self.drawGuidance(&area, 4, "Search complete", "Press Enter to run a new search.");
             },
         }
 
-        _ = area.textAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
+        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
     }
 
     fn viewSearchResults(self: *const App, sfc: *chasen.Surface) !void {
@@ -734,11 +734,11 @@ pub const App = struct {
             },
             .loading => {
                 area.hideCursor();
-                _ = area.textAt(0, 2, "Searching BoardGameGeek...", .{ .fg = .gray });
+                _ = area.borrowTextAt(0, 2, "Searching BoardGameGeek...", .{ .fg = .gray });
             },
             .failed => |message| {
-                _ = area.textAt(0, 2, "Could not search games.", .{ .fg = .{ .index = 9 } });
-                _ = area.textAt(0, 4, message, .{ .fg = .gray });
+                _ = area.borrowTextAt(0, 2, "Could not search games.", .{ .fg = .{ .index = 9 } });
+                _ = area.borrowTextAt(0, 4, message, .{ .fg = .gray });
             },
             .loaded => {
                 if (self.search.list.items.len == 0) {
@@ -765,12 +765,12 @@ pub const App = struct {
             },
         }
 
-        _ = area.textAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
+        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
     }
 
     fn viewCollection(self: *const App, sfc: *chasen.Surface) !void {
         var area = constrainedListSurface(sfc);
-        _ = area.textAt(0, 0, "Collection", .{ .bold = true, .fg = .{ .index = 14 } });
+        _ = area.borrowTextAt(0, 0, "Collection", .{ .bold = true, .fg = .{ .index = 14 } });
 
         switch (self.collection.load_state) {
             .idle => {
@@ -779,12 +779,12 @@ pub const App = struct {
             },
             .loading => {
                 area.hideCursor();
-                _ = area.textAt(0, 2, "Loading BoardGameGeek collection...", .{ .fg = .gray });
+                _ = area.borrowTextAt(0, 2, "Loading BoardGameGeek collection...", .{ .fg = .gray });
             },
             .failed => |message| {
                 try self.drawCollectionUsernameInput(&area);
-                _ = area.textAt(0, 4, "Could not load collection.", .{ .fg = .{ .index = 9 } });
-                _ = area.textAt(0, 6, message, .{ .fg = .gray });
+                _ = area.borrowTextAt(0, 4, "Could not load collection.", .{ .fg = .{ .index = 9 } });
+                _ = area.borrowTextAt(0, 6, message, .{ .fg = .gray });
             },
             .loaded => {
                 self.drawCollectionStatusBar(&area);
@@ -820,7 +820,7 @@ pub const App = struct {
             },
         }
 
-        _ = area.textAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
+        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
     }
 
     fn viewGameDetail(self: *const App, sfc: *chasen.Surface) !void {
@@ -829,13 +829,13 @@ pub const App = struct {
 
         switch (self.game_detail.load_state) {
             .idle, .loading => {
-                _ = area.textAt(0, 0, "Game Details", .{ .bold = true, .fg = .{ .index = 14 } });
-                _ = area.textAt(0, 2, "Loading game detail...", .{ .fg = .gray });
+                _ = area.borrowTextAt(0, 0, "Game Details", .{ .bold = true, .fg = .{ .index = 14 } });
+                _ = area.borrowTextAt(0, 2, "Loading game detail...", .{ .fg = .gray });
             },
             .failed => |message| {
-                _ = area.textAt(0, 0, "Game Details", .{ .bold = true, .fg = .{ .index = 14 } });
-                _ = area.textAt(0, 2, "Could not load game detail.", .{ .fg = .{ .index = 9 } });
-                _ = area.textAt(0, 4, message, .{ .fg = .gray });
+                _ = area.borrowTextAt(0, 0, "Game Details", .{ .bold = true, .fg = .{ .index = 14 } });
+                _ = area.borrowTextAt(0, 2, "Could not load game detail.", .{ .fg = .{ .index = 9 } });
+                _ = area.borrowTextAt(0, 4, message, .{ .fg = .gray });
             },
             .loaded => {
                 if (self.game_detail.games.len == 0) {
@@ -846,7 +846,7 @@ pub const App = struct {
                     for (self.game_detail.lines[range.start..range.end], 0..) |line, index| {
                         const row: u16 = @intCast(index);
                         if (row >= content_height) break;
-                        _ = area.textAt(0, row, line, screens.detail.lineStyle(line));
+                        _ = area.borrowTextAt(0, row, line, screens.detail.lineStyle(line));
                     }
 
                     if (self.game_detail.browser_error_url.len > 0) {
@@ -861,7 +861,7 @@ pub const App = struct {
             },
         }
 
-        _ = area.textAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
+        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
     }
 
     fn viewForums(self: *const App, sfc: *chasen.Surface) !void {
@@ -871,7 +871,7 @@ pub const App = struct {
             .idle, .loading_forums => {
                 area.hideCursor();
                 _ = try area.printAt(0, 0, .{ .bold = true, .fg = .{ .index = 14 } }, "{s} - Forums", .{self.forums.game_name});
-                _ = area.textAt(0, 2, "Loading BoardGameGeek forums...", .{ .fg = .gray });
+                _ = area.borrowTextAt(0, 2, "Loading BoardGameGeek forums...", .{ .fg = .gray });
             },
             .forums_loaded => {
                 _ = try area.printAt(0, 0, .{ .bold = true, .fg = .{ .index = 14 } }, "{s} - Forums", .{self.forums.game_name});
@@ -892,11 +892,11 @@ pub const App = struct {
             },
             .loading_threads => {
                 area.hideCursor();
-                _ = area.textAt(0, 0, self.forumThreadTitle(), .{ .bold = true, .fg = .{ .index = 14 } });
-                _ = area.textAt(0, 2, "Loading BoardGameGeek threads...", .{ .fg = .gray });
+                _ = area.borrowTextAt(0, 0, self.forumThreadTitle(), .{ .bold = true, .fg = .{ .index = 14 } });
+                _ = area.borrowTextAt(0, 2, "Loading BoardGameGeek threads...", .{ .fg = .gray });
             },
             .threads_loaded => {
-                _ = area.textAt(0, 0, self.forumThreadTitle(), .{ .bold = true, .fg = .{ .index = 14 } });
+                _ = area.borrowTextAt(0, 0, self.forumThreadTitle(), .{ .bold = true, .fg = .{ .index = 14 } });
                 _ = try area.printAt(0, list_position_row, .{ .dim = true }, "Page {d} / {d}", .{ self.forums.thread_page.page, self.forums.thread_page.total_pages });
                 if (self.forums.thread_list.items.len == 0) {
                     self.drawEmptyState(&area, list_body_row, "No threads", "BGG did not return threads for this forum page.");
@@ -912,13 +912,13 @@ pub const App = struct {
             },
             .failed => |message| {
                 area.hideCursor();
-                _ = area.textAt(0, 0, "Forums", .{ .bold = true, .fg = .{ .index = 14 } });
-                _ = area.textAt(0, 2, "Could not load forums.", .{ .fg = .{ .index = 9 } });
-                _ = area.textAt(0, 4, message, .{ .fg = .gray });
+                _ = area.borrowTextAt(0, 0, "Forums", .{ .bold = true, .fg = .{ .index = 14 } });
+                _ = area.borrowTextAt(0, 2, "Could not load forums.", .{ .fg = .{ .index = 9 } });
+                _ = area.borrowTextAt(0, 4, message, .{ .fg = .gray });
             },
         }
 
-        _ = area.textAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
+        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
     }
 
     fn viewThread(self: *const App, sfc: *chasen.Surface) !void {
@@ -927,17 +927,17 @@ pub const App = struct {
         switch (self.thread.load_state) {
             .idle, .loading => {
                 area.hideCursor();
-                _ = area.textAt(0, 0, "Thread", .{ .bold = true, .fg = .{ .index = 14 } });
-                _ = area.textAt(0, 2, "Loading thread...", .{ .fg = .gray });
+                _ = area.borrowTextAt(0, 0, "Thread", .{ .bold = true, .fg = .{ .index = 14 } });
+                _ = area.borrowTextAt(0, 2, "Loading thread...", .{ .fg = .gray });
             },
             .failed => |message| {
                 area.hideCursor();
-                _ = area.textAt(0, 0, "Thread", .{ .bold = true, .fg = .{ .index = 14 } });
-                _ = area.textAt(0, 2, "Could not load thread.", .{ .fg = .{ .index = 9 } });
-                _ = area.textAt(0, 4, message, .{ .fg = .gray });
+                _ = area.borrowTextAt(0, 0, "Thread", .{ .bold = true, .fg = .{ .index = 14 } });
+                _ = area.borrowTextAt(0, 2, "Could not load thread.", .{ .fg = .{ .index = 9 } });
+                _ = area.borrowTextAt(0, 4, message, .{ .fg = .gray });
             },
             .loaded => {
-                _ = area.textAt(0, 0, self.thread.subject(), .{ .bold = true, .fg = .{ .index = 14 } });
+                _ = area.borrowTextAt(0, 0, self.thread.subject(), .{ .bold = true, .fg = .{ .index = 14 } });
                 _ = try area.printAt(0, 1, .{ .dim = true }, "{d} posts · {s}", .{ self.thread.postCount(), self.thread.sortLabel() });
 
                 var body_area = area.child(.{
@@ -959,7 +959,7 @@ pub const App = struct {
             },
         }
 
-        _ = area.textAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
+        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), .{ .dim = true });
     }
 
     fn submitToken(self: *App, ctx: *chasen.Ctx(Msg)) !void {
@@ -1562,13 +1562,13 @@ pub const App = struct {
         if (item_count == 0 or surface.size().height < 2) return;
 
         const text = try list_view.focusedPositionText(surface.frameAllocator(), list.focusedIndex(), item_count);
-        _ = surface.textAt(0, list_position_row, text, .{ .dim = true });
+        _ = surface.borrowTextAt(0, list_position_row, text, .{ .dim = true });
     }
 
     fn drawSortMode(self: *const App, surface: *chasen.Surface, label: []const u8) void {
         _ = self;
         if (surface.size().width <= 12 or surface.size().height <= list_position_row) return;
-        _ = surface.textAt(10, list_position_row, label, .{ .dim = true });
+        _ = surface.borrowTextAt(10, list_position_row, label, .{ .dim = true });
     }
 
     fn forumThreadTitle(self: *const App) []const u8 {
@@ -1593,12 +1593,12 @@ pub const App = struct {
 
             const focused = global_index == focused_index;
             const marker = if (focused) ">" else " ";
-            _ = surface.textAt(0, row, marker, .{});
-            _ = surface.textAt(2, row, thread.subject, if (focused) .{ .bold = true, .fg = .{ .index = 14 } } else .{});
+            _ = surface.borrowTextAt(0, row, marker, .{});
+            _ = surface.borrowTextAt(2, row, thread.subject, if (focused) .{ .bold = true, .fg = .{ .index = 14 } } else .{});
 
             if (row + 1 < surface.size().height) {
                 const meta = try screens.forum.threadMetaText(surface.frameAllocator(), thread);
-                _ = surface.textAt(4, row + 1, meta, .{ .dim = true });
+                _ = surface.borrowTextAt(4, row + 1, meta, .{ .dim = true });
             }
         }
     }
@@ -1612,7 +1612,7 @@ pub const App = struct {
                 .{ .dim = true }
             else
                 .{};
-            _ = surface.textAt(0, row, line, style);
+            _ = surface.borrowTextAt(0, row, line, style);
         }
     }
 
@@ -1633,12 +1633,12 @@ pub const App = struct {
 
     fn drawGuidance(self: *const App, surface: *chasen.Surface, row: u16, title: []const u8, message: []const u8) void {
         _ = self;
-        _ = surface.textAt(0, row, title, .{ .bold = true, .fg = .gray });
-        _ = surface.textAt(0, row + 1, message, .{ .fg = .gray });
+        _ = surface.borrowTextAt(0, row, title, .{ .bold = true, .fg = .gray });
+        _ = surface.borrowTextAt(0, row + 1, message, .{ .fg = .gray });
     }
 
     fn drawHotFilterInput(self: *const App, surface: *chasen.Surface) !void {
-        _ = surface.textAt(0, list_filter_row, "Filter:", .{ .dim = true });
+        _ = surface.borrowTextAt(0, list_filter_row, "Filter:", .{ .dim = true });
         if (self.hot_filter_input) |*input| {
             var input_area = surface.child(.{
                 .col = 8,
@@ -1651,7 +1651,7 @@ pub const App = struct {
     }
 
     fn drawSearchFilterInput(self: *const App, surface: *chasen.Surface) !void {
-        _ = surface.textAt(0, list_filter_row, "Filter:", .{ .dim = true });
+        _ = surface.borrowTextAt(0, list_filter_row, "Filter:", .{ .dim = true });
         if (self.search_filter_input) |*input| {
             var input_area = surface.child(.{
                 .col = 8,
@@ -1664,7 +1664,7 @@ pub const App = struct {
     }
 
     fn drawCollectionUsernameInput(self: *const App, surface: *chasen.Surface) !void {
-        _ = surface.textAt(0, 2, "User:", .{ .dim = true });
+        _ = surface.borrowTextAt(0, 2, "User:", .{ .dim = true });
         if (self.collection_username_input) |*input| {
             var input_area = surface.child(.{
                 .col = 6,
@@ -1677,7 +1677,7 @@ pub const App = struct {
     }
 
     fn drawCollectionFilterInput(self: *const App, surface: *chasen.Surface) !void {
-        _ = surface.textAt(0, list_filter_row, "Filter:", .{ .dim = true });
+        _ = surface.borrowTextAt(0, list_filter_row, "Filter:", .{ .dim = true });
         if (self.collection_filter_input) |*input| {
             var input_area = surface.child(.{
                 .col = 8,
@@ -1692,28 +1692,28 @@ pub const App = struct {
     fn drawCollectionStatusBar(self: *const App, surface: *chasen.Surface) void {
         if (surface.size().height <= collection_status_bar_row) return;
         const text = collectionStatusSummary(surface.frameAllocator(), self.collection_status_mask) catch "Status: -";
-        _ = surface.textAt(0, collection_status_bar_row, text, .{ .dim = true });
+        _ = surface.borrowTextAt(0, collection_status_bar_row, text, .{ .dim = true });
     }
 
     fn drawCollectionStatusPicker(self: *const App, surface: *chasen.Surface, start_row: u16) void {
         if (surface.size().height <= start_row) return;
 
-        _ = surface.textAt(0, start_row, "Status Filter", .{ .bold = true, .fg = .gray });
+        _ = surface.borrowTextAt(0, start_row, "Status Filter", .{ .bold = true, .fg = .gray });
         for (collection_status_labels, 0..) |label, index| {
             const row: u16 = @intCast(start_row + 1 + index);
             if (row >= surface.size().height) return;
             const cursor = if (self.collection_status_cursor == index) "> " else "  ";
             const checked = if ((self.collection_status_mask & collectionStatusBit(index)) != 0) "[x]" else "[ ]";
-            _ = surface.textAt(0, row, cursor, .{ .bold = self.collection_status_cursor == index });
-            _ = surface.textAt(2, row, checked, .{ .fg = if ((self.collection_status_mask & collectionStatusBit(index)) != 0) .{ .index = 14 } else .gray });
-            _ = surface.textAt(6, row, label, .{});
+            _ = surface.borrowTextAt(0, row, cursor, .{ .bold = self.collection_status_cursor == index });
+            _ = surface.borrowTextAt(2, row, checked, .{ .fg = if ((self.collection_status_mask & collectionStatusBit(index)) != 0) .{ .index = 14 } else .gray });
+            _ = surface.borrowTextAt(6, row, label, .{});
         }
 
         const clear_row: u16 = @intCast(start_row + 1 + collection_picker_clear_index);
         if (clear_row < surface.size().height) {
             const cursor = if (self.collection_status_cursor == collection_picker_clear_index) "> " else "  ";
-            _ = surface.textAt(0, clear_row, cursor, .{ .bold = self.collection_status_cursor == collection_picker_clear_index });
-            _ = surface.textAt(6, clear_row, "Show All (clear)", .{ .fg = .gray });
+            _ = surface.borrowTextAt(0, clear_row, cursor, .{ .bold = self.collection_status_cursor == collection_picker_clear_index });
+            _ = surface.borrowTextAt(6, clear_row, "Show All (clear)", .{ .fg = .gray });
         }
     }
 
@@ -2580,9 +2580,9 @@ fn drawDescriptionPreview(surface: *chasen.Surface, description: []const u8) voi
     const size = surface.size();
     if (size.width == 0 or size.height == 0) return;
 
-    _ = surface.textAt(0, 0, "Description", .{ .bold = true });
+    _ = surface.borrowTextAt(0, 0, "Description", .{ .bold = true });
     if (description.len == 0) {
-        _ = surface.textAt(0, 2, "-", .{ .fg = .gray });
+        _ = surface.borrowTextAt(0, 2, "-", .{ .fg = .gray });
         return;
     }
 
@@ -2593,7 +2593,7 @@ fn drawDescriptionPreview(surface: *chasen.Surface, description: []const u8) voi
         if (index == description.len or description[index] == '\n') {
             const line = std.mem.trim(u8, description[line_start..index], " \t\r");
             if (line.len > 0) {
-                _ = surface.textAt(0, row, line, .{});
+                _ = surface.borrowTextAt(0, row, line, .{});
                 row += 1;
             }
             line_start = index + 1;
@@ -2604,7 +2604,7 @@ fn drawDescriptionPreview(surface: *chasen.Surface, description: []const u8) voi
 fn drawListLine(surface: *chasen.Surface, row: u16, label: []const u8, values: []const []const u8) !void {
     if (row >= surface.size().height) return;
     const text = try listLineText(surface.frameAllocator(), label, values);
-    _ = surface.textAt(0, row, text, .{ .fg = .gray });
+    _ = surface.borrowTextAt(0, row, text, .{ .fg = .gray });
 }
 
 fn listLineText(allocator: std.mem.Allocator, label: []const u8, values: []const []const u8) ![]const u8 {
