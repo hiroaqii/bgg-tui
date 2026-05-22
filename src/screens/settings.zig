@@ -3,6 +3,7 @@ const chasen = @import("chasen");
 const ui = @import("chasen_ui");
 
 const config_mod = @import("../config.zig");
+const motion = @import("../motion.zig");
 const style_mod = @import("../style.zig");
 
 const Kind = enum {
@@ -115,6 +116,8 @@ pub const State = struct {
         config: config_mod.Config,
         config_path: ?[]const u8,
         theme: style_mod.Theme,
+        selection: []const u8,
+        animation_frame: u64,
         token_input: ?*const ui.PasswordInput,
         username_input: ?*const ui.TextInput,
         width_input: ?*const ui.TextInput,
@@ -137,7 +140,7 @@ pub const State = struct {
             }
             if (row >= size.height) return;
 
-            try drawItem(surface, row, index, item, current_section, config, config_path, theme, self.list.focus.isFocused(index), self.editing, token_input, username_input, width_input);
+            try drawItem(surface, row, index, item, current_section, config, config_path, theme, selection, animation_frame, self.list.focus.isFocused(index), self.editing, token_input, username_input, width_input);
             row += 1;
         }
 
@@ -166,6 +169,8 @@ fn drawItem(
     config: config_mod.Config,
     config_path: ?[]const u8,
     theme: style_mod.Theme,
+    selection: []const u8,
+    animation_frame: u64,
     focused: bool,
     editing: ?EditField,
     token_input: ?*const ui.PasswordInput,
@@ -179,11 +184,11 @@ fn drawItem(
     const value = try valueFor(surface, index, config, config_path);
 
     if (item.label.len == 0) {
-        _ = surface.borrowTextAt(2, row, value, label_style);
+        drawItemText(surface, 2, row, value, label_style, focused, selection, animation_frame);
         return;
     }
 
-    _ = surface.borrowTextAt(2, row, item.label, label_style);
+    drawItemText(surface, 2, row, item.label, label_style, focused, selection, animation_frame);
     const value_col: u16 = @intCast(2 + sectionWidth(section) + 2);
     _ = surface.borrowTextAt(value_col - 2, row, ":", .{});
     if (drawEditingInput(surface, row, value_col, index, editing, token_input, username_input, width_input)) {
@@ -196,6 +201,14 @@ fn drawItem(
             _ = surface.borrowTextAt(value_col + 1 + chasen.text.displayWidth(value), row, "]", .{});
         },
         .text, .info => _ = surface.borrowTextAt(value_col, row, value, .{}),
+    }
+}
+
+fn drawItemText(surface: *chasen.Surface, col: u16, row: u16, text: []const u8, style: chasen.TextStyle, focused: bool, selection: []const u8, animation_frame: u64) void {
+    if (focused) {
+        motion.drawFocusedText(surface, col, row, text, style, selection, animation_frame);
+    } else {
+        _ = surface.borrowTextAt(col, row, text, style);
     }
 }
 

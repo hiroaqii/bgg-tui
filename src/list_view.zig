@@ -1,6 +1,7 @@
 const std = @import("std");
 const chasen = @import("chasen");
 const ui = @import("chasen_ui");
+const motion = @import("motion.zig");
 
 pub const Range = struct {
     start: usize,
@@ -59,6 +60,10 @@ pub fn viewList(list: *const ui.List, surface: *chasen.Surface, opts: ui.List.Vi
 }
 
 pub fn viewListWithDensity(list: *const ui.List, surface: *chasen.Surface, opts: ui.List.ViewOptions, density: Density) void {
+    viewListWithDensitySelection(list, surface, opts, density, "none", 0);
+}
+
+pub fn viewListWithDensitySelection(list: *const ui.List, surface: *chasen.Surface, opts: ui.List.ViewOptions, density: Density, selection: []const u8, frame: u64) void {
     const height = surface.size().height;
     if (height == 0 or list.items.len == 0) return;
 
@@ -80,7 +85,12 @@ pub fn viewListWithDensity(list: *const ui.List, surface: *chasen.Surface, opts:
 
         _ = surface.borrowTextAt(0, row, marker, opts.marker_style);
         if (width > 2) {
-            _ = surface.borrowTextAt(2, row, item, itemStyle(opts, focused, selected));
+            const style = itemStyle(opts, focused, selected);
+            if (focused) {
+                motion.drawFocusedText(surface, 2, row, item, style, selection, frame);
+            } else {
+                _ = surface.borrowTextAt(2, row, item, style);
+            }
         }
     }
 
@@ -184,4 +194,18 @@ test "density list preserves one-row rendering" {
     try ts.expectCellText(0, 1, ">");
     try ts.expectCellText(2, 1, "B");
     try ts.expectCellText(2, 2, "G");
+}
+
+test "animated density list preserves one-row rendering" {
+    const items = [_][]const u8{ "Alpha", "Beta", "Gamma" };
+    var list = ui.List.init(.{ .items = &items });
+    list.update(.move_next);
+
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(12, 5);
+    defer ts.deinit();
+
+    viewListWithDensitySelection(&list, &ts.surface, .{}, .comfortable, "wave", 0);
+
+    try std.testing.expectEqual(@as(u16, 12), ts.surface.size().width);
 }

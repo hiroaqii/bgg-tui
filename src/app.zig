@@ -807,6 +807,10 @@ pub const App = struct {
             .shortcut_col = main_menu_shortcut_col,
             .focused_style = self.focusedStyle(),
         });
+        if (self.menu.focusedItem()) |item| {
+            const row: u16 = @intCast(self.menu.focusedIndex());
+            motion.drawFocusedText(&menu_area, 2, row, item.label, self.theme().focused, self.config.interface.selection, self.animation_frame);
+        }
 
         ui.message_block.drawCenteredText(&area, 10, self.footerHint(), self.subtleStyle());
     }
@@ -823,7 +827,7 @@ pub const App = struct {
         const token_input = if (self.settings_token_input) |*input| input else null;
         const username_input = if (self.settings_username_input) |*input| input else null;
         const width_input = if (self.settings_width_input) |*input| input else null;
-        try self.settings.view(&area, self.config, self.config_path, self.theme(), token_input, username_input, width_input);
+        try self.settings.view(&area, self.config, self.config_path, self.theme(), self.config.interface.selection, self.animation_frame, token_input, username_input, width_input);
     }
 
     fn viewHotGames(self: *const App, sfc: *chasen.Surface) !void {
@@ -853,9 +857,9 @@ pub const App = struct {
                         .width = area.size().width,
                         .height = area.size().height -| (body_row + 1 + list_footer_gap),
                     });
-                    list_view.viewListWithDensity(list, &list_area, .{
+                    list_view.viewListWithDensitySelection(list, &list_area, .{
                         .focused_style = self.focusedStyle(),
-                    }, self.listDensity());
+                    }, self.listDensity(), self.config.interface.selection, self.animation_frame);
                     try self.drawListPosition(&area, list);
                     self.drawSortMode(&area, self.hot_games.sort_mode.label(.hot_games));
                 }
@@ -922,9 +926,9 @@ pub const App = struct {
                         .width = area.size().width,
                         .height = area.size().height -| (body_row + 1 + list_footer_gap),
                     });
-                    list_view.viewListWithDensity(list, &list_area, .{
+                    list_view.viewListWithDensitySelection(list, &list_area, .{
                         .focused_style = self.focusedStyle(),
-                    }, self.listDensity());
+                    }, self.listDensity(), self.config.interface.selection, self.animation_frame);
                     try self.drawListPosition(&area, list);
                     self.drawSortMode(&area, self.search.sort_mode.label(.search_results));
                 }
@@ -975,9 +979,9 @@ pub const App = struct {
                         .width = area.size().width,
                         .height = area.size().height -| (body_row + 1 + picker_height),
                     });
-                    list_view.viewListWithDensity(list, &list_area, .{
+                    list_view.viewListWithDensitySelection(list, &list_area, .{
                         .focused_style = self.focusedStyle(),
-                    }, self.listDensity());
+                    }, self.listDensity(), self.config.interface.selection, self.animation_frame);
                     try self.drawListPosition(&area, list);
                 }
                 if (self.collection_status_picker) {
@@ -1890,7 +1894,11 @@ pub const App = struct {
             const focused = global_index == focused_index;
             const marker = if (focused) ">" else " ";
             _ = surface.borrowTextAt(0, row, marker, .{});
-            _ = surface.borrowTextAt(2, row, thread.subject, if (focused) self.focusedStyle() else .{});
+            if (focused) {
+                motion.drawFocusedText(surface, 2, row, thread.subject, self.theme().focused, self.config.interface.selection, self.animation_frame);
+            } else {
+                _ = surface.borrowTextAt(2, row, thread.subject, .{});
+            }
 
             if (row + 1 < surface.size().height) {
                 const meta = try screens.forum.threadMetaText(surface.frameAllocator(), thread);
@@ -1907,8 +1915,12 @@ pub const App = struct {
             const row = list_body_row + @as(u16, @intCast(index));
             if (row >= surface.size().height) break;
             const marker = if (index == focused_index) "> " else "  ";
-            const text = try std.fmt.allocPrint(surface.frameAllocator(), "{s}{s}", .{ marker, item });
-            _ = surface.borrowTextAt(content_col, row, text, if (index == focused_index) self.focusedStyle() else .{});
+            _ = surface.borrowTextAt(content_col, row, marker, .{});
+            if (index == focused_index) {
+                motion.drawFocusedText(surface, content_col + 2, row, item, self.theme().focused, self.config.interface.selection, self.animation_frame);
+            } else {
+                _ = surface.borrowTextAt(content_col + 2, row, item, .{});
+            }
         }
     }
 
@@ -4265,8 +4277,8 @@ test "settings interface cycle fields update supported values" {
     try std.testing.expectEqualStrings("yyyy/mm/dd", app.config.interface.date_format);
 }
 
-test "blink selection requests animation frames" {
-    var app = App.create(.{ .interface = .{ .selection = "blink" } }, .{});
+test "animated selection requests animation frames" {
+    var app = App.create(.{ .interface = .{ .selection = "wave" } }, .{});
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
     try app.init(&tc.ctx);
@@ -4280,7 +4292,7 @@ test "blink selection requests animation frames" {
     try std.testing.expect(tc.ctx.frame_requested);
 }
 
-test "non-blink selection does not request animation frames" {
+test "non-animated selection does not request animation frames" {
     var app = App.create(.{}, .{});
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
