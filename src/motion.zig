@@ -54,7 +54,7 @@ pub fn drawFocusedText(surface: *chasen.Surface, col: u16, row: u16, text: []con
 }
 
 pub fn drawStatusScanText(surface: *chasen.Surface, col: u16, row: u16, text: []const u8, base: chasen.TextStyle, frame: u64) void {
-    drawScanText(surface, col, row, text, base, frame);
+    drawScanTextWithStep(surface, col, row, text, base, frame, 3);
 }
 
 fn drawWaveText(surface: *chasen.Surface, col: u16, row: u16, text: []const u8, base: chasen.TextStyle, frame: u64) void {
@@ -72,16 +72,21 @@ fn drawWaveText(surface: *chasen.Surface, col: u16, row: u16, text: []const u8, 
 }
 
 fn waveColor(frame: u64, index: u32) chasen.Color {
-    const wave = std.math.sin(@as(f64, @floatFromInt(frame)) * 0.05 + @as(f64, @floatFromInt(index)) * 0.3);
+    const wave = std.math.sin(@as(f64, @floatFromInt(frame)) * 0.05 - @as(f64, @floatFromInt(index)) * 0.3);
     const scaled = (wave + 1.0) / 2.0 * @as(f64, @floatFromInt(wave_colors.len - 1));
     const color_index: usize = @intFromFloat(@floor(scaled));
     return wave_colors[@min(color_index, wave_colors.len - 1)];
 }
 
 fn drawScanText(surface: *chasen.Surface, col: u16, row: u16, text: []const u8, base: chasen.TextStyle, frame: u64) void {
+    drawScanTextWithStep(surface, col, row, text, base, frame, 3);
+}
+
+fn drawScanTextWithStep(surface: *chasen.Surface, col: u16, row: u16, text: []const u8, base: chasen.TextStyle, frame: u64, frame_step: u64) void {
     const count = countGraphemes(text);
     const period = count + scan_colors.len + 3;
-    const position: u32 = if (period == 0) 0 else @intCast((frame / 3) % period);
+    const step = @max(frame_step, 1);
+    const position: u32 = if (period == 0) 0 else @intCast((frame / step) % period);
 
     var cursor = col;
     var index: u32 = 0;
@@ -181,9 +186,9 @@ test "wave focused style remains base because color is drawn per grapheme" {
     try std.testing.expectEqual(base, focusedStyle(base, "wave", 45));
 }
 
-test "wave color uses the Go version palette order" {
+test "wave color uses the configured palette" {
     try std.testing.expectEqual(chasen.Color{ .rgb = .{ 0x4e, 0xcd, 0xc4 } }, waveColor(0, 0));
-    try std.testing.expectEqual(chasen.Color{ .rgb = .{ 0x45, 0xb7, 0xd1 } }, waveColor(0, 3));
+    try std.testing.expectEqual(chasen.Color{ .rgb = .{ 0xff, 0x6b, 0x6b } }, waveColor(0, 3));
 }
 
 test "glitch skips spaces and wide graphemes" {
