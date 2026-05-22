@@ -60,11 +60,37 @@ pub fn drawStatusScanText(surface: *chasen.Surface, col: u16, row: u16, text: []
 
 pub fn applyScreenTransition(surface: *chasen.Surface, transition: anim.Transition) void {
     switch (transition.kind) {
+        .dissolve => applyDissolveTransition(surface, transition.progress()),
         .fade => applyFadeTransition(surface, transition.progress()),
         .glitch => applyGlitchTransition(surface, transition),
         .sweep => applySweepTransition(surface, transition.progress()),
         else => {},
     }
+}
+
+fn applyDissolveTransition(surface: *chasen.Surface, progress: f32) void {
+    const size = surface.size();
+    const clamped = anim.ease.clamp01(progress);
+
+    var row: u16 = 0;
+    while (row < size.height) : (row += 1) {
+        var col: u16 = 0;
+        while (col < size.width) : (col += 1) {
+            var cell = surface.readCell(col, row) orelse continue;
+            if (cell.default or cell.char.grapheme.len == 0 or std.mem.eql(u8, cell.char.grapheme, " ")) continue;
+            if (cell.char.width != 1) continue;
+            if (clamped >= dissolveThreshold(row, col)) continue;
+            cell.char.grapheme = " ";
+            cell.style = .{};
+            surface.writeCell(col, row, cell);
+        }
+    }
+}
+
+fn dissolveThreshold(row: u16, col: u16) f32 {
+    // Match the Go version's deterministic per-cell reveal threshold.
+    const threshold = (@as(u32, row) *% 7919 + @as(u32, col) *% 6271) % 1000 + 1;
+    return @as(f32, @floatFromInt(threshold)) / 1001.0;
 }
 
 fn applyFadeTransition(surface: *chasen.Surface, progress: f32) void {
@@ -396,4 +422,26 @@ test "glitch screen transition replaces matching visible cells" {
         if (!std.mem.eql(u8, expected, actual)) replaced = true;
     }
     try std.testing.expect(replaced);
+}
+
+test "dissolve threshold follows go version formula" {
+    try std.testing.expectEqual(@as(f32, 1.0 / 1001.0), dissolveThreshold(0, 0));
+    try std.testing.expectEqual(@as(f32, 920.0 / 1001.0), dissolveThreshold(1, 0));
+    try std.testing.expectEqual(@as(f32, 272.0 / 1001.0), dissolveThreshold(0, 1));
+}
+
+test "dissolve screen transition clears cells above threshold" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(2, 1);
+    defer ts.deinit();
+
+    _ = ts.surface.borrowTextAt(0, 0, "AB", .{ .bold = true });
+    applyScreenTransition(&ts.surface, anim.Transition{
+        .kind = .dissolve,
+        .frame = 100,
+        .max_frame = 1000,
+    });
+
+    try std.testing.expectEqualStrings("A", ts.surface.readCell(0, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings(" ", ts.surface.readCell(1, 0).?.char.grapheme);
 }
