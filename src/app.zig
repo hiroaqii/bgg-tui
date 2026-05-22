@@ -807,6 +807,7 @@ pub const App = struct {
         self.menu.view(&menu_area, .{
             .shortcut_col = main_menu_shortcut_col,
             .focused_style = self.focusedStyle(),
+            .show_cursor = false,
         });
         if (self.menu.focusedItem()) |item| {
             const row: u16 = @intCast(self.menu.focusedIndex());
@@ -860,6 +861,7 @@ pub const App = struct {
                     });
                     list_view.viewListWithDensitySelection(list, &list_area, .{
                         .focused_style = self.focusedStyle(),
+                        .show_cursor = false,
                     }, self.listDensity(), self.config.interface.selection, self.animation_frame);
                     try self.drawListPosition(&area, list);
                     self.drawSortMode(&area, self.hot_games.sort_mode.label(.hot_games));
@@ -929,6 +931,7 @@ pub const App = struct {
                     });
                     list_view.viewListWithDensitySelection(list, &list_area, .{
                         .focused_style = self.focusedStyle(),
+                        .show_cursor = false,
                     }, self.listDensity(), self.config.interface.selection, self.animation_frame);
                     try self.drawListPosition(&area, list);
                     self.drawSortMode(&area, self.search.sort_mode.label(.search_results));
@@ -982,6 +985,7 @@ pub const App = struct {
                     });
                     list_view.viewListWithDensitySelection(list, &list_area, .{
                         .focused_style = self.focusedStyle(),
+                        .show_cursor = false,
                     }, self.listDensity(), self.config.interface.selection, self.animation_frame);
                     try self.drawListPosition(&area, list);
                 }
