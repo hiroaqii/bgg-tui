@@ -116,6 +116,7 @@ pub const App = struct {
     menu: ui.Menu = ui.Menu.init(.{ .items = &menu_items }),
     animation_frame: u64 = 0,
     loading_scan_start_frame: u64 = 0,
+    transition_choice_seed: u64 = 0,
     screen_transition: anim.Transition = .{},
     transition_from_screen: ?Screen = null,
     transition_to_screen: ?Screen = null,
@@ -2147,7 +2148,8 @@ pub const App = struct {
             return;
         }
 
-        const kind = screenTransitionKind(self.config.interface.transition);
+        self.transition_choice_seed +|= 1;
+        const kind = screenTransitionKindForConfig(self.config.interface.transition, transitionChoiceSeed(self.transition_choice_seed, self.animation_frame, previous_screen, next_screen));
         if (kind == .none) {
             self.clearScreenTransition();
             return;
@@ -3338,6 +3340,29 @@ fn screenTransitionKind(value: []const u8) anim.TransitionKind {
     return .none;
 }
 
+fn screenTransitionKindForConfig(value: []const u8, seed: u64) anim.TransitionKind {
+    if (std.mem.eql(u8, value, "random")) return randomScreenTransitionKind(seed);
+    return screenTransitionKind(value);
+}
+
+fn randomScreenTransitionKind(seed: u64) anim.TransitionKind {
+    const candidates = [_]anim.TransitionKind{ .fade, .glitch, .dissolve, .sweep, .lines, .lines_cross };
+    return candidates[transitionChoiceHash(seed) % candidates.len];
+}
+
+fn transitionChoiceSeed(counter: u64, frame: u64, previous_screen: Screen, next_screen: Screen) u64 {
+    return counter ^ (frame *% 0x9e37_79b9_7f4a_7c15) ^
+        (@as(u64, @intCast(@intFromEnum(previous_screen))) *% 0xbf58_476d_1ce4_e5b9) ^
+        (@as(u64, @intCast(@intFromEnum(next_screen))) *% 0x94d0_49bb_1331_11eb);
+}
+
+fn transitionChoiceHash(seed: u64) usize {
+    var value = seed +% 0x9e37_79b9_7f4a_7c15;
+    value = (value ^ (value >> 30)) *% 0xbf58_476d_1ce4_e5b9;
+    value = (value ^ (value >> 27)) *% 0x94d0_49bb_1331_11eb;
+    return @intCast(value ^ (value >> 31));
+}
+
 fn screenTransitionFrames(kind: anim.TransitionKind) u64 {
     return switch (kind) {
         .dissolve => dissolve_transition_frames,
@@ -3459,6 +3484,35 @@ test "screen transition kind only enables implemented effects" {
     try std.testing.expectEqual(anim.TransitionKind.lines_cross, screenTransitionKind("lines-cross"));
     try std.testing.expectEqual(anim.TransitionKind.sweep, screenTransitionKind("sweep"));
     try std.testing.expectEqual(anim.TransitionKind.none, screenTransitionKind("random"));
+}
+
+test "random screen transition resolves to implemented effects" {
+    var saw_fade = false;
+    var saw_glitch = false;
+    var saw_dissolve = false;
+    var saw_sweep = false;
+    var saw_lines = false;
+    var saw_lines_cross = false;
+
+    var seed: u64 = 0;
+    while (seed < 128) : (seed += 1) {
+        switch (screenTransitionKindForConfig("random", seed)) {
+            .fade => saw_fade = true,
+            .glitch => saw_glitch = true,
+            .dissolve => saw_dissolve = true,
+            .sweep => saw_sweep = true,
+            .lines => saw_lines = true,
+            .lines_cross => saw_lines_cross = true,
+            else => return error.UnexpectedTransitionKind,
+        }
+    }
+
+    try std.testing.expect(saw_fade);
+    try std.testing.expect(saw_glitch);
+    try std.testing.expect(saw_dissolve);
+    try std.testing.expect(saw_sweep);
+    try std.testing.expect(saw_lines);
+    try std.testing.expect(saw_lines_cross);
 }
 
 test "screen transition frame counts can differ by effect" {
