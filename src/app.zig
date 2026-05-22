@@ -370,7 +370,7 @@ pub const App = struct {
             .forum_next_page => try self.openForumPage(ctx, self.forums.thread_page.page + 1),
             .forum_previous_page => try self.openForumPage(ctx, self.forums.thread_page.page -| 1),
             .thread_open => |index| try self.startThread(ctx, index),
-            .thread_loaded => |result| try self.finishThread(result),
+            .thread_loaded => |result| try self.finishThread(ctx, result),
             .thread_move_prev => self.thread.moveUp(),
             .thread_move_next => self.thread.moveDown(threadLayoutForTerminal(self).content_height),
             .thread_sort_toggle => try self.thread.toggleSort(self.allocator.?),
@@ -1796,7 +1796,7 @@ pub const App = struct {
 
         self.thread.startLoad(self.allocator.?, thread.id, self.config.display.thread_width);
         self.thread.setVisibleHeight(threadLayoutForTerminal(self).content_height);
-        self.enterPreparedScreen(.thread, ctx);
+        self.switchScreenWithoutTransition(.thread);
         self.beginLoadingMotion(ctx);
 
         const token = self.config.apiClientToken() orelse {
@@ -1819,7 +1819,7 @@ pub const App = struct {
         };
     }
 
-    fn finishThread(self: *App, task_result: ThreadTaskResult) !void {
+    fn finishThread(self: *App, ctx: *chasen.Ctx(Msg), task_result: ThreadTaskResult) !void {
         if (task_result.request_id != self.thread_request_id) {
             switch (task_result.result) {
                 .ok => |thread| bgg_xml.freeThread(self.allocator.?, thread),
@@ -1829,7 +1829,10 @@ pub const App = struct {
         }
 
         switch (task_result.result) {
-            .ok => |thread| try self.thread.setLoaded(self.allocator.?, thread),
+            .ok => |thread| {
+                try self.thread.setLoaded(self.allocator.?, thread);
+                self.startContentTransitionIfVisible(ctx, .thread);
+            },
             .failed => |message| self.thread.setFailed(message),
         }
     }
@@ -5053,6 +5056,87 @@ test "thread list completion stores hidden result without transition" {
     try app.finishForumThreads(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = .{ .threads = threads, .page = 1, .total_pages = 1 } } });
 
     try std.testing.expect(app.forums.load_state == .threads_loaded);
+    try std.testing.expect(!app.hasActiveScreenTransition());
+    try std.testing.expect(!tc.ctx.frame_requested);
+}
+
+test "thread loading enters thread without screen transition" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    const threads = try std.testing.allocator.alloc(bgg_model.ThreadSummary, 1);
+    threads[0] = .{
+        .id = 100,
+        .subject = try std.testing.allocator.dupe(u8, "Rules question"),
+        .author = try std.testing.allocator.dupe(u8, "hiro"),
+    };
+    try app.forums.setThreadsLoaded(std.testing.allocator, .{ .threads = threads, .page = 1, .total_pages = 1 });
+    app.screen = .forums;
+
+    try app.showScreen(.settings, &tc.ctx);
+    try std.testing.expect(app.hasActiveScreenTransition());
+    app.screen = .forums;
+
+    tc.resetTransient();
+    try app.startThread(&tc.ctx, 0);
+    defer {
+        const task: *ThreadTask = @ptrCast(@alignCast(tc.ctx.pendingTaskWithSlice()[0].ctx));
+        std.testing.allocator.free(task.token);
+        std.testing.allocator.destroy(task);
+    }
+
+    try std.testing.expectEqual(Screen.thread, app.screen);
+    try std.testing.expect(app.thread.load_state == .loading);
+    try std.testing.expect(!app.hasActiveScreenTransition());
+    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expectEqual(@as(u8, 1), tc.ctx.pending_tasks_with_len);
+}
+
+test "thread completion starts content transition when visible" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    const thread = bgg_model.Thread{
+        .id = 100,
+        .subject = try std.testing.allocator.dupe(u8, "Rules question"),
+    };
+
+    app.screen = .thread;
+    app.thread_request_id = 7;
+    tc.resetTransient();
+    try app.finishThread(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = thread } });
+
+    try std.testing.expect(app.thread.load_state == .loaded);
+    try std.testing.expect(app.hasActiveScreenTransition());
+    try std.testing.expectEqual(Screen.thread, app.transition_from_screen.?);
+    try std.testing.expectEqual(Screen.thread, app.transition_to_screen.?);
+    try std.testing.expect(tc.ctx.frame_requested);
+}
+
+test "thread completion stores hidden result without transition" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    const thread = bgg_model.Thread{
+        .id = 100,
+        .subject = try std.testing.allocator.dupe(u8, "Rules question"),
+    };
+
+    app.screen = .main_menu;
+    app.thread_request_id = 7;
+    tc.resetTransient();
+    try app.finishThread(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = thread } });
+
+    try std.testing.expect(app.thread.load_state == .loaded);
     try std.testing.expect(!app.hasActiveScreenTransition());
     try std.testing.expect(!tc.ctx.frame_requested);
 }
