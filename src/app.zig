@@ -1454,8 +1454,7 @@ pub const App = struct {
         errdefer ctx.allocator().free(task.token);
 
         self.hot_games.setLoading();
-        self.startLoadingScan();
-        self.requestMotionFrameIfNeeded(ctx);
+        self.beginLoadingMotion(ctx);
         ctx.spawnWith(task, HotGamesTask.run) catch |err| {
             self.hot_games.setFailed("Could not start hot games loading task");
             return err;
@@ -1500,8 +1499,7 @@ pub const App = struct {
 
         self.screen = .search_results;
         self.search.setLoading(self.allocator.?);
-        self.startLoadingScan();
-        self.requestMotionFrameIfNeeded(ctx);
+        self.beginLoadingMotion(ctx);
         ctx.spawnWith(task, SearchTask.run) catch |err| {
             self.search.setFailed(self.allocator.?, "Could not start search task");
             return err;
@@ -1557,8 +1555,7 @@ pub const App = struct {
         };
 
         self.collection.setLoading(self.allocator.?);
-        self.startLoadingScan();
-        self.requestMotionFrameIfNeeded(ctx);
+        self.beginLoadingMotion(ctx);
         ctx.spawnWith(task, CollectionTask.run) catch |err| {
             self.collection.setFailed(self.allocator.?, "Could not start collection loading task");
             return err;
@@ -1604,8 +1601,7 @@ pub const App = struct {
         errdefer ctx.allocator().free(task.token);
 
         self.game_detail.setLoading();
-        self.startLoadingScan();
-        self.requestMotionFrameIfNeeded(ctx);
+        self.beginLoadingMotion(ctx);
         ctx.spawnWith(task, GameDetailTask.run) catch |err| {
             self.game_detail.setFailed("Could not start game detail task");
             return err;
@@ -1659,8 +1655,7 @@ pub const App = struct {
 
         try self.forums.startForumLoad(self.allocator.?, game.id, game.name);
         self.screen = .forums;
-        self.startLoadingScan();
-        self.requestMotionFrameIfNeeded(ctx);
+        self.beginLoadingMotion(ctx);
 
         const token = self.config.apiClientToken() orelse {
             self.forums.setFailed("BGG API token is required");
@@ -1702,8 +1697,7 @@ pub const App = struct {
         self.thread_list_request_id +%= 1;
         const request_id = self.thread_list_request_id;
         self.forums.startThreadLoad(self.allocator.?, visible_index);
-        self.startLoadingScan();
-        self.requestMotionFrameIfNeeded(ctx);
+        self.beginLoadingMotion(ctx);
         try self.spawnForumThreadsTask(ctx, forum.id, page, request_id);
     }
 
@@ -1712,8 +1706,7 @@ pub const App = struct {
         self.thread_list_request_id +%= 1;
         const request_id = self.thread_list_request_id;
         self.forums.startThreadPageLoad(self.allocator.?, page);
-        self.startLoadingScan();
-        self.requestMotionFrameIfNeeded(ctx);
+        self.beginLoadingMotion(ctx);
         try self.spawnForumThreadsTask(ctx, forum.id, page, request_id);
     }
 
@@ -1769,8 +1762,7 @@ pub const App = struct {
         self.thread.startLoad(self.allocator.?, thread.id, self.config.display.thread_width);
         self.thread.setVisibleHeight(threadLayoutForTerminal(self).content_height);
         self.screen = .thread;
-        self.startLoadingScan();
-        self.requestMotionFrameIfNeeded(ctx);
+        self.beginLoadingMotion(ctx);
 
         const token = self.config.apiClientToken() orelse {
             self.thread.setFailed("BGG API token is required");
@@ -1994,16 +1986,9 @@ pub const App = struct {
     fn drawCenteredLoadingGuidance(self: *const App, surface: *chasen.Surface, title: []const u8, message: []const u8) void {
         const block = ui.MessageBlock.init(.{ .title = title, .message = message });
         block.view(surface, .{});
-
-        const rows = block.contentHeight();
-        if (rows == 0 or surface.size().height == 0) return;
-        const start_row: u16 = if (surface.size().height > rows) (surface.size().height - rows) / 2 else 0;
-        const message_row = if (title.len > 0 and message.len > 0) start_row + 1 else start_row;
-        if (message_row >= surface.size().height) return;
-
-        const message_width = chasen.text.displayWidth(message);
-        const col: u16 = if (message_width >= surface.size().width) 0 else @intCast((surface.size().width - message_width) / 2);
-        motion.drawStatusScanText(surface, col, message_row, message, self.mutedStyle(), self.loadingScanFrame());
+        if (block.layout(surface.size()).message) |point| {
+            motion.drawStatusScanText(surface, point.col, point.row, message, self.mutedStyle(), self.loadingScanFrame());
+        }
     }
 
     fn drawCenteredGuidanceKeepingCursor(self: *const App, surface: *chasen.Surface, title: []const u8, message: []const u8) void {
@@ -2130,6 +2115,11 @@ pub const App = struct {
         if (motion.selectionNeedsFrame(self.config.interface.selection) or self.hasActiveLoadingScan()) {
             ctx.requestFrame();
         }
+    }
+
+    fn beginLoadingMotion(self: *App, ctx: *chasen.Ctx(Msg)) void {
+        self.startLoadingScan();
+        self.requestMotionFrameIfNeeded(ctx);
     }
 
     fn startLoadingScan(self: *App) void {
