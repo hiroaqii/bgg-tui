@@ -360,7 +360,7 @@ pub const App = struct {
                 .move_prev, .move_next => self.forums.updateForumList(list_msg),
                 .activate => |index| try self.startForumThreads(ctx, index, 1),
             },
-            .forum_threads_loaded => |result| try self.finishForumThreads(result),
+            .forum_threads_loaded => |result| try self.finishForumThreads(ctx, result),
             .forum_thread_list => |list_msg| switch (list_msg) {
                 .move_prev, .move_next => self.forums.updateThreadList(list_msg),
                 .activate => |index| try self.startThread(ctx, index),
@@ -1727,6 +1727,7 @@ pub const App = struct {
         self.thread_list_request_id +%= 1;
         const request_id = self.thread_list_request_id;
         self.forums.startThreadLoad(self.allocator.?, visible_index);
+        self.switchScreenWithoutTransition(.forums);
         self.beginLoadingMotion(ctx);
         try self.spawnForumThreadsTask(ctx, forum.id, page, request_id);
     }
@@ -1736,6 +1737,7 @@ pub const App = struct {
         self.thread_list_request_id +%= 1;
         const request_id = self.thread_list_request_id;
         self.forums.startThreadPageLoad(self.allocator.?, page);
+        self.switchScreenWithoutTransition(.forums);
         self.beginLoadingMotion(ctx);
         try self.spawnForumThreadsTask(ctx, forum.id, page, request_id);
     }
@@ -1762,7 +1764,7 @@ pub const App = struct {
         };
     }
 
-    fn finishForumThreads(self: *App, task_result: ForumThreadsTaskResult) !void {
+    fn finishForumThreads(self: *App, ctx: *chasen.Ctx(Msg), task_result: ForumThreadsTaskResult) !void {
         if (task_result.request_id != self.thread_list_request_id) {
             switch (task_result.result) {
                 .ok => |thread_page| bgg_xml.freeThreadList(self.allocator.?, thread_page),
@@ -1772,7 +1774,10 @@ pub const App = struct {
         }
 
         switch (task_result.result) {
-            .ok => |thread_page| try self.forums.setThreadsLoaded(self.allocator.?, thread_page),
+            .ok => |thread_page| {
+                try self.forums.setThreadsLoaded(self.allocator.?, thread_page);
+                self.startContentTransitionIfVisible(ctx, .forums);
+            },
             .failed => |message| self.forums.setFailed(message),
         }
     }
@@ -4103,7 +4108,8 @@ test "forum back to list invalidates in-flight thread load" {
         .subject = try std.testing.allocator.dupe(u8, "Old response"),
         .author = try std.testing.allocator.dupe(u8, "hiro"),
     };
-    try app.finishForumThreads(.{
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.finishForumThreads(&tc.ctx, .{
         .request_id = 7,
         .result = .{ .ok = .{ .threads = threads, .page = 1, .total_pages = 1 } },
     });
@@ -4963,6 +4969,90 @@ test "forum list completion stores hidden result without transition" {
     try app.finishForumList(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = forums } });
 
     try std.testing.expect(app.forums.load_state == .forums_loaded);
+    try std.testing.expect(!app.hasActiveScreenTransition());
+    try std.testing.expect(!tc.ctx.frame_requested);
+}
+
+test "thread list loading enters forums without screen transition" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    const forums = try std.testing.allocator.alloc(bgg_model.Forum, 1);
+    forums[0] = .{
+        .id = 10,
+        .title = try std.testing.allocator.dupe(u8, "General"),
+    };
+    try app.forums.setForumsLoaded(std.testing.allocator, forums);
+    app.screen = .forums;
+
+    try app.showScreen(.settings, &tc.ctx);
+    try std.testing.expect(app.hasActiveScreenTransition());
+    app.screen = .forums;
+
+    tc.resetTransient();
+    try app.startForumThreads(&tc.ctx, 0, 1);
+    defer {
+        const task: *ForumThreadsTask = @ptrCast(@alignCast(tc.ctx.pendingTaskWithSlice()[0].ctx));
+        std.testing.allocator.free(task.token);
+        std.testing.allocator.destroy(task);
+    }
+
+    try std.testing.expectEqual(Screen.forums, app.screen);
+    try std.testing.expect(app.forums.load_state == .loading_threads);
+    try std.testing.expect(!app.hasActiveScreenTransition());
+    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expectEqual(@as(u8, 1), tc.ctx.pending_tasks_with_len);
+}
+
+test "thread list completion starts content transition when visible" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    const threads = try std.testing.allocator.alloc(bgg_model.ThreadSummary, 1);
+    threads[0] = .{
+        .id = 100,
+        .subject = try std.testing.allocator.dupe(u8, "Rules question"),
+        .author = try std.testing.allocator.dupe(u8, "hiro"),
+    };
+
+    app.screen = .forums;
+    app.thread_list_request_id = 7;
+    tc.resetTransient();
+    try app.finishForumThreads(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = .{ .threads = threads, .page = 1, .total_pages = 1 } } });
+
+    try std.testing.expect(app.forums.load_state == .threads_loaded);
+    try std.testing.expect(app.hasActiveScreenTransition());
+    try std.testing.expectEqual(Screen.forums, app.transition_from_screen.?);
+    try std.testing.expectEqual(Screen.forums, app.transition_to_screen.?);
+    try std.testing.expect(tc.ctx.frame_requested);
+}
+
+test "thread list completion stores hidden result without transition" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    const threads = try std.testing.allocator.alloc(bgg_model.ThreadSummary, 1);
+    threads[0] = .{
+        .id = 100,
+        .subject = try std.testing.allocator.dupe(u8, "Rules question"),
+        .author = try std.testing.allocator.dupe(u8, "hiro"),
+    };
+
+    app.screen = .main_menu;
+    app.thread_list_request_id = 7;
+    tc.resetTransient();
+    try app.finishForumThreads(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = .{ .threads = threads, .page = 1, .total_pages = 1 } } });
+
+    try std.testing.expect(app.forums.load_state == .threads_loaded);
     try std.testing.expect(!app.hasActiveScreenTransition());
     try std.testing.expect(!tc.ctx.frame_requested);
 }
