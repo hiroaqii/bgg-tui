@@ -1,5 +1,6 @@
 const std = @import("std");
 const chasen = @import("chasen");
+const anim = @import("chasen_anim");
 const ui = @import("chasen_ui");
 
 const bgg_client = @import("bgg/client.zig");
@@ -27,6 +28,7 @@ const list_screen_max_size = chasen.Size{ .width = 72, .height = 34 };
 const forum_screen_max_size = chasen.Size{ .width = 88, .height = 34 };
 const detail_outer_reserved_rows: u16 = 3;
 const thread_outer_reserved_rows: u16 = 3;
+const screen_transition_frames: u64 = 72;
 
 // List screens follow the Go version's vertical rhythm:
 // row 0 title, row 1 blank, row 2 position, row 3 blank, row 4 list body.
@@ -111,6 +113,9 @@ pub const App = struct {
     menu: ui.Menu = ui.Menu.init(.{ .items = &menu_items }),
     animation_frame: u64 = 0,
     loading_scan_start_frame: u64 = 0,
+    screen_transition: anim.Transition = .{},
+    transition_from_screen: ?Screen = null,
+    transition_to_screen: ?Screen = null,
     pub const Msg = union(enum) {
         setup_token_input: ui.PasswordInput.Msg,
         setup_token_paste: []const u8,
@@ -365,7 +370,7 @@ pub const App = struct {
             .thread_sort_toggle => try self.thread.toggleSort(self.allocator.?),
             .thread_open_browser => try self.openThreadInBrowser(ctx),
             .browser_opened => |result| try self.finishBrowserOpen(result),
-            .thread_back_to_forums => self.backToThreadList(),
+            .thread_back_to_forums => self.backToThreadList(ctx),
             .settings_token_start => try self.startSettingsTokenEdit(),
             .settings_token_input => |input_msg| {
                 if (input_msg == .submit) {
@@ -417,6 +422,7 @@ pub const App = struct {
             .terminal_resized => |size| self.handleResize(size),
             .frame => |frame| {
                 self.animation_frame = frame.index;
+                self.stepScreenTransition();
                 self.requestMotionFrameIfNeeded(ctx);
             },
             .menu => |menu_msg| switch (menu_msg) {
@@ -476,6 +482,10 @@ pub const App = struct {
             .right = self.footerHint(),
         });
         status.view(&status_area, .{});
+
+        if (self.hasActiveScreenTransition()) {
+            motion.applyScreenTransition(sfc, self.screen_transition);
+        }
     }
 
     pub fn handleEvent(self: *const App, event: chasen.Event) ?Msg {
@@ -1136,7 +1146,7 @@ pub const App = struct {
         // borrow the value for both this session and TOML serialization.
         try self.saveConfigIfAvailable(ctx);
         try input.update(.clear);
-        self.screen = .main_menu;
+        try self.showScreen(.main_menu, ctx);
     }
 
     fn startSettingsTokenEdit(self: *App) !void {
@@ -1413,6 +1423,7 @@ pub const App = struct {
     fn showScreen(self: *App, screen: Screen, ctx: *chasen.Ctx(Msg)) !void {
         const previous_screen = self.screen;
         self.screen = screen;
+        self.startScreenTransition(previous_screen, screen, ctx);
         if (screen == .hot_games) {
             try self.startHotGamesLoad(ctx);
         }
@@ -1501,8 +1512,8 @@ pub const App = struct {
         errdefer ctx.allocator().free(task.token);
         errdefer ctx.allocator().free(task.query);
 
-        self.screen = .search_results;
         self.search.setLoading(self.allocator.?);
+        self.enterPreparedScreen(.search_results, ctx);
         self.beginLoadingMotion(ctx);
         ctx.spawnWith(task, SearchTask.run) catch |err| {
             self.search.setFailed(self.allocator.?, "Could not start search task");
@@ -1586,7 +1597,6 @@ pub const App = struct {
         self.browser_request_id +%= 1;
         const request_id = self.detail_request_id;
         self.detail_back_screen = back_screen;
-        self.screen = .game_detail;
         self.game_detail.deinit(self.allocator.?);
         self.game_detail.setVisibleHeight(detailLayoutForTerminal(self).content_height);
 
@@ -1605,6 +1615,7 @@ pub const App = struct {
         errdefer ctx.allocator().free(task.token);
 
         self.game_detail.setLoading();
+        self.enterPreparedScreen(.game_detail, ctx);
         self.beginLoadingMotion(ctx);
         ctx.spawnWith(task, GameDetailTask.run) catch |err| {
             self.game_detail.setFailed("Could not start game detail task");
@@ -1658,7 +1669,7 @@ pub const App = struct {
         const request_id = self.forum_request_id;
 
         try self.forums.startForumLoad(self.allocator.?, game.id, game.name);
-        self.screen = .forums;
+        self.enterPreparedScreen(.forums, ctx);
         self.beginLoadingMotion(ctx);
 
         const token = self.config.apiClientToken() orelse {
@@ -1765,7 +1776,7 @@ pub const App = struct {
 
         self.thread.startLoad(self.allocator.?, thread.id, self.config.display.thread_width);
         self.thread.setVisibleHeight(threadLayoutForTerminal(self).content_height);
-        self.screen = .thread;
+        self.enterPreparedScreen(.thread, ctx);
         self.beginLoadingMotion(ctx);
 
         const token = self.config.apiClientToken() orelse {
@@ -1803,11 +1814,11 @@ pub const App = struct {
         }
     }
 
-    fn backToThreadList(self: *App) void {
+    fn backToThreadList(self: *App, ctx: *chasen.Ctx(Msg)) void {
         self.thread_request_id +%= 1;
         self.browser_request_id +%= 1;
         self.thread.deinit(self.allocator.?);
-        self.screen = .forums;
+        self.enterPreparedScreen(.forums, ctx);
     }
 
     fn openThreadInBrowser(self: *App, ctx: *chasen.Ctx(Msg)) !void {
@@ -2116,9 +2127,55 @@ pub const App = struct {
     }
 
     fn requestMotionFrameIfNeeded(self: *const App, ctx: *chasen.Ctx(Msg)) void {
-        if (motion.selectionNeedsFrame(self.config.interface.selection) or self.hasActiveLoadingScan()) {
+        if (motion.selectionNeedsFrame(self.config.interface.selection) or self.hasActiveLoadingScan() or self.hasActiveScreenTransition()) {
             ctx.requestFrame();
         }
+    }
+
+    fn enterPreparedScreen(self: *App, screen: Screen, ctx: *chasen.Ctx(Msg)) void {
+        const previous_screen = self.screen;
+        self.screen = screen;
+        self.startScreenTransition(previous_screen, screen, ctx);
+    }
+
+    fn startScreenTransition(self: *App, previous_screen: Screen, next_screen: Screen, ctx: *chasen.Ctx(Msg)) void {
+        if (previous_screen == next_screen) {
+            self.clearScreenTransition();
+            return;
+        }
+
+        const kind = screenTransitionKind(self.config.interface.transition);
+        if (kind == .none) {
+            self.clearScreenTransition();
+            return;
+        }
+
+        self.transition_from_screen = previous_screen;
+        self.transition_to_screen = next_screen;
+        // Start at frame 1 so the first rendered frame reveals some content
+        // instead of briefly clearing the entire screen.
+        self.screen_transition = anim.Transition{
+            .kind = kind,
+            .frame = 1,
+            .max_frame = screen_transition_frames,
+        };
+        self.requestMotionFrameIfNeeded(ctx);
+    }
+
+    fn stepScreenTransition(self: *App) void {
+        if (!self.hasActiveScreenTransition()) return;
+        _ = self.screen_transition.step();
+        if (self.screen_transition.done()) self.clearScreenTransition();
+    }
+
+    fn hasActiveScreenTransition(self: *const App) bool {
+        return self.screen_transition.kind != .none and !self.screen_transition.done();
+    }
+
+    fn clearScreenTransition(self: *App) void {
+        self.screen_transition = .{};
+        self.transition_from_screen = null;
+        self.transition_to_screen = null;
     }
 
     fn beginLoadingMotion(self: *App, ctx: *chasen.Ctx(Msg)) void {
@@ -3265,6 +3322,14 @@ fn screenTitle(screen: Screen) []const u8 {
     };
 }
 
+fn screenTransitionKind(value: []const u8) anim.TransitionKind {
+    if (std.mem.eql(u8, value, "sweep")) return .sweep;
+    // Other configured transition names are preserved for settings/config
+    // parity, but this slice only implements sweep. Keep unsupported names
+    // as no-op until their renderer is added.
+    return .none;
+}
+
 fn insertPastedCodepoints(input: anytype, text: []const u8) !void {
     var index: usize = 0;
     while (index < text.len) {
@@ -3366,6 +3431,13 @@ test "menu indexes map to screens" {
     try std.testing.expectEqual(Screen.collection, screenForMenuIndex(2).?);
     try std.testing.expectEqual(Screen.settings, screenForMenuIndex(3).?);
     try std.testing.expect(screenForMenuIndex(4) == null);
+}
+
+test "screen transition kind only enables implemented effects" {
+    try std.testing.expectEqual(anim.TransitionKind.none, screenTransitionKind("none"));
+    try std.testing.expectEqual(anim.TransitionKind.sweep, screenTransitionKind("sweep"));
+    try std.testing.expectEqual(anim.TransitionKind.none, screenTransitionKind("fade"));
+    try std.testing.expectEqual(anim.TransitionKind.none, screenTransitionKind("glitch"));
 }
 
 test "screen titles match status labels" {
@@ -4349,6 +4421,63 @@ test "non-animated selection does not request animation frames" {
     defer app.deinitOwnedState();
 
     try std.testing.expect(!tc.ctx.frame_requested);
+}
+
+test "none screen transition uses routing path without requesting frames" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "none" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    tc.resetTransient();
+    try app.showScreen(.search, &tc.ctx);
+
+    try std.testing.expectEqual(Screen.search, app.screen);
+    try std.testing.expect(!app.hasActiveScreenTransition());
+    try std.testing.expect(!tc.ctx.frame_requested);
+}
+
+test "sweep screen transition requests frames until completion" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    tc.resetTransient();
+    try app.showScreen(.settings, &tc.ctx);
+
+    try std.testing.expect(app.hasActiveScreenTransition());
+    try std.testing.expectEqual(anim.TransitionKind.sweep, app.screen_transition.kind);
+    try std.testing.expectEqual(Screen.main_menu, app.transition_from_screen.?);
+    try std.testing.expectEqual(Screen.settings, app.transition_to_screen.?);
+    try std.testing.expect(tc.ctx.frame_requested);
+
+    var frame_index: u64 = 1;
+    while (app.hasActiveScreenTransition()) : (frame_index += 1) {
+        tc.resetTransient();
+        try app.update(.{ .frame = .{ .now_ns = frame_index * 16, .delta_ns = 16, .index = frame_index } }, &tc.ctx);
+    }
+
+    try std.testing.expectEqual(anim.TransitionKind.none, app.screen_transition.kind);
+    try std.testing.expect(app.transition_from_screen == null);
+    try std.testing.expect(app.transition_to_screen == null);
+    try std.testing.expect(!tc.ctx.frame_requested);
+}
+
+test "prepared screen entry keeps target state before transition starts" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    app.search.setLoading(std.testing.allocator);
+    app.enterPreparedScreen(.search_results, &tc.ctx);
+
+    try std.testing.expectEqual(Screen.search_results, app.screen);
+    try std.testing.expect(app.search.load_state == .loading);
+    try std.testing.expect(app.hasActiveScreenTransition());
 }
 
 test "settings interface cycle wraps unknown values to first supported value" {

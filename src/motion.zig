@@ -15,6 +15,7 @@ const scan_colors = [_]chasen.Color{
     .{ .rgb = .{ 0x4e, 0xcd, 0xc4 } },
     .{ .rgb = .{ 0x45, 0xb7, 0xd1 } },
 };
+const transition_edge_color = chasen.Color{ .rgb = .{ 0x4e, 0xcd, 0xc4 } };
 const glitch_chars = [_][]const u8{ "@", "#", "$", "%", "&", "*", "!", "?", "+", "=", "~", "^", "x", "X", "░", "▒", "▓", "█" };
 
 pub fn selectionNeedsFrame(selection: []const u8) bool {
@@ -55,6 +56,49 @@ pub fn drawFocusedText(surface: *chasen.Surface, col: u16, row: u16, text: []con
 
 pub fn drawStatusScanText(surface: *chasen.Surface, col: u16, row: u16, text: []const u8, base: chasen.TextStyle, frame: u64) void {
     drawScanTextWithStep(surface, col, row, text, base, frame, 3);
+}
+
+pub fn applyScreenTransition(surface: *chasen.Surface, transition: anim.Transition) void {
+    switch (transition.kind) {
+        .sweep => applySweepTransition(surface, transition.progress()),
+        else => {},
+    }
+}
+
+fn applySweepTransition(surface: *chasen.Surface, progress: f32) void {
+    const size = surface.size();
+    if (size.width == 0 or size.height == 0) return;
+
+    const eased = easeOutQuad(progress);
+    const sweep_col: u16 = @intFromFloat(@floor(eased * @as(f32, @floatFromInt(size.width))));
+
+    var col: u16 = 0;
+    while (col < size.width) : (col += 1) {
+        if (col < sweep_col) continue;
+        if (col == sweep_col and sweep_col > 0) {
+            drawSweepEdge(surface, col);
+            continue;
+        }
+        surface.clear(.{
+            .col = col,
+            .row = 0,
+            .width = 1,
+            .height = size.height,
+        });
+    }
+}
+
+fn drawSweepEdge(surface: *chasen.Surface, col: u16) void {
+    const size = surface.size();
+    var row: u16 = 0;
+    while (row < size.height) : (row += 1) {
+        _ = surface.borrowTextAt(col, row, "▌", .{ .fg = transition_edge_color });
+    }
+}
+
+fn easeOutQuad(progress: f32) f32 {
+    const clamped = anim.ease.clamp01(progress);
+    return 1.0 - (1.0 - clamped) * (1.0 - clamped);
 }
 
 fn drawWaveText(surface: *chasen.Surface, col: u16, row: u16, text: []const u8, base: chasen.TextStyle, frame: u64) void {
@@ -208,4 +252,28 @@ test "glitch replacement uses configured symbol set" {
         if (std.mem.eql(u8, replacement, char)) found = true;
     }
     try std.testing.expect(found);
+}
+
+test "sweep screen transition clears unrevealed columns and draws edge" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(4, 2);
+    defer ts.deinit();
+    ts.surface.fillAll(.{ .char = .{ .grapheme = "x", .width = 1 } });
+
+    applyScreenTransition(&ts.surface, anim.Transition{
+        .kind = .sweep,
+        .frame = 2,
+        .max_frame = 4,
+    });
+
+    try std.testing.expectEqualStrings("x", ts.surface.readCell(0, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("x", ts.surface.readCell(1, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("x", ts.surface.readCell(2, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("▌", ts.surface.readCell(3, 0).?.char.grapheme);
+}
+
+test "sweep easing matches go version shape" {
+    try std.testing.expectEqual(@as(f32, 0.0), easeOutQuad(0.0));
+    try std.testing.expectEqual(@as(f32, 0.75), easeOutQuad(0.5));
+    try std.testing.expectEqual(@as(f32, 1.0), easeOutQuad(1.0));
 }
