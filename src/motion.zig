@@ -63,6 +63,7 @@ pub fn applyScreenTransition(surface: *chasen.Surface, transition: anim.Transiti
         .dissolve => applyDissolveTransition(surface, transition.progress()),
         .fade => applyFadeTransition(surface, transition.progress()),
         .glitch => applyGlitchTransition(surface, transition),
+        .lines => applyLinesTransition(surface, transition.progress(), false),
         .sweep => applySweepTransition(surface, transition.progress()),
         else => {},
     }
@@ -157,6 +158,78 @@ fn transitionGlitchReplacement(frame: u64, row: u16, col: u16) []const u8 {
 fn transitionGlitchHash(frame: u64, row: u16, col: u16) usize {
     const index = @as(u32, row) *% 4099 + @as(u32, col);
     return glitchHash(frame, index);
+}
+
+fn applyLinesTransition(surface: *chasen.Surface, progress: f32, cross: bool) void {
+    const size = surface.size();
+    if (size.width == 0 or size.height == 0) return;
+
+    const clamped = anim.ease.clamp01(progress);
+    const total_rows = @as(f32, @floatFromInt(size.height));
+
+    var row: u16 = 0;
+    while (row < size.height) : (row += 1) {
+        const line_width = lineContentWidth(surface, row);
+        if (line_width == 0) continue;
+
+        const line_delay = @as(f32, @floatFromInt(row)) / total_rows * 0.6;
+        const raw_line_progress = (clamped - line_delay) / 0.4;
+        const line_progress = easeOutQuad(raw_line_progress);
+        if (line_progress >= 1.0) continue;
+
+        if (cross and row % 2 == 1) {
+            revealLineFromLeft(surface, row, line_width, line_progress);
+        } else {
+            revealLineFromRight(surface, row, line_width, line_progress);
+        }
+    }
+}
+
+fn lineContentWidth(surface: *chasen.Surface, row: u16) u16 {
+    const size = surface.size();
+    var width: u16 = 0;
+    var col: u16 = 0;
+    while (col < size.width) : (col += 1) {
+        const cell = surface.readCell(col, row) orelse continue;
+        if (cell.default or cell.char.grapheme.len == 0 or std.mem.eql(u8, cell.char.grapheme, " ")) continue;
+        width = @max(width, col +| cell.char.width);
+    }
+    return width;
+}
+
+fn revealLineFromRight(surface: *chasen.Surface, row: u16, line_width: u16, progress: f32) void {
+    const offset: u16 = @intFromFloat(@floor(@as(f32, @floatFromInt(line_width)) * (1.0 - progress)));
+    const visible_cols = line_width -| offset;
+
+    var remaining = visible_cols;
+    while (remaining > 0) {
+        remaining -= 1;
+        const source_col = remaining;
+        const target_col = source_col +| offset;
+        if (surface.readCell(source_col, row)) |cell| {
+            if (cell.char.width == 1) {
+                surface.writeCell(target_col, row, cell);
+                continue;
+            }
+        }
+        clearCell(surface, target_col, row);
+    }
+    clearRowRange(surface, row, 0, offset);
+}
+
+fn revealLineFromLeft(surface: *chasen.Surface, row: u16, line_width: u16, progress: f32) void {
+    const visible_cols: u16 = @intFromFloat(@floor(@as(f32, @floatFromInt(line_width)) * progress));
+    const hidden_cols = line_width -| visible_cols;
+    clearRowRange(surface, row, 0, hidden_cols);
+}
+
+fn clearCell(surface: *chasen.Surface, col: u16, row: u16) void {
+    surface.clear(.{ .col = col, .row = row, .width = 1, .height = 1 });
+}
+
+fn clearRowRange(surface: *chasen.Surface, row: u16, col: u16, width: u16) void {
+    if (width == 0) return;
+    surface.clear(.{ .col = col, .row = row, .width = width, .height = 1 });
 }
 
 fn applySweepTransition(surface: *chasen.Surface, progress: f32) void {
@@ -444,4 +517,23 @@ test "dissolve screen transition clears cells above threshold" {
 
     try std.testing.expectEqualStrings("A", ts.surface.readCell(0, 0).?.char.grapheme);
     try std.testing.expectEqualStrings(" ", ts.surface.readCell(1, 0).?.char.grapheme);
+}
+
+test "lines screen transition staggers rows from the right" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(4, 2);
+    defer ts.deinit();
+
+    _ = ts.surface.borrowTextAt(0, 0, "AB", .{});
+    _ = ts.surface.borrowTextAt(0, 1, "CD", .{});
+    applyScreenTransition(&ts.surface, anim.Transition{
+        .kind = .lines,
+        .frame = 10,
+        .max_frame = 100,
+    });
+
+    try std.testing.expectEqualStrings(" ", ts.surface.readCell(0, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("A", ts.surface.readCell(1, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings(" ", ts.surface.readCell(0, 1).?.char.grapheme);
+    try std.testing.expectEqualStrings(" ", ts.surface.readCell(1, 1).?.char.grapheme);
 }
