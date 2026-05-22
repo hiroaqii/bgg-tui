@@ -64,6 +64,7 @@ pub fn applyScreenTransition(surface: *chasen.Surface, transition: anim.Transiti
         .fade => applyFadeTransition(surface, transition.progress()),
         .glitch => applyGlitchTransition(surface, transition),
         .lines => applyLinesTransition(surface, transition.progress(), false),
+        .lines_cross => applyLinesTransition(surface, transition.progress(), true),
         .sweep => applySweepTransition(surface, transition.progress()),
         else => {},
     }
@@ -219,8 +220,20 @@ fn revealLineFromRight(surface: *chasen.Surface, row: u16, line_width: u16, prog
 
 fn revealLineFromLeft(surface: *chasen.Surface, row: u16, line_width: u16, progress: f32) void {
     const visible_cols: u16 = @intFromFloat(@floor(@as(f32, @floatFromInt(line_width)) * progress));
-    const hidden_cols = line_width -| visible_cols;
-    clearRowRange(surface, row, 0, hidden_cols);
+    const source_start = line_width -| visible_cols;
+
+    var source_col = source_start;
+    while (source_col < line_width) : (source_col += 1) {
+        const target_col = source_col -| source_start;
+        if (surface.readCell(source_col, row)) |cell| {
+            if (cell.char.width == 1) {
+                surface.writeCell(target_col, row, cell);
+                continue;
+            }
+        }
+        clearCell(surface, target_col, row);
+    }
+    clearRowRange(surface, row, visible_cols, line_width -| visible_cols);
 }
 
 fn clearCell(surface: *chasen.Surface, col: u16, row: u16) void {
@@ -535,5 +548,24 @@ test "lines screen transition staggers rows from the right" {
     try std.testing.expectEqualStrings(" ", ts.surface.readCell(0, 0).?.char.grapheme);
     try std.testing.expectEqualStrings("A", ts.surface.readCell(1, 0).?.char.grapheme);
     try std.testing.expectEqualStrings(" ", ts.surface.readCell(0, 1).?.char.grapheme);
+    try std.testing.expectEqualStrings(" ", ts.surface.readCell(1, 1).?.char.grapheme);
+}
+
+test "lines-cross screen transition alternates row direction" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(4, 2);
+    defer ts.deinit();
+
+    _ = ts.surface.borrowTextAt(0, 0, "AB", .{});
+    _ = ts.surface.borrowTextAt(0, 1, "CD", .{});
+    applyScreenTransition(&ts.surface, anim.Transition{
+        .kind = .lines_cross,
+        .frame = 50,
+        .max_frame = 100,
+    });
+
+    try std.testing.expectEqualStrings("A", ts.surface.readCell(0, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("B", ts.surface.readCell(1, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("D", ts.surface.readCell(0, 1).?.char.grapheme);
     try std.testing.expectEqualStrings(" ", ts.surface.readCell(1, 1).?.char.grapheme);
 }

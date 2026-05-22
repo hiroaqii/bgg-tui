@@ -3330,9 +3330,10 @@ fn screenTransitionKind(value: []const u8) anim.TransitionKind {
     if (std.mem.eql(u8, value, "fade")) return .fade;
     if (std.mem.eql(u8, value, "glitch")) return .glitch;
     if (std.mem.eql(u8, value, "lines")) return .lines;
+    if (std.mem.eql(u8, value, "lines-cross")) return .lines_cross;
     if (std.mem.eql(u8, value, "sweep")) return .sweep;
     // Other configured transition names are preserved for settings/config
-    // parity, but this slice only implements dissolve, fade, glitch, lines, and sweep. Keep unsupported names
+    // parity, but this slice only implements dissolve, fade, glitch, lines, lines-cross, and sweep. Keep unsupported names
     // as no-op until their renderer is added.
     return .none;
 }
@@ -3341,7 +3342,7 @@ fn screenTransitionFrames(kind: anim.TransitionKind) u64 {
     return switch (kind) {
         .dissolve => dissolve_transition_frames,
         .glitch => glitch_transition_frames,
-        .lines => lines_transition_frames,
+        .lines, .lines_cross => lines_transition_frames,
         else => screen_transition_frames,
     };
 }
@@ -3455,8 +3456,9 @@ test "screen transition kind only enables implemented effects" {
     try std.testing.expectEqual(anim.TransitionKind.fade, screenTransitionKind("fade"));
     try std.testing.expectEqual(anim.TransitionKind.glitch, screenTransitionKind("glitch"));
     try std.testing.expectEqual(anim.TransitionKind.lines, screenTransitionKind("lines"));
+    try std.testing.expectEqual(anim.TransitionKind.lines_cross, screenTransitionKind("lines-cross"));
     try std.testing.expectEqual(anim.TransitionKind.sweep, screenTransitionKind("sweep"));
-    try std.testing.expectEqual(anim.TransitionKind.none, screenTransitionKind("lines-cross"));
+    try std.testing.expectEqual(anim.TransitionKind.none, screenTransitionKind("random"));
 }
 
 test "screen transition frame counts can differ by effect" {
@@ -3465,6 +3467,7 @@ test "screen transition frame counts can differ by effect" {
     try std.testing.expectEqual(@as(u64, 60), screenTransitionFrames(.dissolve));
     try std.testing.expectEqual(@as(u64, 192), screenTransitionFrames(.glitch));
     try std.testing.expectEqual(@as(u64, 90), screenTransitionFrames(.lines));
+    try std.testing.expectEqual(@as(u64, 90), screenTransitionFrames(.lines_cross));
 }
 
 test "screen titles match status labels" {
