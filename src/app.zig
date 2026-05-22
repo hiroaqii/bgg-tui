@@ -343,7 +343,7 @@ pub const App = struct {
             .collection_status_move_next => self.moveCollectionStatusCursor(.next),
             .collection_status_toggle => try self.toggleCollectionStatus(ctx),
             .collection_status_close => self.collection_status_picker = false,
-            .collection_items_loaded => |result| try self.finishCollectionLoad(result),
+            .collection_items_loaded => |result| try self.finishCollectionLoad(ctx, result),
             .collection_list => |list_msg| switch (list_msg) {
                 .move_prev, .move_next => self.collection.update(list_msg),
                 .activate => |index| {
@@ -1577,6 +1577,7 @@ pub const App = struct {
         };
 
         self.collection.setLoading(self.allocator.?);
+        self.switchScreenWithoutTransition(.collection);
         self.beginLoadingMotion(ctx);
         ctx.spawnWith(task, CollectionTask.run) catch |err| {
             self.collection.setFailed(self.allocator.?, "Could not start collection loading task");
@@ -1584,7 +1585,7 @@ pub const App = struct {
         };
     }
 
-    fn finishCollectionLoad(self: *App, task_result: CollectionTaskResult) !void {
+    fn finishCollectionLoad(self: *App, ctx: *chasen.Ctx(Msg), task_result: CollectionTaskResult) !void {
         if (task_result.request_id != self.collection_request_id) {
             switch (task_result.result) {
                 .ok => |items| bgg_xml.freeCollectionItems(self.allocator.?, items),
@@ -1594,7 +1595,10 @@ pub const App = struct {
         }
 
         switch (task_result.result) {
-            .ok => |items| try self.collection.setLoaded(self.allocator.?, items, self.collection_status_mask),
+            .ok => |items| {
+                try self.collection.setLoaded(self.allocator.?, items, self.collection_status_mask);
+                self.startContentTransitionIfVisible(ctx, .collection);
+            },
             .failed => |message| self.collection.setFailed(self.allocator.?, message),
         }
     }
@@ -4806,6 +4810,79 @@ test "search completion stores hidden result without transition" {
     try app.finishSearch(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = results } });
 
     try std.testing.expect(app.search.load_state == .loaded);
+    try std.testing.expect(!app.hasActiveScreenTransition());
+    try std.testing.expect(!tc.ctx.frame_requested);
+}
+
+test "collection loading enters collection without screen transition" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    try app.showScreen(.settings, &tc.ctx);
+    try std.testing.expect(app.hasActiveScreenTransition());
+
+    try app.collection_username_input.?.update(.clear);
+    try app.collection_username_input.?.update(.{ .insert = 'h' });
+    try app.collection_username_input.?.update(.{ .insert = 'i' });
+    try app.collection_username_input.?.update(.{ .insert = 'r' });
+    try app.collection_username_input.?.update(.{ .insert = 'o' });
+    tc.resetTransient();
+    try app.startCollectionLoad(&tc.ctx);
+    defer {
+        const task: *CollectionTask = @ptrCast(@alignCast(tc.ctx.pendingTaskWithSlice()[0].ctx));
+        std.testing.allocator.free(task.token);
+        std.testing.allocator.free(task.username);
+        std.testing.allocator.destroy(task);
+    }
+
+    try std.testing.expectEqual(Screen.collection, app.screen);
+    try std.testing.expect(app.collection.load_state == .loading);
+    try std.testing.expect(!app.hasActiveScreenTransition());
+    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expectEqual(@as(u8, 1), tc.ctx.pending_tasks_with_len);
+}
+
+test "collection completion starts content transition when visible" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 1);
+    items[0] = .{ .id = 13, .name = try std.testing.allocator.dupe(u8, "CATAN"), .owned = true };
+
+    app.screen = .collection;
+    app.collection_request_id = 7;
+    tc.resetTransient();
+    try app.finishCollectionLoad(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = items } });
+
+    try std.testing.expect(app.collection.load_state == .loaded);
+    try std.testing.expect(app.hasActiveScreenTransition());
+    try std.testing.expectEqual(Screen.collection, app.transition_from_screen.?);
+    try std.testing.expectEqual(Screen.collection, app.transition_to_screen.?);
+    try std.testing.expect(tc.ctx.frame_requested);
+}
+
+test "collection completion stores hidden result without transition" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 1);
+    items[0] = .{ .id = 13, .name = try std.testing.allocator.dupe(u8, "CATAN"), .owned = true };
+
+    app.screen = .main_menu;
+    app.collection_request_id = 7;
+    tc.resetTransient();
+    try app.finishCollectionLoad(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = items } });
+
+    try std.testing.expect(app.collection.load_state == .loaded);
     try std.testing.expect(!app.hasActiveScreenTransition());
     try std.testing.expect(!tc.ctx.frame_requested);
 }
