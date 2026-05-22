@@ -110,6 +110,7 @@ pub const App = struct {
     terminal_size: chasen.Size = forum_screen_max_size,
     menu: ui.Menu = ui.Menu.init(.{ .items = &menu_items }),
     animation_frame: u64 = 0,
+    loading_scan_start_frame: u64 = 0,
     pub const Msg = union(enum) {
         setup_token_input: ui.PasswordInput.Msg,
         setup_token_paste: []const u8,
@@ -1453,6 +1454,7 @@ pub const App = struct {
         errdefer ctx.allocator().free(task.token);
 
         self.hot_games.setLoading();
+        self.startLoadingScan();
         self.requestMotionFrameIfNeeded(ctx);
         ctx.spawnWith(task, HotGamesTask.run) catch |err| {
             self.hot_games.setFailed("Could not start hot games loading task");
@@ -1498,6 +1500,7 @@ pub const App = struct {
 
         self.screen = .search_results;
         self.search.setLoading(self.allocator.?);
+        self.startLoadingScan();
         self.requestMotionFrameIfNeeded(ctx);
         ctx.spawnWith(task, SearchTask.run) catch |err| {
             self.search.setFailed(self.allocator.?, "Could not start search task");
@@ -1554,6 +1557,7 @@ pub const App = struct {
         };
 
         self.collection.setLoading(self.allocator.?);
+        self.startLoadingScan();
         self.requestMotionFrameIfNeeded(ctx);
         ctx.spawnWith(task, CollectionTask.run) catch |err| {
             self.collection.setFailed(self.allocator.?, "Could not start collection loading task");
@@ -1600,6 +1604,7 @@ pub const App = struct {
         errdefer ctx.allocator().free(task.token);
 
         self.game_detail.setLoading();
+        self.startLoadingScan();
         self.requestMotionFrameIfNeeded(ctx);
         ctx.spawnWith(task, GameDetailTask.run) catch |err| {
             self.game_detail.setFailed("Could not start game detail task");
@@ -1654,6 +1659,7 @@ pub const App = struct {
 
         try self.forums.startForumLoad(self.allocator.?, game.id, game.name);
         self.screen = .forums;
+        self.startLoadingScan();
         self.requestMotionFrameIfNeeded(ctx);
 
         const token = self.config.apiClientToken() orelse {
@@ -1696,6 +1702,7 @@ pub const App = struct {
         self.thread_list_request_id +%= 1;
         const request_id = self.thread_list_request_id;
         self.forums.startThreadLoad(self.allocator.?, visible_index);
+        self.startLoadingScan();
         self.requestMotionFrameIfNeeded(ctx);
         try self.spawnForumThreadsTask(ctx, forum.id, page, request_id);
     }
@@ -1705,6 +1712,7 @@ pub const App = struct {
         self.thread_list_request_id +%= 1;
         const request_id = self.thread_list_request_id;
         self.forums.startThreadPageLoad(self.allocator.?, page);
+        self.startLoadingScan();
         self.requestMotionFrameIfNeeded(ctx);
         try self.spawnForumThreadsTask(ctx, forum.id, page, request_id);
     }
@@ -1761,6 +1769,7 @@ pub const App = struct {
         self.thread.startLoad(self.allocator.?, thread.id, self.config.display.thread_width);
         self.thread.setVisibleHeight(threadLayoutForTerminal(self).content_height);
         self.screen = .thread;
+        self.startLoadingScan();
         self.requestMotionFrameIfNeeded(ctx);
 
         const token = self.config.apiClientToken() orelse {
@@ -1973,7 +1982,7 @@ pub const App = struct {
 
     fn drawLoadingGuidance(self: *const App, surface: *chasen.Surface, row: u16, title: []const u8, message: []const u8) void {
         _ = surface.borrowTextAt(0, row, title, self.mutedTitleStyle());
-        motion.drawStatusScanText(surface, 0, row + 1, message, self.mutedStyle(), self.animation_frame);
+        motion.drawStatusScanText(surface, 0, row + 1, message, self.mutedStyle(), self.loadingScanFrame());
     }
 
     fn drawCenteredGuidance(self: *const App, surface: *chasen.Surface, title: []const u8, message: []const u8) void {
@@ -1994,7 +2003,7 @@ pub const App = struct {
 
         const message_width = chasen.text.displayWidth(message);
         const col: u16 = if (message_width >= surface.size().width) 0 else @intCast((surface.size().width - message_width) / 2);
-        motion.drawStatusScanText(surface, col, message_row, message, self.mutedStyle(), self.animation_frame);
+        motion.drawStatusScanText(surface, col, message_row, message, self.mutedStyle(), self.loadingScanFrame());
     }
 
     fn drawCenteredGuidanceKeepingCursor(self: *const App, surface: *chasen.Surface, title: []const u8, message: []const u8) void {
@@ -2121,6 +2130,14 @@ pub const App = struct {
         if (motion.selectionNeedsFrame(self.config.interface.selection) or self.hasActiveLoadingScan()) {
             ctx.requestFrame();
         }
+    }
+
+    fn startLoadingScan(self: *App) void {
+        self.loading_scan_start_frame = self.animation_frame;
+    }
+
+    fn loadingScanFrame(self: *const App) u64 {
+        return self.animation_frame -| self.loading_scan_start_frame;
     }
 
     fn hasActiveLoadingScan(self: *const App) bool {
