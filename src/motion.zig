@@ -60,9 +60,34 @@ pub fn drawStatusScanText(surface: *chasen.Surface, col: u16, row: u16, text: []
 
 pub fn applyScreenTransition(surface: *chasen.Surface, transition: anim.Transition) void {
     switch (transition.kind) {
+        .fade => applyFadeTransition(surface, transition.progress()),
         .sweep => applySweepTransition(surface, transition.progress()),
         else => {},
     }
+}
+
+fn applyFadeTransition(surface: *chasen.Surface, progress: f32) void {
+    const size = surface.size();
+    const style = (chasen.TextStyle{ .fg = .{ .index = fadeGrayIndex(progress) } }).toVaxis();
+
+    var row: u16 = 0;
+    while (row < size.height) : (row += 1) {
+        var col: u16 = 0;
+        while (col < size.width) : (col += 1) {
+            var cell = surface.readCell(col, row) orelse continue;
+            if (cell.default) continue;
+            // Match the Go version's string post-processing: ANSI styling is
+            // stripped, then the whole visible frame is rendered in grayscale.
+            cell.style = style;
+            surface.writeCell(col, row, cell);
+        }
+    }
+}
+
+fn fadeGrayIndex(progress: f32) u8 {
+    const clamped = anim.ease.clamp01(progress);
+    const gray: u8 = @intFromFloat(@floor(232.0 + clamped * 23.0));
+    return @min(gray, 255);
 }
 
 fn applySweepTransition(surface: *chasen.Surface, progress: f32) void {
@@ -276,4 +301,28 @@ test "sweep easing matches go version shape" {
     try std.testing.expectEqual(@as(f32, 0.0), easeOutQuad(0.0));
     try std.testing.expectEqual(@as(f32, 0.75), easeOutQuad(0.5));
     try std.testing.expectEqual(@as(f32, 1.0), easeOutQuad(1.0));
+}
+
+test "fade screen transition maps progress to go grayscale range" {
+    try std.testing.expectEqual(@as(u8, 232), fadeGrayIndex(0.0));
+    try std.testing.expectEqual(@as(u8, 243), fadeGrayIndex(0.5));
+    try std.testing.expectEqual(@as(u8, 255), fadeGrayIndex(1.0));
+}
+
+test "fade screen transition replaces visible cell style with grayscale" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(2, 1);
+    defer ts.deinit();
+
+    _ = ts.surface.borrowTextAt(0, 0, "A", .{ .bold = true, .fg = .{ .index = 2 } });
+    applyScreenTransition(&ts.surface, anim.Transition{
+        .kind = .fade,
+        .frame = 0,
+        .max_frame = 10,
+    });
+
+    const cell = ts.surface.readCell(0, 0).?;
+    try std.testing.expectEqualStrings("A", cell.char.grapheme);
+    try std.testing.expect(cell.style.fg.eql(.{ .index = 232 }));
+    try std.testing.expect(!cell.style.bold);
 }

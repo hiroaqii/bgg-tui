@@ -28,7 +28,7 @@ const list_screen_max_size = chasen.Size{ .width = 72, .height = 34 };
 const forum_screen_max_size = chasen.Size{ .width = 88, .height = 34 };
 const detail_outer_reserved_rows: u16 = 3;
 const thread_outer_reserved_rows: u16 = 3;
-const screen_transition_frames: u64 = 72;
+const screen_transition_frames: u64 = 84;
 
 // List screens follow the Go version's vertical rhythm:
 // row 0 title, row 1 blank, row 2 position, row 3 blank, row 4 list body.
@@ -3323,9 +3323,10 @@ fn screenTitle(screen: Screen) []const u8 {
 }
 
 fn screenTransitionKind(value: []const u8) anim.TransitionKind {
+    if (std.mem.eql(u8, value, "fade")) return .fade;
     if (std.mem.eql(u8, value, "sweep")) return .sweep;
     // Other configured transition names are preserved for settings/config
-    // parity, but this slice only implements sweep. Keep unsupported names
+    // parity, but this slice only implements fade and sweep. Keep unsupported names
     // as no-op until their renderer is added.
     return .none;
 }
@@ -3435,8 +3436,8 @@ test "menu indexes map to screens" {
 
 test "screen transition kind only enables implemented effects" {
     try std.testing.expectEqual(anim.TransitionKind.none, screenTransitionKind("none"));
+    try std.testing.expectEqual(anim.TransitionKind.fade, screenTransitionKind("fade"));
     try std.testing.expectEqual(anim.TransitionKind.sweep, screenTransitionKind("sweep"));
-    try std.testing.expectEqual(anim.TransitionKind.none, screenTransitionKind("fade"));
     try std.testing.expectEqual(anim.TransitionKind.none, screenTransitionKind("glitch"));
 }
 
