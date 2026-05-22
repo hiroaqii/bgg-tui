@@ -65,9 +65,38 @@ pub fn applyScreenTransition(surface: *chasen.Surface, transition: anim.Transiti
         .glitch => applyGlitchTransition(surface, transition),
         .lines => applyLinesTransition(surface, transition.progress(), false),
         .lines_cross => applyLinesTransition(surface, transition.progress(), true),
+        .scanline => applyScanlineTransition(surface, transition.progress()),
         .sweep => applySweepTransition(surface, transition.progress()),
         .wipe => applyWipeTransition(surface, transition.progress()),
         else => {},
+    }
+}
+
+fn applyScanlineTransition(surface: *chasen.Surface, progress: f32) void {
+    const size = surface.size();
+    if (size.width == 0 or size.height == 0) return;
+
+    const scan_position: u16 = @intFromFloat(@floor(anim.ease.clamp01(progress) * @as(f32, @floatFromInt(size.height + 1))));
+    if (scan_position < size.height) {
+        const style = (chasen.TextStyle{ .fg = transition_edge_color, .bold = true }).toVaxis();
+        styleRow(surface, scan_position, style);
+        surface.clear(.{
+            .col = 0,
+            .row = scan_position + 1,
+            .width = size.width,
+            .height = size.height - scan_position - 1,
+        });
+    }
+}
+
+fn styleRow(surface: *chasen.Surface, row: u16, style: anytype) void {
+    const size = surface.size();
+    var col: u16 = 0;
+    while (col < size.width) : (col += 1) {
+        var cell = surface.readCell(col, row) orelse continue;
+        if (cell.default) continue;
+        cell.style = style;
+        surface.writeCell(col, row, cell);
     }
 }
 
@@ -602,4 +631,24 @@ test "wipe screen transition clears unrevealed right side" {
     try std.testing.expectEqualStrings("B", ts.surface.readCell(1, 0).?.char.grapheme);
     try std.testing.expectEqualStrings(" ", ts.surface.readCell(2, 0).?.char.grapheme);
     try std.testing.expectEqualStrings(" ", ts.surface.readCell(3, 0).?.char.grapheme);
+}
+
+test "scanline screen transition highlights current row and clears following rows" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(2, 3);
+    defer ts.deinit();
+
+    _ = ts.surface.borrowTextAt(0, 0, "AB", .{});
+    _ = ts.surface.borrowTextAt(0, 1, "CD", .{});
+    _ = ts.surface.borrowTextAt(0, 2, "EF", .{});
+    applyScreenTransition(&ts.surface, anim.Transition{
+        .kind = .scanline,
+        .frame = 10,
+        .max_frame = 100,
+    });
+
+    try std.testing.expectEqualStrings("A", ts.surface.readCell(0, 0).?.char.grapheme);
+    try std.testing.expect(ts.surface.readCell(0, 0).?.style.fg.eql(.{ .rgb = .{ 0x4e, 0xcd, 0xc4 } }));
+    try std.testing.expectEqualStrings(" ", ts.surface.readCell(0, 1).?.char.grapheme);
+    try std.testing.expectEqualStrings(" ", ts.surface.readCell(0, 2).?.char.grapheme);
 }
