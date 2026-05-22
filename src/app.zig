@@ -3268,7 +3268,7 @@ fn parseSettingsWidth(text: []const u8) !u16 {
 
 const color_theme_values = [_][]const u8{ "default", "blue", "orange", "mono", "matcha" };
 const transition_values = [_][]const u8{ "none", "fade", "glitch", "dissolve", "sweep", "lines", "lines-cross", "random" };
-const selection_values = [_][]const u8{ "none", "wave", "blink", "glitch" };
+const selection_values = [_][]const u8{ "none", "invert", "wave", "blink", "glitch", "scan" };
 const border_style_values = [_][]const u8{ "none", "rounded", "thick", "double", "block", "dots" };
 const list_density_values = [_][]const u8{ "compact", "normal", "comfortable", "relaxed" };
 const date_format_values = [_][]const u8{ "yyyy-mm-dd", "yyyy/mm/dd", "relative", "YYYY-MM-DD" };
@@ -4268,7 +4268,7 @@ test "settings interface cycle fields update supported values" {
     try app.cycleSettingsField(&tc.ctx, .transition);
     try std.testing.expectEqualStrings("fade", app.config.interface.transition);
     try app.cycleSettingsField(&tc.ctx, .selection);
-    try std.testing.expectEqualStrings("wave", app.config.interface.selection);
+    try std.testing.expectEqualStrings("invert", app.config.interface.selection);
     try app.cycleSettingsField(&tc.ctx, .border_style);
     try std.testing.expectEqualStrings("thick", app.config.interface.border_style);
     try app.cycleSettingsField(&tc.ctx, .list_density);
