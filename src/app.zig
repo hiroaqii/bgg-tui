@@ -2144,6 +2144,11 @@ pub const App = struct {
         self.startScreenTransition(previous_screen, screen, ctx);
     }
 
+    fn switchScreenWithoutTransition(self: *App, screen: Screen) void {
+        self.screen = screen;
+        self.clearScreenTransition();
+    }
+
     fn startScreenTransition(self: *App, previous_screen: Screen, next_screen: Screen, ctx: *chasen.Ctx(Msg)) void {
         if (previous_screen == next_screen) {
             self.clearScreenTransition();
@@ -2167,6 +2172,31 @@ pub const App = struct {
             .max_frame = screenTransitionFrames(kind),
         };
         self.requestMotionFrameIfNeeded(ctx);
+    }
+
+    fn startContentTransition(self: *App, ctx: *chasen.Ctx(Msg)) void {
+        self.transition_choice_seed +|= 1;
+        const kind = screenTransitionKindForConfig(self.config.interface.transition, transitionChoiceSeed(self.transition_choice_seed, self.animation_frame, self.screen, self.screen));
+        if (kind == .none) {
+            self.clearScreenTransition();
+            return;
+        }
+
+        self.transition_from_screen = self.screen;
+        self.transition_to_screen = self.screen;
+        // Content transitions reveal newly loaded state inside the current
+        // screen, so from/to intentionally point at the same screen.
+        self.screen_transition = anim.Transition{
+            .kind = kind,
+            .frame = 1,
+            .max_frame = screenTransitionFrames(kind),
+        };
+        self.requestMotionFrameIfNeeded(ctx);
+    }
+
+    fn startContentTransitionIfVisible(self: *App, ctx: *chasen.Ctx(Msg), target: Screen) void {
+        if (self.screen != target) return;
+        self.startContentTransition(ctx);
     }
 
     fn stepScreenTransition(self: *App) void {
@@ -4578,6 +4608,64 @@ test "prepared screen entry keeps target state before transition starts" {
     try std.testing.expectEqual(Screen.search_results, app.screen);
     try std.testing.expect(app.search.load_state == .loading);
     try std.testing.expect(app.hasActiveScreenTransition());
+}
+
+test "screen switch without transition clears active transition" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    try app.showScreen(.settings, &tc.ctx);
+    try std.testing.expect(app.hasActiveScreenTransition());
+
+    app.switchScreenWithoutTransition(.search_results);
+
+    try std.testing.expectEqual(Screen.search_results, app.screen);
+    try std.testing.expect(!app.hasActiveScreenTransition());
+    try std.testing.expect(app.transition_from_screen == null);
+    try std.testing.expect(app.transition_to_screen == null);
+}
+
+test "content transition can start within the current screen" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    app.screen = .game_detail;
+    tc.resetTransient();
+    app.startContentTransition(&tc.ctx);
+
+    try std.testing.expect(app.hasActiveScreenTransition());
+    try std.testing.expectEqual(anim.TransitionKind.sweep, app.screen_transition.kind);
+    try std.testing.expectEqual(Screen.game_detail, app.transition_from_screen.?);
+    try std.testing.expectEqual(Screen.game_detail, app.transition_to_screen.?);
+    try std.testing.expect(tc.ctx.frame_requested);
+}
+
+test "content transition only starts when target screen is visible" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    app.screen = .main_menu;
+    tc.resetTransient();
+    app.startContentTransitionIfVisible(&tc.ctx, .game_detail);
+
+    try std.testing.expect(!app.hasActiveScreenTransition());
+    try std.testing.expect(!tc.ctx.frame_requested);
+
+    app.screen = .game_detail;
+    app.startContentTransitionIfVisible(&tc.ctx, .game_detail);
+
+    try std.testing.expect(app.hasActiveScreenTransition());
+    try std.testing.expectEqual(Screen.game_detail, app.transition_from_screen.?);
+    try std.testing.expectEqual(Screen.game_detail, app.transition_to_screen.?);
 }
 
 test "settings interface cycle wraps unknown values to first supported value" {
