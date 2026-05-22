@@ -355,7 +355,7 @@ pub const App = struct {
             .game_detail_move_next => self.game_detail.moveDown(self.game_detail.visible_height),
             .game_detail_open_browser => try self.openGameInBrowser(ctx),
             .forum_open => try self.startForumList(ctx),
-            .forums_loaded => |result| try self.finishForumList(result),
+            .forums_loaded => |result| try self.finishForumList(ctx, result),
             .forum_list => |list_msg| switch (list_msg) {
                 .move_prev, .move_next => self.forums.updateForumList(list_msg),
                 .activate => |index| try self.startForumThreads(ctx, index, 1),
@@ -1681,7 +1681,7 @@ pub const App = struct {
         const request_id = self.forum_request_id;
 
         try self.forums.startForumLoad(self.allocator.?, game.id, game.name);
-        self.enterPreparedScreen(.forums, ctx);
+        self.switchScreenWithoutTransition(.forums);
         self.beginLoadingMotion(ctx);
 
         const token = self.config.apiClientToken() orelse {
@@ -1704,7 +1704,7 @@ pub const App = struct {
         };
     }
 
-    fn finishForumList(self: *App, task_result: ForumListTaskResult) !void {
+    fn finishForumList(self: *App, ctx: *chasen.Ctx(Msg), task_result: ForumListTaskResult) !void {
         if (task_result.request_id != self.forum_request_id) {
             switch (task_result.result) {
                 .ok => |forums| bgg_xml.freeForums(self.allocator.?, forums),
@@ -1714,7 +1714,10 @@ pub const App = struct {
         }
 
         switch (task_result.result) {
-            .ok => |forums| try self.forums.setForumsLoaded(self.allocator.?, forums),
+            .ok => |forums| {
+                try self.forums.setForumsLoaded(self.allocator.?, forums);
+                self.startContentTransitionIfVisible(ctx, .forums);
+            },
             .failed => |message| self.forums.setFailed(message),
         }
     }
@@ -4883,6 +4886,83 @@ test "collection completion stores hidden result without transition" {
     try app.finishCollectionLoad(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = items } });
 
     try std.testing.expect(app.collection.load_state == .loaded);
+    try std.testing.expect(!app.hasActiveScreenTransition());
+    try std.testing.expect(!tc.ctx.frame_requested);
+}
+
+test "forum list loading enters forums without screen transition" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    const games = try std.testing.allocator.alloc(bgg_model.Game, 1);
+    games[0] = .{ .id = 13, .name = try std.testing.allocator.dupe(u8, "Catan") };
+    try app.game_detail.setLoaded(std.testing.allocator, games, 90);
+
+    try app.showScreen(.settings, &tc.ctx);
+    try std.testing.expect(app.hasActiveScreenTransition());
+
+    tc.resetTransient();
+    try app.startForumList(&tc.ctx);
+    defer {
+        const task: *ForumListTask = @ptrCast(@alignCast(tc.ctx.pendingTaskWithSlice()[0].ctx));
+        std.testing.allocator.free(task.token);
+        std.testing.allocator.destroy(task);
+    }
+
+    try std.testing.expectEqual(Screen.forums, app.screen);
+    try std.testing.expect(app.forums.load_state == .loading_forums);
+    try std.testing.expect(!app.hasActiveScreenTransition());
+    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expectEqual(@as(u8, 1), tc.ctx.pending_tasks_with_len);
+}
+
+test "forum list completion starts content transition when visible" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    const forums = try std.testing.allocator.alloc(bgg_model.Forum, 1);
+    forums[0] = .{
+        .id = 10,
+        .title = try std.testing.allocator.dupe(u8, "General"),
+    };
+
+    app.screen = .forums;
+    app.forum_request_id = 7;
+    tc.resetTransient();
+    try app.finishForumList(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = forums } });
+
+    try std.testing.expect(app.forums.load_state == .forums_loaded);
+    try std.testing.expect(app.hasActiveScreenTransition());
+    try std.testing.expectEqual(Screen.forums, app.transition_from_screen.?);
+    try std.testing.expectEqual(Screen.forums, app.transition_to_screen.?);
+    try std.testing.expect(tc.ctx.frame_requested);
+}
+
+test "forum list completion stores hidden result without transition" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    const forums = try std.testing.allocator.alloc(bgg_model.Forum, 1);
+    forums[0] = .{
+        .id = 10,
+        .title = try std.testing.allocator.dupe(u8, "General"),
+    };
+
+    app.screen = .main_menu;
+    app.forum_request_id = 7;
+    tc.resetTransient();
+    try app.finishForumList(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = forums } });
+
+    try std.testing.expect(app.forums.load_state == .forums_loaded);
     try std.testing.expect(!app.hasActiveScreenTransition());
     try std.testing.expect(!tc.ctx.frame_requested);
 }
