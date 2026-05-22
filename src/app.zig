@@ -233,7 +233,7 @@ pub const App = struct {
         self.settings_width_input = try ui.TextInput.init(ctx.allocator(), .{
             .placeholder = "Enter width (20-240)",
         });
-        self.requestSelectionFrameIfNeeded(ctx);
+        self.requestMotionFrameIfNeeded(ctx);
     }
 
     pub fn update(self: *App, msg: Msg, ctx: *chasen.Ctx(Msg)) !void {
@@ -416,7 +416,7 @@ pub const App = struct {
             .terminal_resized => |size| self.handleResize(size),
             .frame => |frame| {
                 self.animation_frame = frame.index;
-                self.requestSelectionFrameIfNeeded(ctx);
+                self.requestMotionFrameIfNeeded(ctx);
             },
             .menu => |menu_msg| switch (menu_msg) {
                 .move_prev, .move_next => self.menu.update(menu_msg),
@@ -836,7 +836,7 @@ pub const App = struct {
 
         switch (self.hot_games.load_state) {
             .idle, .loading => {
-                self.drawCenteredGuidance(&area, "Hot Games", "Loading BoardGameGeek hot games...");
+                self.drawCenteredLoadingGuidance(&area, "Hot Games", "Loading BoardGameGeek hot games...");
             },
             .failed => |message| {
                 self.drawCenteredGuidance(&area, "Could not load hot games.", message);
@@ -883,7 +883,7 @@ pub const App = struct {
                 self.drawGuidance(&area, 4, "Search board games", "Enter at least 3 characters and press Enter.");
             },
             .loading => {
-                self.drawGuidance(&area, 4, "Search board games", "Search request is running...");
+                self.drawLoadingGuidance(&area, 4, "Search board games", "Search request is running...");
             },
             .failed => |message| {
                 self.drawGuidance(&area, 4, "Could not search games.", message);
@@ -905,7 +905,7 @@ pub const App = struct {
                 self.drawCenteredGuidance(&area, "No search yet", "Run a search to see matching board games.");
             },
             .loading => {
-                self.drawCenteredGuidance(&area, "Search Results", "Searching BoardGameGeek...");
+                self.drawCenteredLoadingGuidance(&area, "Search Results", "Searching BoardGameGeek...");
             },
             .failed => |message| {
                 self.drawCenteredGuidance(&area, "Could not search games.", message);
@@ -951,7 +951,7 @@ pub const App = struct {
                 self.drawGuidance(&area, 4, "Load collection", "Enter a BGG username and press Enter.");
             },
             .loading => {
-                self.drawCenteredGuidance(&area, "Collection", "Loading BoardGameGeek collection...");
+                self.drawCenteredLoadingGuidance(&area, "Collection", "Loading BoardGameGeek collection...");
             },
             .failed => |message| {
                 try self.drawCollectionUsernameInput(&area);
@@ -1000,7 +1000,7 @@ pub const App = struct {
 
         switch (self.game_detail.load_state) {
             .idle, .loading => {
-                self.drawCenteredGuidance(&area, "Game Details", "Loading game detail...");
+                self.drawCenteredLoadingGuidance(&area, "Game Details", "Loading game detail...");
             },
             .failed => |message| {
                 self.drawCenteredGuidance(&area, "Could not load game detail.", message);
@@ -1039,7 +1039,7 @@ pub const App = struct {
         switch (self.forums.load_state) {
             .idle, .loading_forums => {
                 const title = try std.fmt.allocPrint(area.frameAllocator(), "{s} - Forums", .{self.forums.game_name});
-                self.drawCenteredGuidance(&area, title, "Loading BoardGameGeek forums...");
+                self.drawCenteredLoadingGuidance(&area, title, "Loading BoardGameGeek forums...");
             },
             .forums_loaded => {
                 if (self.forums.forum_list.items.len == 0) {
@@ -1054,7 +1054,7 @@ pub const App = struct {
                 }
             },
             .loading_threads => {
-                self.drawCenteredGuidance(&area, self.forumThreadTitle(), "Loading BoardGameGeek threads...");
+                self.drawCenteredLoadingGuidance(&area, self.forumThreadTitle(), "Loading BoardGameGeek threads...");
             },
             .threads_loaded => {
                 _ = area.borrowTextAt(0, 0, self.forumThreadTitle(), self.titleStyle());
@@ -1086,7 +1086,7 @@ pub const App = struct {
 
         switch (self.thread.load_state) {
             .idle, .loading => {
-                self.drawCenteredGuidance(&area, "Thread", "Loading thread...");
+                self.drawCenteredLoadingGuidance(&area, "Thread", "Loading thread...");
             },
             .failed => |message| {
                 self.drawCenteredGuidance(&area, "Could not load thread.", message);
@@ -1237,7 +1237,7 @@ pub const App = struct {
             .transition => self.config.interface.transition = nextCycleValue(self.config.interface.transition, &transition_values),
             .selection => {
                 self.config.interface.selection = nextCycleValue(self.config.interface.selection, &selection_values);
-                self.requestSelectionFrameIfNeeded(ctx);
+                self.requestMotionFrameIfNeeded(ctx);
             },
             .border_style => self.config.interface.border_style = nextCycleValue(self.config.interface.border_style, &border_style_values),
             .list_density => self.config.interface.list_density = nextCycleValue(self.config.interface.list_density, &list_density_values),
@@ -1453,6 +1453,7 @@ pub const App = struct {
         errdefer ctx.allocator().free(task.token);
 
         self.hot_games.setLoading();
+        self.requestMotionFrameIfNeeded(ctx);
         ctx.spawnWith(task, HotGamesTask.run) catch |err| {
             self.hot_games.setFailed("Could not start hot games loading task");
             return err;
@@ -1497,6 +1498,7 @@ pub const App = struct {
 
         self.screen = .search_results;
         self.search.setLoading(self.allocator.?);
+        self.requestMotionFrameIfNeeded(ctx);
         ctx.spawnWith(task, SearchTask.run) catch |err| {
             self.search.setFailed(self.allocator.?, "Could not start search task");
             return err;
@@ -1552,6 +1554,7 @@ pub const App = struct {
         };
 
         self.collection.setLoading(self.allocator.?);
+        self.requestMotionFrameIfNeeded(ctx);
         ctx.spawnWith(task, CollectionTask.run) catch |err| {
             self.collection.setFailed(self.allocator.?, "Could not start collection loading task");
             return err;
@@ -1597,6 +1600,7 @@ pub const App = struct {
         errdefer ctx.allocator().free(task.token);
 
         self.game_detail.setLoading();
+        self.requestMotionFrameIfNeeded(ctx);
         ctx.spawnWith(task, GameDetailTask.run) catch |err| {
             self.game_detail.setFailed("Could not start game detail task");
             return err;
@@ -1650,6 +1654,7 @@ pub const App = struct {
 
         try self.forums.startForumLoad(self.allocator.?, game.id, game.name);
         self.screen = .forums;
+        self.requestMotionFrameIfNeeded(ctx);
 
         const token = self.config.apiClientToken() orelse {
             self.forums.setFailed("BGG API token is required");
@@ -1691,6 +1696,7 @@ pub const App = struct {
         self.thread_list_request_id +%= 1;
         const request_id = self.thread_list_request_id;
         self.forums.startThreadLoad(self.allocator.?, visible_index);
+        self.requestMotionFrameIfNeeded(ctx);
         try self.spawnForumThreadsTask(ctx, forum.id, page, request_id);
     }
 
@@ -1699,6 +1705,7 @@ pub const App = struct {
         self.thread_list_request_id +%= 1;
         const request_id = self.thread_list_request_id;
         self.forums.startThreadPageLoad(self.allocator.?, page);
+        self.requestMotionFrameIfNeeded(ctx);
         try self.spawnForumThreadsTask(ctx, forum.id, page, request_id);
     }
 
@@ -1754,6 +1761,7 @@ pub const App = struct {
         self.thread.startLoad(self.allocator.?, thread.id, self.config.display.thread_width);
         self.thread.setVisibleHeight(threadLayoutForTerminal(self).content_height);
         self.screen = .thread;
+        self.requestMotionFrameIfNeeded(ctx);
 
         const token = self.config.apiClientToken() orelse {
             self.thread.setFailed("BGG API token is required");
@@ -1963,10 +1971,30 @@ pub const App = struct {
         _ = surface.borrowTextAt(0, row + 1, message, self.mutedStyle());
     }
 
+    fn drawLoadingGuidance(self: *const App, surface: *chasen.Surface, row: u16, title: []const u8, message: []const u8) void {
+        _ = surface.borrowTextAt(0, row, title, self.mutedTitleStyle());
+        motion.drawStatusScanText(surface, 0, row + 1, message, self.mutedStyle(), self.animation_frame);
+    }
+
     fn drawCenteredGuidance(self: *const App, surface: *chasen.Surface, title: []const u8, message: []const u8) void {
         _ = self;
         const block = ui.MessageBlock.init(.{ .title = title, .message = message });
         block.view(surface, .{});
+    }
+
+    fn drawCenteredLoadingGuidance(self: *const App, surface: *chasen.Surface, title: []const u8, message: []const u8) void {
+        const block = ui.MessageBlock.init(.{ .title = title, .message = message });
+        block.view(surface, .{});
+
+        const rows = block.contentHeight();
+        if (rows == 0 or surface.size().height == 0) return;
+        const start_row: u16 = if (surface.size().height > rows) (surface.size().height - rows) / 2 else 0;
+        const message_row = if (title.len > 0 and message.len > 0) start_row + 1 else start_row;
+        if (message_row >= surface.size().height) return;
+
+        const message_width = chasen.text.displayWidth(message);
+        const col: u16 = if (message_width >= surface.size().width) 0 else @intCast((surface.size().width - message_width) / 2);
+        motion.drawStatusScanText(surface, col, message_row, message, self.mutedStyle(), self.animation_frame);
     }
 
     fn drawCenteredGuidanceKeepingCursor(self: *const App, surface: *chasen.Surface, title: []const u8, message: []const u8) void {
@@ -2089,10 +2117,20 @@ pub const App = struct {
         return self.theme().subtle;
     }
 
-    fn requestSelectionFrameIfNeeded(self: *const App, ctx: *chasen.Ctx(Msg)) void {
-        if (motion.selectionNeedsFrame(self.config.interface.selection)) {
+    fn requestMotionFrameIfNeeded(self: *const App, ctx: *chasen.Ctx(Msg)) void {
+        if (motion.selectionNeedsFrame(self.config.interface.selection) or self.hasActiveLoadingScan()) {
             ctx.requestFrame();
         }
+    }
+
+    fn hasActiveLoadingScan(self: *const App) bool {
+        return self.hot_games.load_state == .loading or
+            self.search.load_state == .loading or
+            self.collection.load_state == .loading or
+            self.game_detail.load_state == .loading or
+            self.forums.load_state == .loading_forums or
+            self.forums.load_state == .loading_threads or
+            self.thread.load_state == .loading;
     }
 
     fn footerHint(self: *const App) []const u8 {

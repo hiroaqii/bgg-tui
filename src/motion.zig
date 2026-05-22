@@ -53,6 +53,10 @@ pub fn drawFocusedText(surface: *chasen.Surface, col: u16, row: u16, text: []con
     _ = surface.borrowTextAt(col, row, text, focusedStyle(base, selection, frame));
 }
 
+pub fn drawStatusScanText(surface: *chasen.Surface, col: u16, row: u16, text: []const u8, base: chasen.TextStyle, frame: u64) void {
+    drawScanText(surface, col, row, text, base, frame);
+}
+
 fn drawWaveText(surface: *chasen.Surface, col: u16, row: u16, text: []const u8, base: chasen.TextStyle, frame: u64) void {
     var cursor = col;
     var index: u32 = 0;
