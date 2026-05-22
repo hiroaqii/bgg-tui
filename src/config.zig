@@ -82,7 +82,7 @@ pub const Config = struct {
         if (!isOneOf(config.interface.selection, &.{ "none", "wave", "blink", "glitch" })) return error.InvalidSelection;
         if (!isOneOf(config.interface.list_density, &.{ "compact", "normal", "comfortable", "relaxed" })) return error.InvalidListDensity;
         if (!isOneOf(config.interface.date_format, &.{ "yyyy-mm-dd", "yyyy/mm/dd", "relative", "YYYY-MM-DD" })) return error.InvalidDateFormat;
-        if (!isOneOf(config.interface.border_style, &.{ "none", "rounded", "thick", "double", "block", "ascii" })) return error.InvalidBorderStyle;
+        if (!isOneOf(config.interface.border_style, &.{ "none", "rounded", "thick", "double", "block", "dots" })) return error.InvalidBorderStyle;
     }
 };
 
@@ -777,7 +777,7 @@ test "config validation accepts documented theme and border values" {
         try config.validate();
     }
 
-    inline for (.{ "none", "rounded", "thick", "double", "block", "ascii" }) |border| {
+    inline for (.{ "none", "rounded", "thick", "double", "block", "dots" }) |border| {
         var config = Config.defaults();
         config.interface.border_style = border;
         try config.validate();

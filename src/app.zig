@@ -3239,7 +3239,7 @@ fn parseSettingsWidth(text: []const u8) !u16 {
 const color_theme_values = [_][]const u8{ "default", "blue", "orange", "mono", "matcha" };
 const transition_values = [_][]const u8{ "none", "fade", "glitch", "dissolve", "sweep", "lines", "lines-cross", "random" };
 const selection_values = [_][]const u8{ "none", "wave", "blink", "glitch" };
-const border_style_values = [_][]const u8{ "none", "rounded", "thick", "double", "block", "ascii" };
+const border_style_values = [_][]const u8{ "none", "rounded", "thick", "double", "block", "dots" };
 const list_density_values = [_][]const u8{ "compact", "normal", "comfortable", "relaxed" };
 const date_format_values = [_][]const u8{ "yyyy-mm-dd", "yyyy/mm/dd", "relative", "YYYY-MM-DD" };
 

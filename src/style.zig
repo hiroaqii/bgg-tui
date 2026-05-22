@@ -33,57 +33,12 @@ pub const Theme = struct {
 /// Maps persisted border names to the shell panel glyph set. The invisible
 /// `none` preset keeps the same content geometry as the visible borders.
 pub fn borderFromName(name: []const u8) ui.Panel.Border {
-    if (std.mem.eql(u8, name, "none")) return .{
-        .top_left = " ",
-        .top = " ",
-        .top_right = " ",
-        .right = " ",
-        .bottom_right = " ",
-        .bottom = " ",
-        .bottom_left = " ",
-        .left = " ",
-    };
-    if (std.mem.eql(u8, name, "thick")) return .{
-        .top_left = "┏",
-        .top = "━",
-        .top_right = "┓",
-        .right = "┃",
-        .bottom_right = "┛",
-        .bottom = "━",
-        .bottom_left = "┗",
-        .left = "┃",
-    };
-    if (std.mem.eql(u8, name, "double")) return .{
-        .top_left = "╔",
-        .top = "═",
-        .top_right = "╗",
-        .right = "║",
-        .bottom_right = "╝",
-        .bottom = "═",
-        .bottom_left = "╚",
-        .left = "║",
-    };
-    if (std.mem.eql(u8, name, "block")) return .{
-        .top_left = "█",
-        .top = "▀",
-        .top_right = "█",
-        .right = "█",
-        .bottom_right = "█",
-        .bottom = "▄",
-        .bottom_left = "█",
-        .left = "█",
-    };
-    if (std.mem.eql(u8, name, "ascii")) return .{
-        .top_left = "+",
-        .top = "-",
-        .top_right = "+",
-        .right = "|",
-        .bottom_right = "+",
-        .bottom = "-",
-        .bottom_left = "+",
-        .left = "|",
-    };
-    return .rounded;
+    if (std.mem.eql(u8, name, "none")) return ui.Panel.Border.preset(.none);
+    if (std.mem.eql(u8, name, "thick")) return ui.Panel.Border.preset(.thick);
+    if (std.mem.eql(u8, name, "double")) return ui.Panel.Border.preset(.double);
+    if (std.mem.eql(u8, name, "block")) return ui.Panel.Border.preset(.block);
+    if (std.mem.eql(u8, name, "dots")) return ui.Panel.Border.preset(.dots);
+    return ui.Panel.Border.preset(.rounded);
 }
 
 fn accentColor(name: []const u8) chasen.Color {
@@ -114,7 +69,7 @@ test "border names map to glyph presets" {
     try std.testing.expectEqualStrings("━", borderFromName("thick").top);
     try std.testing.expectEqualStrings("═", borderFromName("double").top);
     try std.testing.expectEqualStrings("▀", borderFromName("block").top);
-    try std.testing.expectEqualStrings("-", borderFromName("ascii").top);
-    try std.testing.expectEqualStrings("|", borderFromName("ascii").left);
+    try std.testing.expectEqualStrings("·", borderFromName("dots").top);
+    try std.testing.expectEqualStrings("⋮", borderFromName("dots").left);
     try std.testing.expectEqualStrings("╭", borderFromName("custom").top_left);
 }
