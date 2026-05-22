@@ -350,7 +350,7 @@ pub const App = struct {
                     if (self.collection.sourceIndex(index)) |source_index| try self.openCollectionItem(source_index, ctx);
                 },
             },
-            .game_detail_loaded => |result| try self.finishGameDetail(result),
+            .game_detail_loaded => |result| try self.finishGameDetail(ctx, result),
             .game_detail_move_prev => self.game_detail.moveUp(),
             .game_detail_move_next => self.game_detail.moveDown(self.game_detail.visible_height),
             .game_detail_open_browser => try self.openGameInBrowser(ctx),
@@ -1621,7 +1621,7 @@ pub const App = struct {
         errdefer ctx.allocator().free(task.token);
 
         self.game_detail.setLoading();
-        self.enterPreparedScreen(.game_detail, ctx);
+        self.switchScreenWithoutTransition(.game_detail);
         self.beginLoadingMotion(ctx);
         ctx.spawnWith(task, GameDetailTask.run) catch |err| {
             self.game_detail.setFailed("Could not start game detail task");
@@ -1629,7 +1629,7 @@ pub const App = struct {
         };
     }
 
-    fn finishGameDetail(self: *App, task_result: GameDetailTaskResult) !void {
+    fn finishGameDetail(self: *App, ctx: *chasen.Ctx(Msg), task_result: GameDetailTaskResult) !void {
         if (task_result.request_id != self.detail_request_id) {
             switch (task_result.result) {
                 .ok => |games| bgg_xml.freeGames(self.allocator.?, games),
@@ -1642,6 +1642,7 @@ pub const App = struct {
             .ok => |games| {
                 try self.game_detail.setLoaded(self.allocator.?, games, self.config.display.detail_width);
                 self.game_detail.setVisibleHeight(detailLayoutForTerminal(self).content_height);
+                self.startContentTransitionIfVisible(ctx, .game_detail);
             },
             .failed => |message| self.game_detail.setFailed(message),
         }
@@ -4666,6 +4667,73 @@ test "content transition only starts when target screen is visible" {
     try std.testing.expect(app.hasActiveScreenTransition());
     try std.testing.expectEqual(Screen.game_detail, app.transition_from_screen.?);
     try std.testing.expectEqual(Screen.game_detail, app.transition_to_screen.?);
+}
+
+test "game detail loading enters without screen transition" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    try app.showScreen(.settings, &tc.ctx);
+    try std.testing.expect(app.hasActiveScreenTransition());
+
+    tc.resetTransient();
+    try app.startGameDetail(&tc.ctx, 13, .hot_games);
+    defer {
+        const task: *GameDetailTask = @ptrCast(@alignCast(tc.ctx.pendingTaskWithSlice()[0].ctx));
+        std.testing.allocator.free(task.token);
+        std.testing.allocator.destroy(task);
+    }
+
+    try std.testing.expectEqual(Screen.game_detail, app.screen);
+    try std.testing.expect(app.game_detail.load_state == .loading);
+    try std.testing.expect(!app.hasActiveScreenTransition());
+    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expectEqual(@as(u8, 1), tc.ctx.pending_tasks_with_len);
+}
+
+test "game detail load completion starts content transition when visible" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    const games = try std.testing.allocator.alloc(bgg_model.Game, 1);
+    games[0] = .{ .id = 13, .name = try std.testing.allocator.dupe(u8, "Catan") };
+
+    app.screen = .game_detail;
+    app.detail_request_id = 7;
+    tc.resetTransient();
+    try app.finishGameDetail(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = games } });
+
+    try std.testing.expect(app.game_detail.load_state == .loaded);
+    try std.testing.expect(app.hasActiveScreenTransition());
+    try std.testing.expectEqual(Screen.game_detail, app.transition_from_screen.?);
+    try std.testing.expectEqual(Screen.game_detail, app.transition_to_screen.?);
+    try std.testing.expect(tc.ctx.frame_requested);
+}
+
+test "game detail load completion stores hidden result without transition" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    const games = try std.testing.allocator.alloc(bgg_model.Game, 1);
+    games[0] = .{ .id = 13, .name = try std.testing.allocator.dupe(u8, "Catan") };
+
+    app.screen = .main_menu;
+    app.detail_request_id = 7;
+    tc.resetTransient();
+    try app.finishGameDetail(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = games } });
+
+    try std.testing.expect(app.game_detail.load_state == .loaded);
+    try std.testing.expect(!app.hasActiveScreenTransition());
+    try std.testing.expect(!tc.ctx.frame_requested);
 }
 
 test "settings interface cycle wraps unknown values to first supported value" {
