@@ -12,6 +12,9 @@
         .chasen_ui = .{
             .path = "../chasen-ui",
         },
+        .chasen_anim = .{
+            .path = "../chasen-anim",
+        },
     },
     .fingerprint = 0x19169d3aedcc6ad1, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",

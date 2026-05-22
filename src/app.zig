@@ -13,6 +13,7 @@ const format = @import("format.zig");
 const labels_mod = @import("labels.zig");
 const list_filter = @import("list_filter.zig");
 const list_view = @import("list_view.zig");
+const motion = @import("motion.zig");
 const screens = @import("screens/root.zig");
 const style_mod = @import("style.zig");
 
@@ -108,6 +109,7 @@ pub const App = struct {
     settings: screens.settings.State = .{},
     terminal_size: chasen.Size = forum_screen_max_size,
     menu: ui.Menu = ui.Menu.init(.{ .items = &menu_items }),
+    animation_frame: u64 = 0,
     pub const Msg = union(enum) {
         setup_token_input: ui.PasswordInput.Msg,
         setup_token_paste: []const u8,
@@ -179,6 +181,7 @@ pub const App = struct {
         settings_cycle_next: screens.settings.CycleField,
         settings_list: ui.List.Msg,
         terminal_resized: chasen.Size,
+        frame: chasen.Frame,
         menu: ui.Menu.Msg,
         hot_list: ui.List.Msg,
         hot_sort_toggle,
@@ -230,6 +233,7 @@ pub const App = struct {
         self.settings_width_input = try ui.TextInput.init(ctx.allocator(), .{
             .placeholder = "Enter width (20-240)",
         });
+        self.requestSelectionFrameIfNeeded(ctx);
     }
 
     pub fn update(self: *App, msg: Msg, ctx: *chasen.Ctx(Msg)) !void {
@@ -410,6 +414,10 @@ pub const App = struct {
             .settings_cycle_next => |field| try self.cycleSettingsField(ctx, field),
             .settings_list => |list_msg| self.settings.updateList(list_msg),
             .terminal_resized => |size| self.handleResize(size),
+            .frame => |frame| {
+                self.animation_frame = frame.index;
+                self.requestSelectionFrameIfNeeded(ctx);
+            },
             .menu => |menu_msg| switch (menu_msg) {
                 .move_prev, .move_next => self.menu.update(menu_msg),
                 .activate => |index| {
@@ -470,6 +478,7 @@ pub const App = struct {
     }
 
     pub fn handleEvent(self: *const App, event: chasen.Event) ?Msg {
+        if (event == .frame) return .{ .frame = event.frame };
         if (event == .winsize) {
             return .{ .terminal_resized = .{ .width = event.winsize.cols, .height = event.winsize.rows } };
         }
@@ -1222,7 +1231,10 @@ pub const App = struct {
         switch (field) {
             .color_theme => self.config.interface.color_theme = nextCycleValue(self.config.interface.color_theme, &color_theme_values),
             .transition => self.config.interface.transition = nextCycleValue(self.config.interface.transition, &transition_values),
-            .selection => self.config.interface.selection = nextCycleValue(self.config.interface.selection, &selection_values),
+            .selection => {
+                self.config.interface.selection = nextCycleValue(self.config.interface.selection, &selection_values);
+                self.requestSelectionFrameIfNeeded(ctx);
+            },
             .border_style => self.config.interface.border_style = nextCycleValue(self.config.interface.border_style, &border_style_values),
             .list_density => self.config.interface.list_density = nextCycleValue(self.config.interface.list_density, &list_density_values),
             .date_format => self.config.interface.date_format = nextCycleValue(self.config.interface.date_format, &date_format_values),
@@ -2048,7 +2060,7 @@ pub const App = struct {
     }
 
     fn focusedStyle(self: *const App) chasen.TextStyle {
-        return self.theme().focused;
+        return motion.focusedStyle(self.theme().focused, self.config.interface.selection, self.animation_frame);
     }
 
     fn mutedStyle(self: *const App) chasen.TextStyle {
@@ -2063,6 +2075,12 @@ pub const App = struct {
 
     fn subtleStyle(self: *const App) chasen.TextStyle {
         return self.theme().subtle;
+    }
+
+    fn requestSelectionFrameIfNeeded(self: *const App, ctx: *chasen.Ctx(Msg)) void {
+        if (motion.selectionNeedsFrame(self.config.interface.selection)) {
+            ctx.requestFrame();
+        }
     }
 
     fn footerHint(self: *const App) []const u8 {
@@ -4245,6 +4263,31 @@ test "settings interface cycle fields update supported values" {
     try std.testing.expectEqualStrings("comfortable", app.config.interface.list_density);
     try app.cycleSettingsField(&tc.ctx, .date_format);
     try std.testing.expectEqualStrings("yyyy/mm/dd", app.config.interface.date_format);
+}
+
+test "blink selection requests animation frames" {
+    var app = App.create(.{ .interface = .{ .selection = "blink" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    try std.testing.expect(tc.ctx.frame_requested);
+
+    tc.resetTransient();
+    try app.update(.{ .frame = .{ .now_ns = 100, .delta_ns = 16, .index = 15 } }, &tc.ctx);
+    try std.testing.expectEqual(@as(u64, 15), app.animation_frame);
+    try std.testing.expect(tc.ctx.frame_requested);
+}
+
+test "non-blink selection does not request animation frames" {
+    var app = App.create(.{}, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    try std.testing.expect(!tc.ctx.frame_requested);
 }
 
 test "settings interface cycle wraps unknown values to first supported value" {
