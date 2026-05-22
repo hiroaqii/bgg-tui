@@ -61,6 +61,7 @@ pub fn drawStatusScanText(surface: *chasen.Surface, col: u16, row: u16, text: []
 pub fn applyScreenTransition(surface: *chasen.Surface, transition: anim.Transition) void {
     switch (transition.kind) {
         .fade => applyFadeTransition(surface, transition.progress()),
+        .glitch => applyGlitchTransition(surface, transition),
         .sweep => applySweepTransition(surface, transition.progress()),
         else => {},
     }
@@ -88,6 +89,48 @@ fn fadeGrayIndex(progress: f32) u8 {
     const clamped = anim.ease.clamp01(progress);
     const gray: u8 = @intFromFloat(@floor(232.0 + clamped * 23.0));
     return @min(gray, 255);
+}
+
+fn applyGlitchTransition(surface: *chasen.Surface, transition: anim.Transition) void {
+    const size = surface.size();
+    const threshold = transitionGlitchThreshold(transition.progress());
+    const tick = transition.frame / 5;
+    const style = (chasen.TextStyle{ .fg = transition_edge_color }).toVaxis();
+
+    var row: u16 = 0;
+    while (row < size.height) : (row += 1) {
+        var col: u16 = 0;
+        while (col < size.width) : (col += 1) {
+            var cell = surface.readCell(col, row) orelse continue;
+            if (cell.default or cell.char.grapheme.len == 0 or std.mem.eql(u8, cell.char.grapheme, " ")) continue;
+            if (cell.char.width != 1) continue;
+            if (transitionGlitchHash(tick, row, col) % 1000 >= threshold) continue;
+
+            cell.char.grapheme = transitionGlitchReplacement(tick, row, col);
+            cell.style = style;
+            surface.writeCell(col, row, cell);
+        }
+    }
+}
+
+fn transitionGlitchThreshold(progress: f32) u16 {
+    const clamped = anim.ease.clamp01(progress);
+    const remaining = 1.0 - clamped;
+    // Go version uses 0.4 * (1 - progress). Use a denser start and steeper
+    // decay so the effect is more visible at entry but does not linger.
+    const squared = remaining * remaining;
+    const fourth = squared * squared;
+    const decay = fourth * fourth;
+    return @intFromFloat(@floor(400.0 * decay));
+}
+
+fn transitionGlitchReplacement(frame: u64, row: u16, col: u16) []const u8 {
+    return glitch_chars[transitionGlitchHash(frame + 17, row, col) % glitch_chars.len];
+}
+
+fn transitionGlitchHash(frame: u64, row: u16, col: u16) usize {
+    const index = @as(u32, row) *% 4099 + @as(u32, col);
+    return glitchHash(frame, index);
 }
 
 fn applySweepTransition(surface: *chasen.Surface, progress: f32) void {
@@ -325,4 +368,32 @@ test "fade screen transition replaces visible cell style with grayscale" {
     try std.testing.expectEqualStrings("A", cell.char.grapheme);
     try std.testing.expect(cell.style.fg.eql(.{ .index = 232 }));
     try std.testing.expect(!cell.style.bold);
+}
+
+test "glitch screen transition probability decreases with progress" {
+    try std.testing.expectEqual(@as(u16, 400), transitionGlitchThreshold(0.0));
+    try std.testing.expectEqual(@as(u16, 1), transitionGlitchThreshold(0.5));
+    try std.testing.expectEqual(@as(u16, 0), transitionGlitchThreshold(1.0));
+}
+
+test "glitch screen transition replaces matching visible cells" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(8, 1);
+    defer ts.deinit();
+
+    _ = ts.surface.borrowTextAt(0, 0, "ABCDEFGH", .{ .bold = true });
+    applyScreenTransition(&ts.surface, anim.Transition{
+        .kind = .glitch,
+        .frame = 0,
+        .max_frame = 10,
+    });
+
+    var replaced = false;
+    var col: u16 = 0;
+    while (col < 8) : (col += 1) {
+        const expected = "ABCDEFGH"[col .. col + 1];
+        const actual = ts.surface.readCell(col, 0).?.char.grapheme;
+        if (!std.mem.eql(u8, expected, actual)) replaced = true;
+    }
+    try std.testing.expect(replaced);
 }
