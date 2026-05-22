@@ -66,6 +66,7 @@ pub fn applyScreenTransition(surface: *chasen.Surface, transition: anim.Transiti
         .lines => applyLinesTransition(surface, transition.progress(), false),
         .lines_cross => applyLinesTransition(surface, transition.progress(), true),
         .sweep => applySweepTransition(surface, transition.progress()),
+        .wipe => applyWipeTransition(surface, transition.progress()),
         else => {},
     }
 }
@@ -243,6 +244,21 @@ fn clearCell(surface: *chasen.Surface, col: u16, row: u16) void {
 fn clearRowRange(surface: *chasen.Surface, row: u16, col: u16, width: u16) void {
     if (width == 0) return;
     surface.clear(.{ .col = col, .row = row, .width = width, .height = 1 });
+}
+
+fn applyWipeTransition(surface: *chasen.Surface, progress: f32) void {
+    const size = surface.size();
+    if (size.width == 0 or size.height == 0) return;
+
+    const visible_width: u16 = @intFromFloat(@floor(anim.ease.clamp01(progress) * @as(f32, @floatFromInt(size.width))));
+    if (visible_width >= size.width) return;
+
+    surface.clear(.{
+        .col = visible_width,
+        .row = 0,
+        .width = size.width - visible_width,
+        .height = size.height,
+    });
 }
 
 fn applySweepTransition(surface: *chasen.Surface, progress: f32) void {
@@ -568,4 +584,22 @@ test "lines-cross screen transition alternates row direction" {
     try std.testing.expectEqualStrings("B", ts.surface.readCell(1, 0).?.char.grapheme);
     try std.testing.expectEqualStrings("D", ts.surface.readCell(0, 1).?.char.grapheme);
     try std.testing.expectEqualStrings(" ", ts.surface.readCell(1, 1).?.char.grapheme);
+}
+
+test "wipe screen transition clears unrevealed right side" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(4, 1);
+    defer ts.deinit();
+
+    _ = ts.surface.borrowTextAt(0, 0, "ABCD", .{});
+    applyScreenTransition(&ts.surface, anim.Transition{
+        .kind = .wipe,
+        .frame = 50,
+        .max_frame = 100,
+    });
+
+    try std.testing.expectEqualStrings("A", ts.surface.readCell(0, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("B", ts.surface.readCell(1, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings(" ", ts.surface.readCell(2, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings(" ", ts.surface.readCell(3, 0).?.char.grapheme);
 }

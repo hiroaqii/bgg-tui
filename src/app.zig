@@ -32,6 +32,7 @@ const screen_transition_frames: u64 = 84;
 const dissolve_transition_frames: u64 = 60;
 const glitch_transition_frames: u64 = 192;
 const lines_transition_frames: u64 = 90;
+const wipe_transition_frames: u64 = 90;
 
 // List screens follow the Go version's vertical rhythm:
 // row 0 title, row 1 blank, row 2 position, row 3 blank, row 4 list body.
@@ -3334,8 +3335,9 @@ fn screenTransitionKind(value: []const u8) anim.TransitionKind {
     if (std.mem.eql(u8, value, "lines")) return .lines;
     if (std.mem.eql(u8, value, "lines-cross")) return .lines_cross;
     if (std.mem.eql(u8, value, "sweep")) return .sweep;
+    if (std.mem.eql(u8, value, "wipe")) return .wipe;
     // Other configured transition names are preserved for settings/config
-    // parity, but this slice only implements dissolve, fade, glitch, lines, lines-cross, and sweep. Keep unsupported names
+    // parity, but this slice only implements dissolve, fade, glitch, lines, lines-cross, sweep, and wipe. Keep unsupported names
     // as no-op until their renderer is added.
     return .none;
 }
@@ -3346,7 +3348,7 @@ fn screenTransitionKindForConfig(value: []const u8, seed: u64) anim.TransitionKi
 }
 
 fn randomScreenTransitionKind(seed: u64) anim.TransitionKind {
-    const candidates = [_]anim.TransitionKind{ .fade, .glitch, .dissolve, .sweep, .lines, .lines_cross };
+    const candidates = [_]anim.TransitionKind{ .fade, .glitch, .dissolve, .sweep, .wipe, .lines, .lines_cross };
     return candidates[transitionChoiceHash(seed) % candidates.len];
 }
 
@@ -3368,6 +3370,7 @@ fn screenTransitionFrames(kind: anim.TransitionKind) u64 {
         .dissolve => dissolve_transition_frames,
         .glitch => glitch_transition_frames,
         .lines, .lines_cross => lines_transition_frames,
+        .wipe => wipe_transition_frames,
         else => screen_transition_frames,
     };
 }
@@ -3423,7 +3426,7 @@ fn parseSettingsWidth(text: []const u8) !u16 {
 }
 
 const color_theme_values = [_][]const u8{ "default", "blue", "orange", "mono", "matcha" };
-const transition_values = [_][]const u8{ "none", "fade", "glitch", "dissolve", "sweep", "lines", "lines-cross", "random" };
+const transition_values = [_][]const u8{ "none", "fade", "glitch", "dissolve", "sweep", "wipe", "lines", "lines-cross", "random" };
 const selection_values = [_][]const u8{ "none", "invert", "wave", "blink", "glitch", "scan" };
 const border_style_values = [_][]const u8{ "none", "rounded", "thick", "double", "block", "dots" };
 const list_density_values = [_][]const u8{ "compact", "normal", "comfortable", "relaxed" };
@@ -3483,6 +3486,7 @@ test "screen transition kind only enables implemented effects" {
     try std.testing.expectEqual(anim.TransitionKind.lines, screenTransitionKind("lines"));
     try std.testing.expectEqual(anim.TransitionKind.lines_cross, screenTransitionKind("lines-cross"));
     try std.testing.expectEqual(anim.TransitionKind.sweep, screenTransitionKind("sweep"));
+    try std.testing.expectEqual(anim.TransitionKind.wipe, screenTransitionKind("wipe"));
     try std.testing.expectEqual(anim.TransitionKind.none, screenTransitionKind("random"));
 }
 
@@ -3491,6 +3495,7 @@ test "random screen transition resolves to implemented effects" {
     var saw_glitch = false;
     var saw_dissolve = false;
     var saw_sweep = false;
+    var saw_wipe = false;
     var saw_lines = false;
     var saw_lines_cross = false;
 
@@ -3501,6 +3506,7 @@ test "random screen transition resolves to implemented effects" {
             .glitch => saw_glitch = true,
             .dissolve => saw_dissolve = true,
             .sweep => saw_sweep = true,
+            .wipe => saw_wipe = true,
             .lines => saw_lines = true,
             .lines_cross => saw_lines_cross = true,
             else => return error.UnexpectedTransitionKind,
@@ -3511,6 +3517,7 @@ test "random screen transition resolves to implemented effects" {
     try std.testing.expect(saw_glitch);
     try std.testing.expect(saw_dissolve);
     try std.testing.expect(saw_sweep);
+    try std.testing.expect(saw_wipe);
     try std.testing.expect(saw_lines);
     try std.testing.expect(saw_lines_cross);
 }
@@ -3522,6 +3529,7 @@ test "screen transition frame counts can differ by effect" {
     try std.testing.expectEqual(@as(u64, 192), screenTransitionFrames(.glitch));
     try std.testing.expectEqual(@as(u64, 90), screenTransitionFrames(.lines));
     try std.testing.expectEqual(@as(u64, 90), screenTransitionFrames(.lines_cross));
+    try std.testing.expectEqual(@as(u64, 90), screenTransitionFrames(.wipe));
 }
 
 test "screen titles match status labels" {
