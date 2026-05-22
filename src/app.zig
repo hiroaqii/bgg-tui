@@ -303,7 +303,7 @@ pub const App = struct {
             },
             .search_filter_clear => try self.clearSearchFilter(),
             .search_sort_toggle => try self.toggleSearchSort(),
-            .search_results_loaded => |result| try self.finishSearch(result),
+            .search_results_loaded => |result| try self.finishSearch(ctx, result),
             .search_list => |list_msg| switch (list_msg) {
                 .move_prev, .move_next => self.search.update(list_msg),
                 .activate => |index| {
@@ -1519,7 +1519,7 @@ pub const App = struct {
         errdefer ctx.allocator().free(task.query);
 
         self.search.setLoading(self.allocator.?);
-        self.enterPreparedScreen(.search_results, ctx);
+        self.switchScreenWithoutTransition(.search_results);
         self.beginLoadingMotion(ctx);
         ctx.spawnWith(task, SearchTask.run) catch |err| {
             self.search.setFailed(self.allocator.?, "Could not start search task");
@@ -1527,7 +1527,7 @@ pub const App = struct {
         };
     }
 
-    fn finishSearch(self: *App, task_result: SearchTaskResult) !void {
+    fn finishSearch(self: *App, ctx: *chasen.Ctx(Msg), task_result: SearchTaskResult) !void {
         if (task_result.request_id != self.search_request_id) {
             switch (task_result.result) {
                 .ok => |results| bgg_xml.freeSearchResults(self.allocator.?, results),
@@ -1539,6 +1539,7 @@ pub const App = struct {
         switch (task_result.result) {
             .ok => |results| {
                 try self.search.setLoaded(self.allocator.?, results);
+                self.startContentTransitionIfVisible(ctx, .search_results);
             },
             .failed => |message| self.search.setFailed(self.allocator.?, message),
         }
@@ -4736,6 +4737,79 @@ test "game detail load completion stores hidden result without transition" {
     try std.testing.expect(!tc.ctx.frame_requested);
 }
 
+test "search loading enters results without screen transition" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    try app.showScreen(.settings, &tc.ctx);
+    try std.testing.expect(app.hasActiveScreenTransition());
+
+    try app.search_input.?.update(.clear);
+    try app.search_input.?.update(.{ .insert = 'r' });
+    try app.search_input.?.update(.{ .insert = 'o' });
+    try app.search_input.?.update(.{ .insert = 'o' });
+    try app.search_input.?.update(.{ .insert = 't' });
+    tc.resetTransient();
+    try app.startSearch(&tc.ctx);
+    defer {
+        const task: *SearchTask = @ptrCast(@alignCast(tc.ctx.pendingTaskWithSlice()[0].ctx));
+        std.testing.allocator.free(task.token);
+        std.testing.allocator.free(task.query);
+        std.testing.allocator.destroy(task);
+    }
+
+    try std.testing.expectEqual(Screen.search_results, app.screen);
+    try std.testing.expect(app.search.load_state == .loading);
+    try std.testing.expect(!app.hasActiveScreenTransition());
+    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expectEqual(@as(u8, 1), tc.ctx.pending_tasks_with_len);
+}
+
+test "search completion starts content transition when results are visible" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
+    results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+
+    app.screen = .search_results;
+    app.search_request_id = 7;
+    tc.resetTransient();
+    try app.finishSearch(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = results } });
+
+    try std.testing.expect(app.search.load_state == .loaded);
+    try std.testing.expect(app.hasActiveScreenTransition());
+    try std.testing.expectEqual(Screen.search_results, app.transition_from_screen.?);
+    try std.testing.expectEqual(Screen.search_results, app.transition_to_screen.?);
+    try std.testing.expect(tc.ctx.frame_requested);
+}
+
+test "search completion stores hidden result without transition" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
+    results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+
+    app.screen = .main_menu;
+    app.search_request_id = 7;
+    tc.resetTransient();
+    try app.finishSearch(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = results } });
+
+    try std.testing.expect(app.search.load_state == .loaded);
+    try std.testing.expect(!app.hasActiveScreenTransition());
+    try std.testing.expect(!tc.ctx.frame_requested);
+}
+
 test "settings interface cycle wraps unknown values to first supported value" {
     var app = App.create(.{ .interface = .{ .color_theme = "custom" } }, .{});
 
@@ -5040,11 +5114,12 @@ test "successful search completion loads result list" {
     app.allocator = std.testing.allocator;
     defer app.deinitOwnedState();
 
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
     app.search_request_id = 7;
     const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
     results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
 
-    try app.finishSearch(.{
+    try app.finishSearch(&tc.ctx, .{
         .request_id = 7,
         .result = .{ .ok = results },
     });
@@ -5061,8 +5136,9 @@ test "failed search completion clears previous loaded results" {
     results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Old Result") };
     try app.search.setLoaded(std.testing.allocator, results);
 
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
     app.search_request_id = 3;
-    try app.finishSearch(.{
+    try app.finishSearch(&tc.ctx, .{
         .request_id = 3,
         .result = .{ .failed = "rate limited" },
     });
@@ -5096,10 +5172,11 @@ test "outdated search results do not replace current search state" {
 
     app.search_request_id = 2;
 
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
     const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
     results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Old Result") };
 
-    try app.finishSearch(.{
+    try app.finishSearch(&tc.ctx, .{
         .request_id = 1,
         .result = .{ .ok = results },
     });
@@ -5125,7 +5202,7 @@ test "invalid search submit invalidates in-flight search results" {
     const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
     results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Old Result") };
 
-    try app.finishSearch(.{
+    try app.finishSearch(&tc.ctx, .{
         .request_id = 1,
         .result = .{ .ok = results },
     });
