@@ -116,21 +116,7 @@ pub const App = struct {
         hot_filter_paste: []const u8,
         hot_filter_clear,
         search: SearchMsg,
-        collection_username_input: ui.TextInput.Msg,
-        collection_username_paste: []const u8,
-        collection_filter_start,
-        collection_filter_input: ui.TextInput.Msg,
-        collection_filter_paste: []const u8,
-        collection_filter_clear,
-        collection_change_user,
-        collection_refresh,
-        collection_status_open,
-        collection_status_move_prev,
-        collection_status_move_next,
-        collection_status_toggle,
-        collection_status_close,
-        collection_items_loaded: CollectionTaskResult,
-        collection_list: ui.List.Msg,
+        collection: CollectionMsg,
         game_detail_loaded: GameDetailTaskResult,
         game_detail_move_prev,
         game_detail_move_next,
@@ -217,46 +203,7 @@ pub const App = struct {
             },
             .hot_filter_clear => try self.clearHotFilter(),
             .search => |search_msg| try self.updateSearch(search_msg, ctx),
-            .collection_username_input => |input_msg| {
-                if (input_msg == .submit) {
-                    try self.startCollectionLoad(ctx);
-                } else if (self.collection.username_input) |*input| {
-                    try input.update(input_msg);
-                }
-            },
-            .collection_username_paste => |text| {
-                if (self.collection.username_input) |*input| {
-                    try insertPastedCodepoints(input, text);
-                }
-            },
-            .collection_filter_start => try self.startCollectionFilter(),
-            .collection_filter_input => |input_msg| {
-                if (input_msg != .submit) {
-                    if (self.collection.filter_input) |*input| try input.update(input_msg);
-                    try self.applyCollectionFilter();
-                }
-            },
-            .collection_filter_paste => |text| {
-                if (self.collection.filter_input) |*input| {
-                    try insertPastedCodepoints(input, text);
-                    try self.applyCollectionFilter();
-                }
-            },
-            .collection_filter_clear => try self.clearCollectionFilter(),
-            .collection_change_user => try self.changeCollectionUser(),
-            .collection_refresh => try self.refreshCollection(ctx),
-            .collection_status_open => self.openCollectionStatusPicker(),
-            .collection_status_move_prev => self.moveCollectionStatusCursor(.prev),
-            .collection_status_move_next => self.moveCollectionStatusCursor(.next),
-            .collection_status_toggle => try self.toggleCollectionStatus(ctx),
-            .collection_status_close => self.collection.status_picker = false,
-            .collection_items_loaded => |result| try self.finishCollectionLoad(ctx, result),
-            .collection_list => |list_msg| switch (list_msg) {
-                .move_prev, .move_next => self.collection.update(list_msg),
-                .activate => |index| {
-                    if (self.collection.sourceIndex(index)) |source_index| try self.openCollectionItem(source_index, ctx);
-                },
-            },
+            .collection => |collection_msg| try self.updateCollection(collection_msg, ctx),
             .game_detail_loaded => |result| try self.finishGameDetail(ctx, result),
             .game_detail_move_prev => self.game_detail.moveUp(),
             .game_detail_move_next => self.game_detail.moveDown(self.game_detail.visible_height),
@@ -474,10 +421,10 @@ pub const App = struct {
             if (self.collection.status_picker) {
                 switch (event) {
                     .key_press => |key| {
-                        if (key.matches(chasen.Key.escape, .{})) return .collection_status_close;
-                        if (key.matches(chasen.Key.up, .{}) or key.codepoint == 'k') return .collection_status_move_prev;
-                        if (key.matches(chasen.Key.down, .{}) or key.codepoint == 'j') return .collection_status_move_next;
-                        if (key.matches(chasen.Key.enter, .{})) return .collection_status_toggle;
+                        if (key.matches(chasen.Key.escape, .{})) return .{ .collection = .status_close };
+                        if (key.matches(chasen.Key.up, .{}) or key.codepoint == 'k') return .{ .collection = .status_move_prev };
+                        if (key.matches(chasen.Key.down, .{}) or key.codepoint == 'j') return .{ .collection = .status_move_next };
+                        if (key.matches(chasen.Key.enter, .{})) return .{ .collection = .status_toggle };
                     },
                     else => {},
                 }
@@ -486,41 +433,41 @@ pub const App = struct {
             if (self.collection.filter_active) {
                 switch (event) {
                     .key_press => |key| {
-                        if (key.matches(chasen.Key.escape, .{})) return .collection_filter_clear;
+                        if (key.matches(chasen.Key.escape, .{})) return .{ .collection = .filter_clear };
                         if (key.matches(chasen.Key.enter, .{})) {
-                            if (self.collection.handleEvent(event)) |msg| return .{ .collection_list = msg };
+                            if (self.collection.handleEvent(event)) |msg| return .{ .collection = .{ .list = msg } };
                             return null;
                         }
                     },
-                    .paste => |text| return .{ .collection_filter_paste = text },
+                    .paste => |text| return .{ .collection = .{ .filter_paste = text } },
                     else => {},
                 }
                 if (self.collection.filter_input) |*input| {
-                    if (input.handleEvent(event)) |msg| return .{ .collection_filter_input = msg };
+                    if (input.handleEvent(event)) |msg| return .{ .collection = .{ .filter_input = msg } };
                 }
-                if (self.collection.handleEvent(event)) |msg| return .{ .collection_list = msg };
+                if (self.collection.handleEvent(event)) |msg| return .{ .collection = .{ .list = msg } };
                 return null;
             }
             switch (event) {
                 .key_press => |key| {
                     if (self.collection.load_state == .loaded) {
-                        if (key.codepoint == 's') return .collection_status_open;
-                        if (key.codepoint == '/') return .collection_filter_start;
-                        if (key.codepoint == 'u') return .collection_change_user;
-                        if (key.codepoint == 'r') return .collection_refresh;
+                        if (key.codepoint == 's') return .{ .collection = .status_open };
+                        if (key.codepoint == '/') return .{ .collection = .filter_start };
+                        if (key.codepoint == 'u') return .{ .collection = .change_user };
+                        if (key.codepoint == 'r') return .{ .collection = .refresh };
                         if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'm') return .{ .show_screen = .main_menu };
                         if (key.codepoint == 'q') return .quit;
                     } else if (key.matches(chasen.Key.escape, .{})) {
                         return .{ .show_screen = .main_menu };
                     }
                 },
-                .paste => |text| if (self.collection.load_state != .loaded) return .{ .collection_username_paste = text },
+                .paste => |text| if (self.collection.load_state != .loaded) return .{ .collection = .{ .username_paste = text } },
                 else => {},
             }
             if (self.collection.load_state == .loaded) {
-                if (self.collection.handleEvent(event)) |msg| return .{ .collection_list = msg };
+                if (self.collection.handleEvent(event)) |msg| return .{ .collection = .{ .list = msg } };
             } else if (self.collection.username_input) |*input| {
-                if (input.handleEvent(event)) |msg| return .{ .collection_username_input = msg };
+                if (input.handleEvent(event)) |msg| return .{ .collection = .{ .username_input = msg } };
             }
             return null;
         }
@@ -1286,6 +1233,51 @@ pub const App = struct {
 
     fn toggleSearchSort(self: *App) !void {
         try self.search.toggleSort(self.allocator.?);
+    }
+
+    fn updateCollection(self: *App, msg: CollectionMsg, ctx: *chasen.Ctx(Msg)) !void {
+        switch (msg) {
+            .username_input => |input_msg| {
+                if (input_msg == .submit) {
+                    try self.startCollectionLoad(ctx);
+                } else if (self.collection.username_input) |*input| {
+                    try input.update(input_msg);
+                }
+            },
+            .username_paste => |text| {
+                if (self.collection.username_input) |*input| {
+                    try insertPastedCodepoints(input, text);
+                }
+            },
+            .filter_start => try self.startCollectionFilter(),
+            .filter_input => |input_msg| {
+                if (input_msg != .submit) {
+                    if (self.collection.filter_input) |*input| try input.update(input_msg);
+                    try self.applyCollectionFilter();
+                }
+            },
+            .filter_paste => |text| {
+                if (self.collection.filter_input) |*input| {
+                    try insertPastedCodepoints(input, text);
+                    try self.applyCollectionFilter();
+                }
+            },
+            .filter_clear => try self.clearCollectionFilter(),
+            .change_user => try self.changeCollectionUser(),
+            .refresh => try self.refreshCollection(ctx),
+            .status_open => self.openCollectionStatusPicker(),
+            .status_move_prev => self.moveCollectionStatusCursor(.prev),
+            .status_move_next => self.moveCollectionStatusCursor(.next),
+            .status_toggle => try self.toggleCollectionStatus(ctx),
+            .status_close => self.collection.status_picker = false,
+            .items_loaded => |result| try self.finishCollectionLoad(ctx, result),
+            .list => |list_msg| switch (list_msg) {
+                .move_prev, .move_next => self.collection.update(list_msg),
+                .activate => |index| {
+                    if (self.collection.sourceIndex(index)) |source_index| try self.openCollectionItem(source_index, ctx);
+                },
+            },
+        }
     }
 
     fn startCollectionFilter(self: *App) !void {
@@ -2748,6 +2740,24 @@ const CollectionTaskResult = struct {
     result: CollectionResult,
 };
 
+const CollectionMsg = union(enum) {
+    username_input: ui.TextInput.Msg,
+    username_paste: []const u8,
+    filter_start,
+    filter_input: ui.TextInput.Msg,
+    filter_paste: []const u8,
+    filter_clear,
+    change_user,
+    refresh,
+    status_open,
+    status_move_prev,
+    status_move_next,
+    status_toggle,
+    status_close,
+    items_loaded: CollectionTaskResult,
+    list: ui.List.Msg,
+};
+
 const GameDetailResult = union(enum) {
     ok: []bgg_model.Game,
     failed: []const u8,
@@ -2876,10 +2886,10 @@ const CollectionTask = struct {
             allocator.destroy(task);
         }
 
-        return .{ .collection_items_loaded = .{
+        return .{ .collection = .{ .items_loaded = .{
             .request_id = task.request_id,
             .result = loadCollectionItems(allocator, io, task.token, task.username) catch |err| .{ .failed = @errorName(err) },
-        } };
+        } } };
     }
 };
 
@@ -3892,8 +3902,8 @@ test "loaded collection receives activation on collection screen" {
     try app.collection.setLoaded(std.testing.allocator, items, 0);
 
     const msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
-    try std.testing.expect(msg == .collection_list);
-    try std.testing.expectEqual(ui.List.Msg{ .activate = 0 }, msg.collection_list);
+    try std.testing.expect(msg == .collection);
+    try std.testing.expectEqual(ui.List.Msg{ .activate = 0 }, msg.collection.list);
 }
 
 test "loaded collection slash starts filter" {
@@ -3907,7 +3917,8 @@ test "loaded collection slash starts filter" {
     try app.collection.setLoaded(std.testing.allocator, items, 0);
 
     const msg = app.handleEvent(.{ .key_press = .{ .codepoint = '/' } }).?;
-    try std.testing.expect(msg == .collection_filter_start);
+    try std.testing.expect(msg == .collection);
+    try std.testing.expect(msg.collection == .filter_start);
 }
 
 test "loaded collection handles change user and refresh shortcuts" {
@@ -3921,10 +3932,12 @@ test "loaded collection handles change user and refresh shortcuts" {
     try app.collection.setLoaded(std.testing.allocator, items, 0);
 
     const user_msg = app.handleEvent(.{ .key_press = .{ .codepoint = 'u' } }).?;
-    try std.testing.expect(user_msg == .collection_change_user);
+    try std.testing.expect(user_msg == .collection);
+    try std.testing.expect(user_msg.collection == .change_user);
 
     const refresh_msg = app.handleEvent(.{ .key_press = .{ .codepoint = 'r' } }).?;
-    try std.testing.expect(refresh_msg == .collection_refresh);
+    try std.testing.expect(refresh_msg == .collection);
+    try std.testing.expect(refresh_msg.collection == .refresh);
 }
 
 test "loaded collection s opens status picker" {
@@ -3938,7 +3951,8 @@ test "loaded collection s opens status picker" {
     try app.collection.setLoaded(std.testing.allocator, items, 0);
 
     const msg = app.handleEvent(.{ .key_press = .{ .codepoint = 's' } }).?;
-    try std.testing.expect(msg == .collection_status_open);
+    try std.testing.expect(msg == .collection);
+    try std.testing.expect(msg.collection == .status_open);
 }
 
 test "collection status picker toggles multiple statuses without request" {
