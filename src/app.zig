@@ -86,9 +86,6 @@ pub const App = struct {
     search_filter_input: ?ui.TextInput = null,
     collection_username_input: ?ui.TextInput = null,
     collection_filter_input: ?ui.TextInput = null,
-    settings_token_input: ?ui.PasswordInput = null,
-    settings_username_input: ?ui.TextInput = null,
-    settings_width_input: ?ui.TextInput = null,
     owned_token: ?[]u8 = null,
     owned_default_username: ?[]u8 = null,
     hot_games: HotGamesState = .{},
@@ -231,15 +228,7 @@ pub const App = struct {
         self.collection_filter_input = try ui.TextInput.init(ctx.allocator(), .{
             .placeholder = "Filter collection",
         });
-        self.settings_token_input = try ui.PasswordInput.init(ctx.allocator(), .{
-            .placeholder = "Enter API token",
-        });
-        self.settings_username_input = try ui.TextInput.init(ctx.allocator(), .{
-            .placeholder = "Enter BGG username",
-        });
-        self.settings_width_input = try ui.TextInput.init(ctx.allocator(), .{
-            .placeholder = "Enter width (20-240)",
-        });
+        try self.settings.initInputs(ctx.allocator(), self.config.collection.default_username);
         self.requestMotionFrameIfNeeded(ctx);
     }
 
@@ -376,12 +365,12 @@ pub const App = struct {
             .settings_token_input => |input_msg| {
                 if (input_msg == .submit) {
                     try self.submitSettingsToken(ctx);
-                } else if (self.settings_token_input) |*input| {
+                } else if (self.settings.token_input) |*input| {
                     try input.update(input_msg);
                 }
             },
             .settings_token_paste => |text| {
-                if (self.settings_token_input) |*input| {
+                if (self.settings.token_input) |*input| {
                     try insertPastedCodepoints(input, text);
                 }
             },
@@ -391,12 +380,12 @@ pub const App = struct {
             .settings_username_input => |input_msg| {
                 if (input_msg == .submit) {
                     try self.submitSettingsUsername(ctx);
-                } else if (self.settings_username_input) |*input| {
+                } else if (self.settings.username_input) |*input| {
                     try input.update(input_msg);
                 }
             },
             .settings_username_paste => |text| {
-                if (self.settings_username_input) |*input| {
+                if (self.settings.username_input) |*input| {
                     try insertPastedCodepoints(input, text);
                 }
             },
@@ -406,12 +395,12 @@ pub const App = struct {
             .settings_width_input => |input_msg| {
                 if (input_msg == .submit) {
                     try self.submitSettingsWidth(ctx);
-                } else if (self.settings_width_input) |*input| {
+                } else if (self.settings.width_input) |*input| {
                     try input.update(input_msg);
                 }
             },
             .settings_width_paste => |text| {
-                if (self.settings_width_input) |*input| {
+                if (self.settings.width_input) |*input| {
                     try insertPastedCodepoints(input, text);
                 }
             },
@@ -689,13 +678,13 @@ pub const App = struct {
                     else => {},
                 }
                 switch (field) {
-                    .token => if (self.settings_token_input) |*input| {
+                    .token => if (self.settings.token_input) |*input| {
                         if (input.handleEvent(event)) |msg| return .{ .settings_token_input = msg };
                     },
-                    .username => if (self.settings_username_input) |*input| {
+                    .username => if (self.settings.username_input) |*input| {
                         if (input.handleEvent(event)) |msg| return .{ .settings_username_input = msg };
                     },
-                    .list_width, .thread_width, .detail_width => if (self.settings_width_input) |*input| {
+                    .list_width, .thread_width, .detail_width => if (self.settings.width_input) |*input| {
                         if (input.handleEvent(event)) |msg| return .{ .settings_width_input = msg };
                     },
                 }
@@ -837,10 +826,7 @@ pub const App = struct {
 
     fn viewSettings(self: *const App, sfc: *chasen.Surface) !void {
         var area = centeredSurface(sfc, screens.settings.required_size);
-        const token_input = if (self.settings_token_input) |*input| input else null;
-        const username_input = if (self.settings_username_input) |*input| input else null;
-        const width_input = if (self.settings_width_input) |*input| input else null;
-        try self.settings.view(&area, self.config, self.config_path, self.theme(), self.config.interface.selection, self.animation_frame, token_input, username_input, width_input);
+        try self.settings.view(&area, self.config, self.config_path, self.theme(), self.config.interface.selection, self.animation_frame);
     }
 
     fn viewHotGames(self: *const App, sfc: *chasen.Surface) !void {
@@ -1151,14 +1137,14 @@ pub const App = struct {
     }
 
     fn startSettingsTokenEdit(self: *App) !void {
-        if (self.settings_token_input) |*input| {
+        if (self.settings.token_input) |*input| {
             try input.update(.clear);
         }
         self.settings.startEdit(.token);
     }
 
     fn submitSettingsToken(self: *App, ctx: *chasen.Ctx(Msg)) !void {
-        const input = if (self.settings_token_input) |*input| input else return;
+        const input = if (self.settings.token_input) |*input| input else return;
         const token = std.mem.trim(u8, input.text(), " \t\r\n");
         if (token.len > 0) {
             if (self.owned_token) |old| self.allocator.?.free(old);
@@ -1171,14 +1157,14 @@ pub const App = struct {
     }
 
     fn cancelSettingsTokenEdit(self: *App) void {
-        if (self.settings_token_input) |*input| {
+        if (self.settings.token_input) |*input| {
             input.update(.clear) catch {};
         }
         self.settings.stopEditing();
     }
 
     fn startSettingsUsernameEdit(self: *App) !void {
-        if (self.settings_username_input) |*input| {
+        if (self.settings.username_input) |*input| {
             try input.update(.clear);
             if (self.config.collection.default_username) |username| {
                 try insertPastedCodepoints(input, username);
@@ -1188,7 +1174,7 @@ pub const App = struct {
     }
 
     fn submitSettingsUsername(self: *App, ctx: *chasen.Ctx(Msg)) !void {
-        const input = if (self.settings_username_input) |*input| input else return;
+        const input = if (self.settings.username_input) |*input| input else return;
         const username = std.mem.trim(u8, input.text(), " \t\r\n");
         if (username.len == 0) {
             if (self.owned_default_username) |old| self.allocator.?.free(old);
@@ -1206,14 +1192,14 @@ pub const App = struct {
     }
 
     fn cancelSettingsUsernameEdit(self: *App) void {
-        if (self.settings_username_input) |*input| {
+        if (self.settings.username_input) |*input| {
             input.update(.clear) catch {};
         }
         self.settings.stopEditing();
     }
 
     fn startSettingsWidthEdit(self: *App, field: screens.settings.EditField) !void {
-        if (self.settings_width_input) |*input| {
+        if (self.settings.width_input) |*input| {
             try input.update(.clear);
             try inputWidthValue(input, self.config, field);
         }
@@ -1222,7 +1208,7 @@ pub const App = struct {
 
     fn submitSettingsWidth(self: *App, ctx: *chasen.Ctx(Msg)) !void {
         const field = self.settings.editing orelse return;
-        const input = if (self.settings_width_input) |*input| input else return;
+        const input = if (self.settings.width_input) |*input| input else return;
         const value = parseSettingsWidth(input.text()) catch return;
         switch (field) {
             .list_width => self.config.display.list_width = value,
@@ -1236,7 +1222,7 @@ pub const App = struct {
     }
 
     fn cancelSettingsWidthEdit(self: *App) void {
-        if (self.settings_width_input) |*input| {
+        if (self.settings.width_input) |*input| {
             input.update(.clear) catch {};
         }
         self.settings.stopEditing();
@@ -1296,18 +1282,7 @@ pub const App = struct {
             input.deinit();
             self.collection_filter_input = null;
         }
-        if (self.settings_token_input) |*input| {
-            input.deinit();
-            self.settings_token_input = null;
-        }
-        if (self.settings_username_input) |*input| {
-            input.deinit();
-            self.settings_username_input = null;
-        }
-        if (self.settings_width_input) |*input| {
-            input.deinit();
-            self.settings_width_input = null;
-        }
+        self.settings.deinitInputs();
         if (self.owned_token) |token| {
             self.allocator.?.free(token);
             self.owned_token = null;
@@ -4281,7 +4256,7 @@ test "settings token edit saves token and stays on settings" {
     var app = App.create(.{ .api = .{ .token = "old-token" } }, .{});
     app.allocator = std.testing.allocator;
     app.screen = .settings;
-    app.settings_token_input = try ui.PasswordInput.init(std.testing.allocator, .{ .value = "  new-token  " });
+    app.settings.token_input = try ui.PasswordInput.init(std.testing.allocator, .{ .value = "  new-token  " });
     app.settings.startEdit(.token);
     defer app.deinitOwnedState();
 
@@ -4291,7 +4266,7 @@ test "settings token edit saves token and stays on settings" {
     try std.testing.expectEqual(Screen.settings, app.screen);
     try std.testing.expect(app.settings.editing == null);
     try std.testing.expectEqualStrings("new-token", app.config.apiClientToken().?);
-    try std.testing.expectEqualStrings("", app.settings_token_input.?.text());
+    try std.testing.expectEqualStrings("", app.settings.token_input.?.text());
 }
 
 test "settings token edit saves config when path is available" {
@@ -4299,7 +4274,7 @@ test "settings token edit saves config when path is available" {
 
     var app = App.create(.{}, .{ .config_path = path });
     app.allocator = std.testing.allocator;
-    app.settings_token_input = try ui.PasswordInput.init(std.testing.allocator, .{ .value = "settings-token" });
+    app.settings.token_input = try ui.PasswordInput.init(std.testing.allocator, .{ .value = "settings-token" });
     app.settings.startEdit(.token);
     defer app.deinitOwnedState();
 
@@ -4320,7 +4295,7 @@ test "settings token edit saves config when path is available" {
 test "settings token edit cancel clears input without changing token" {
     var app = App.create(.{ .api = .{ .token = "old-token" } }, .{});
     app.allocator = std.testing.allocator;
-    app.settings_token_input = try ui.PasswordInput.init(std.testing.allocator, .{ .value = "new-token" });
+    app.settings.token_input = try ui.PasswordInput.init(std.testing.allocator, .{ .value = "new-token" });
     app.settings.startEdit(.token);
     defer app.deinitOwnedState();
 
@@ -4328,14 +4303,14 @@ test "settings token edit cancel clears input without changing token" {
 
     try std.testing.expect(app.settings.editing == null);
     try std.testing.expectEqualStrings("old-token", app.config.apiClientToken().?);
-    try std.testing.expectEqualStrings("", app.settings_token_input.?.text());
+    try std.testing.expectEqualStrings("", app.settings.token_input.?.text());
 }
 
 test "settings username edit saves username and stays on settings" {
     var app = App.create(.{ .collection = .{ .default_username = "old-user" } }, .{});
     app.allocator = std.testing.allocator;
     app.screen = .settings;
-    app.settings_username_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "  new-user  " });
+    app.settings.username_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "  new-user  " });
     app.settings.startEdit(.username);
     defer app.deinitOwnedState();
 
@@ -4345,13 +4320,13 @@ test "settings username edit saves username and stays on settings" {
     try std.testing.expectEqual(Screen.settings, app.screen);
     try std.testing.expect(app.settings.editing == null);
     try std.testing.expectEqualStrings("new-user", app.config.collection.default_username.?);
-    try std.testing.expectEqualStrings("", app.settings_username_input.?.text());
+    try std.testing.expectEqualStrings("", app.settings.username_input.?.text());
 }
 
 test "settings username edit clears username when empty" {
     var app = App.create(.{ .collection = .{ .default_username = "old-user" } }, .{});
     app.allocator = std.testing.allocator;
-    app.settings_username_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "   " });
+    app.settings.username_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "   " });
     app.settings.startEdit(.username);
     defer app.deinitOwnedState();
 
@@ -4360,7 +4335,7 @@ test "settings username edit clears username when empty" {
 
     try std.testing.expect(app.settings.editing == null);
     try std.testing.expect(app.config.collection.default_username == null);
-    try std.testing.expectEqualStrings("", app.settings_username_input.?.text());
+    try std.testing.expectEqualStrings("", app.settings.username_input.?.text());
 }
 
 test "settings username edit saves config when path is available" {
@@ -4368,7 +4343,7 @@ test "settings username edit saves config when path is available" {
 
     var app = App.create(.{}, .{ .config_path = path });
     app.allocator = std.testing.allocator;
-    app.settings_username_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "hiro" });
+    app.settings.username_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "hiro" });
     app.settings.startEdit(.username);
     defer app.deinitOwnedState();
 
@@ -4389,7 +4364,7 @@ test "settings username edit saves config when path is available" {
 test "settings username edit cancel clears input without changing username" {
     var app = App.create(.{ .collection = .{ .default_username = "old-user" } }, .{});
     app.allocator = std.testing.allocator;
-    app.settings_username_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "new-user" });
+    app.settings.username_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "new-user" });
     app.settings.startEdit(.username);
     defer app.deinitOwnedState();
 
@@ -4397,14 +4372,14 @@ test "settings username edit cancel clears input without changing username" {
 
     try std.testing.expect(app.settings.editing == null);
     try std.testing.expectEqualStrings("old-user", app.config.collection.default_username.?);
-    try std.testing.expectEqualStrings("", app.settings_username_input.?.text());
+    try std.testing.expectEqualStrings("", app.settings.username_input.?.text());
 }
 
 test "settings width edit saves selected width and stays on settings" {
     var app = App.create(.{}, .{});
     app.allocator = std.testing.allocator;
     app.screen = .settings;
-    app.settings_width_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "120" });
+    app.settings.width_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "120" });
     app.settings.startEdit(.thread_width);
     defer app.deinitOwnedState();
 
@@ -4414,13 +4389,13 @@ test "settings width edit saves selected width and stays on settings" {
     try std.testing.expectEqual(Screen.settings, app.screen);
     try std.testing.expect(app.settings.editing == null);
     try std.testing.expectEqual(@as(u16, 120), app.config.display.thread_width);
-    try std.testing.expectEqualStrings("", app.settings_width_input.?.text());
+    try std.testing.expectEqualStrings("", app.settings.width_input.?.text());
 }
 
 test "settings width edit ignores invalid width" {
     var app = App.create(.{ .display = .{ .list_width = 40 } }, .{});
     app.allocator = std.testing.allocator;
-    app.settings_width_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "10" });
+    app.settings.width_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "10" });
     app.settings.startEdit(.list_width);
     defer app.deinitOwnedState();
 
@@ -4429,7 +4404,7 @@ test "settings width edit ignores invalid width" {
 
     try std.testing.expectEqual(@as(u16, 40), app.config.display.list_width);
     try std.testing.expectEqual(screens.settings.EditField.list_width, app.settings.editing.?);
-    try std.testing.expectEqualStrings("10", app.settings_width_input.?.text());
+    try std.testing.expectEqualStrings("10", app.settings.width_input.?.text());
 }
 
 test "settings width edit saves config when path is available" {
@@ -4437,7 +4412,7 @@ test "settings width edit saves config when path is available" {
 
     var app = App.create(.{}, .{ .config_path = path });
     app.allocator = std.testing.allocator;
-    app.settings_width_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "144" });
+    app.settings.width_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "144" });
     app.settings.startEdit(.detail_width);
     defer app.deinitOwnedState();
 
@@ -4458,7 +4433,7 @@ test "settings width edit saves config when path is available" {
 test "settings width edit cancel clears input without changing width" {
     var app = App.create(.{ .display = .{ .detail_width = 90 } }, .{});
     app.allocator = std.testing.allocator;
-    app.settings_width_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "120" });
+    app.settings.width_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "120" });
     app.settings.startEdit(.detail_width);
     defer app.deinitOwnedState();
 
@@ -4466,7 +4441,7 @@ test "settings width edit cancel clears input without changing width" {
 
     try std.testing.expect(app.settings.editing == null);
     try std.testing.expectEqual(@as(u16, 90), app.config.display.detail_width);
-    try std.testing.expectEqualStrings("", app.settings_width_input.?.text());
+    try std.testing.expectEqualStrings("", app.settings.width_input.?.text());
 }
 
 test "settings show images toggle flips display config" {

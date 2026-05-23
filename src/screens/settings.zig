@@ -61,6 +61,45 @@ pub const required_size = chasen.Size{ .width = 72, .height = 27 };
 pub const State = struct {
     list: ui.List = ui.List.init(.{ .items = itemLabels() }),
     editing: ?EditField = null,
+    token_input: ?ui.PasswordInput = null,
+    username_input: ?ui.TextInput = null,
+    width_input: ?ui.TextInput = null,
+
+    pub fn initInputs(self: *State, allocator: std.mem.Allocator, default_username: ?[]const u8) !void {
+        self.token_input = try ui.PasswordInput.init(allocator, .{
+            .placeholder = "Enter API token",
+        });
+        errdefer {
+            self.token_input.?.deinit();
+            self.token_input = null;
+        }
+        self.username_input = try ui.TextInput.init(allocator, .{
+            .placeholder = "Enter BGG username",
+            .value = default_username orelse "",
+        });
+        errdefer {
+            self.username_input.?.deinit();
+            self.username_input = null;
+        }
+        self.width_input = try ui.TextInput.init(allocator, .{
+            .placeholder = "Enter width (20-240)",
+        });
+    }
+
+    pub fn deinitInputs(self: *State) void {
+        if (self.token_input) |*input| {
+            input.deinit();
+            self.token_input = null;
+        }
+        if (self.username_input) |*input| {
+            input.deinit();
+            self.username_input = null;
+        }
+        if (self.width_input) |*input| {
+            input.deinit();
+            self.width_input = null;
+        }
+    }
 
     pub fn updateList(self: *State, msg: ui.List.Msg) void {
         self.list.update(msg);
@@ -118,9 +157,6 @@ pub const State = struct {
         theme: style_mod.Theme,
         selection: []const u8,
         animation_frame: u64,
-        token_input: ?*const ui.PasswordInput,
-        username_input: ?*const ui.TextInput,
-        width_input: ?*const ui.TextInput,
     ) !void {
         const size = surface.size();
         if (size.width == 0 or size.height == 0) return;
@@ -140,6 +176,9 @@ pub const State = struct {
             }
             if (row >= size.height) return;
 
+            const token_input = if (self.token_input) |*input| input else null;
+            const username_input = if (self.username_input) |*input| input else null;
+            const width_input = if (self.width_input) |*input| input else null;
             try drawItem(surface, row, index, item, current_section, config, config_path, theme, selection, animation_frame, self.list.focus.isFocused(index), self.editing, token_input, username_input, width_input);
             row += 1;
         }
