@@ -115,15 +115,7 @@ pub const App = struct {
         search: SearchMsg,
         collection: CollectionMsg,
         game_detail: GameDetailMsg,
-        forum_open,
-        forums_loaded: ForumListTaskResult,
-        forum_list: ui.List.Msg,
-        forum_threads_loaded: ForumThreadsTaskResult,
-        forum_thread_list: ui.List.Msg,
-        forum_back_to_detail,
-        forum_back_to_list,
-        forum_next_page,
-        forum_previous_page,
+        forum: ForumMsg,
         thread_open: usize,
         thread_loaded: ThreadTaskResult,
         thread_move_prev,
@@ -183,21 +175,7 @@ pub const App = struct {
             .search => |search_msg| try self.updateSearch(search_msg, ctx),
             .collection => |collection_msg| try self.updateCollection(collection_msg, ctx),
             .game_detail => |detail_msg| try self.updateGameDetail(detail_msg, ctx),
-            .forum_open => try self.startForumList(ctx),
-            .forums_loaded => |result| try self.finishForumList(ctx, result),
-            .forum_list => |list_msg| switch (list_msg) {
-                .move_prev, .move_next => self.forums.updateForumList(list_msg),
-                .activate => |index| try self.startForumThreads(ctx, index, 1),
-            },
-            .forum_threads_loaded => |result| try self.finishForumThreads(ctx, result),
-            .forum_thread_list => |list_msg| switch (list_msg) {
-                .move_prev, .move_next => self.forums.updateThreadList(list_msg),
-                .activate => |index| try self.startThread(ctx, index),
-            },
-            .forum_back_to_detail => try self.showScreen(.game_detail, ctx),
-            .forum_back_to_list => self.backToForumList(),
-            .forum_next_page => try self.openForumPage(ctx, self.forums.thread_page.page + 1),
-            .forum_previous_page => try self.openForumPage(ctx, self.forums.thread_page.page -| 1),
+            .forum => |forum_msg| try self.updateForum(forum_msg, ctx),
             .thread_open => |index| try self.startThread(ctx, index),
             .thread_loaded => |result| try self.finishThread(ctx, result),
             .thread_move_prev => self.thread.moveUp(),
@@ -335,7 +313,7 @@ pub const App = struct {
                     if (key.matches(chasen.Key.up, .{}) or key.codepoint == 'k') return .{ .game_detail = .move_prev };
                     if (key.matches(chasen.Key.down, .{}) or key.codepoint == 'j') return .{ .game_detail = .move_next };
                     if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'b') return .{ .show_screen = self.navigation.detail_back_screen };
-                    if (key.codepoint == 'f' and self.game_detail.load_state == .loaded and self.game_detail.games.len > 0) return .forum_open;
+                    if (key.codepoint == 'f' and self.game_detail.load_state == .loaded and self.game_detail.games.len > 0) return .{ .forum = .open };
                     if (key.codepoint == 'o' and self.game_detail.load_state == .loaded and self.game_detail.games.len > 0) return .{ .game_detail = .open_browser };
                     if (key.codepoint == 'm') return .{ .show_screen = .main_menu };
                     if (key.codepoint == 'q') return .quit;
@@ -351,14 +329,14 @@ pub const App = struct {
                     if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'm') return .{ .show_screen = .main_menu };
                     if (key.codepoint == 'q') return .quit;
                     if (key.codepoint == 'b') {
-                        return if (self.forums.mode == .thread_list) .forum_back_to_list else .forum_back_to_detail;
+                        return .{ .forum = if (self.forums.mode == .thread_list) .back_to_list else .back_to_detail };
                     }
                     if (self.forums.mode == .thread_list) {
-                        if (key.codepoint == 'n' and self.forums.canOpenNextPage()) return .forum_next_page;
-                        if (key.codepoint == 'p' and self.forums.canOpenPreviousPage()) return .forum_previous_page;
-                        if (self.forums.thread_list.handleEvent(event)) |msg| return .{ .forum_thread_list = msg };
+                        if (key.codepoint == 'n' and self.forums.canOpenNextPage()) return .{ .forum = .next_page };
+                        if (key.codepoint == 'p' and self.forums.canOpenPreviousPage()) return .{ .forum = .previous_page };
+                        if (self.forums.thread_list.handleEvent(event)) |msg| return .{ .forum = .{ .thread_list = msg } };
                     } else if (self.forums.mode == .forum_list) {
-                        if (self.forums.forum_list.handleEvent(event)) |msg| return .{ .forum_list = msg };
+                        if (self.forums.forum_list.handleEvent(event)) |msg| return .{ .forum = .{ .list = msg } };
                     }
                 },
                 else => {},
@@ -1280,6 +1258,26 @@ pub const App = struct {
             .move_prev => self.game_detail.moveUp(),
             .move_next => self.game_detail.moveDown(self.game_detail.visible_height),
             .open_browser => try self.openGameInBrowser(ctx),
+        }
+    }
+
+    fn updateForum(self: *App, msg: ForumMsg, ctx: *chasen.Ctx(Msg)) !void {
+        switch (msg) {
+            .open => try self.startForumList(ctx),
+            .loaded => |result| try self.finishForumList(ctx, result),
+            .list => |list_msg| switch (list_msg) {
+                .move_prev, .move_next => self.forums.updateForumList(list_msg),
+                .activate => |index| try self.startForumThreads(ctx, index, 1),
+            },
+            .threads_loaded => |result| try self.finishForumThreads(ctx, result),
+            .thread_list => |list_msg| switch (list_msg) {
+                .move_prev, .move_next => self.forums.updateThreadList(list_msg),
+                .activate => |index| try self.startThread(ctx, index),
+            },
+            .back_to_detail => try self.showScreen(.game_detail, ctx),
+            .back_to_list => self.backToForumList(),
+            .next_page => try self.openForumPage(ctx, self.forums.thread_page.page + 1),
+            .previous_page => try self.openForumPage(ctx, self.forums.thread_page.page -| 1),
         }
     }
 
@@ -2808,6 +2806,18 @@ const ForumThreadsTaskResult = struct {
     result: ForumThreadsResult,
 };
 
+const ForumMsg = union(enum) {
+    open,
+    loaded: ForumListTaskResult,
+    list: ui.List.Msg,
+    threads_loaded: ForumThreadsTaskResult,
+    thread_list: ui.List.Msg,
+    back_to_detail,
+    back_to_list,
+    next_page,
+    previous_page,
+};
+
 const ThreadResult = union(enum) {
     ok: bgg_model.Thread,
     failed: []const u8,
@@ -2944,10 +2954,10 @@ const ForumListTask = struct {
             allocator.destroy(task);
         }
 
-        return .{ .forums_loaded = .{
+        return .{ .forum = .{ .loaded = .{
             .request_id = task.request_id,
             .result = loadForumList(allocator, io, task.token, task.game_id) catch |err| .{ .failed = @errorName(err) },
-        } };
+        } } };
     }
 };
 
@@ -2964,10 +2974,10 @@ const ForumThreadsTask = struct {
             allocator.destroy(task);
         }
 
-        return .{ .forum_threads_loaded = .{
+        return .{ .forum = .{ .threads_loaded = .{
             .request_id = task.request_id,
             .result = loadForumThreads(allocator, io, task.token, task.forum_id, task.page) catch |err| .{ .failed = @errorName(err) },
-        } };
+        } } };
     }
 };
 
@@ -4108,7 +4118,8 @@ test "loaded game detail f opens forums" {
     app.screen = .game_detail;
 
     const msg = app.handleEvent(.{ .key_press = .{ .codepoint = 'f' } }).?;
-    try std.testing.expect(msg == .forum_open);
+    try std.testing.expect(msg == .forum);
+    try std.testing.expect(msg.forum == .open);
 }
 
 test "loaded game detail o opens browser" {
@@ -4134,11 +4145,13 @@ test "forum back key returns to detail or forum list" {
     app.screen = .forums;
     app.forums.mode = .forum_list;
     const detail_msg = app.handleEvent(.{ .key_press = .{ .codepoint = 'b' } }).?;
-    try std.testing.expect(detail_msg == .forum_back_to_detail);
+    try std.testing.expect(detail_msg == .forum);
+    try std.testing.expect(detail_msg.forum == .back_to_detail);
 
     app.forums.mode = .thread_list;
     const list_msg = app.handleEvent(.{ .key_press = .{ .codepoint = 'b' } }).?;
-    try std.testing.expect(list_msg == .forum_back_to_list);
+    try std.testing.expect(list_msg == .forum);
+    try std.testing.expect(list_msg.forum == .back_to_list);
 }
 
 test "forum back to list invalidates in-flight thread load" {
