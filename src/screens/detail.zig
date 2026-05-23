@@ -15,6 +15,7 @@ pub const LoadState = union(enum) {
 };
 
 pub const State = struct {
+    request_id: u64 = 0,
     load_state: LoadState = .idle,
     games: []bgg_model.Game = &.{},
     rendered_text: []u8 = "",

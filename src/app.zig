@@ -87,13 +87,9 @@ pub const App = struct {
     search: SearchState = .{},
     collection: CollectionState = .{},
     game_detail: screens.detail.State = .{},
-    detail_request_id: u64 = 0,
     detail_back_screen: Screen = .main_menu,
     forums: screens.forum.State = .{},
-    forum_request_id: u64 = 0,
-    thread_list_request_id: u64 = 0,
     thread: screens.thread.State = .{},
-    thread_request_id: u64 = 0,
     browser_request_id: u64 = 0,
     settings: screens.settings.State = .{},
     terminal_size: chasen.Size = forum_screen_max_size,
@@ -1547,9 +1543,9 @@ pub const App = struct {
     }
 
     fn startGameDetail(self: *App, ctx: *chasen.Ctx(Msg), game_id: u32, back_screen: Screen) !void {
-        self.detail_request_id +%= 1;
+        self.game_detail.request_id +%= 1;
         self.browser_request_id +%= 1;
-        const request_id = self.detail_request_id;
+        const request_id = self.game_detail.request_id;
         self.detail_back_screen = back_screen;
         self.game_detail.deinit(self.allocator.?);
         self.game_detail.setVisibleHeight(detailLayoutForTerminal(self).content_height);
@@ -1578,7 +1574,7 @@ pub const App = struct {
     }
 
     fn finishGameDetail(self: *App, ctx: *chasen.Ctx(Msg), task_result: GameDetailTaskResult) !void {
-        if (task_result.request_id != self.detail_request_id) {
+        if (task_result.request_id != self.game_detail.request_id) {
             switch (task_result.result) {
                 .ok => |games| bgg_xml.freeGames(self.allocator.?, games),
                 .failed => {},
@@ -1619,9 +1615,9 @@ pub const App = struct {
     fn startForumList(self: *App, ctx: *chasen.Ctx(Msg)) !void {
         if (self.game_detail.load_state != .loaded or self.game_detail.games.len == 0) return;
         const game = self.game_detail.games[0];
-        self.forum_request_id +%= 1;
-        self.thread_list_request_id +%= 1;
-        const request_id = self.forum_request_id;
+        self.forums.request_id +%= 1;
+        self.forums.thread_list_request_id +%= 1;
+        const request_id = self.forums.request_id;
 
         try self.forums.startForumLoad(self.allocator.?, game.id, game.name);
         self.switchScreenWithoutTransition(.forums);
@@ -1648,7 +1644,7 @@ pub const App = struct {
     }
 
     fn finishForumList(self: *App, ctx: *chasen.Ctx(Msg), task_result: ForumListTaskResult) !void {
-        if (task_result.request_id != self.forum_request_id) {
+        if (task_result.request_id != self.forums.request_id) {
             switch (task_result.result) {
                 .ok => |forums| bgg_xml.freeForums(self.allocator.?, forums),
                 .failed => {},
@@ -1667,8 +1663,8 @@ pub const App = struct {
 
     fn startForumThreads(self: *App, ctx: *chasen.Ctx(Msg), visible_index: usize, page: u32) !void {
         const forum = self.forums.selectedForumFromVisible(visible_index) orelse return;
-        self.thread_list_request_id +%= 1;
-        const request_id = self.thread_list_request_id;
+        self.forums.thread_list_request_id +%= 1;
+        const request_id = self.forums.thread_list_request_id;
         self.forums.startThreadLoad(self.allocator.?, visible_index);
         self.switchScreenWithoutTransition(.forums);
         self.beginLoadingMotion(ctx);
@@ -1677,8 +1673,8 @@ pub const App = struct {
 
     fn openForumPage(self: *App, ctx: *chasen.Ctx(Msg), page: u32) !void {
         const forum = self.forums.selectedForum() orelse return;
-        self.thread_list_request_id +%= 1;
-        const request_id = self.thread_list_request_id;
+        self.forums.thread_list_request_id +%= 1;
+        const request_id = self.forums.thread_list_request_id;
         self.forums.startThreadPageLoad(self.allocator.?, page);
         self.switchScreenWithoutTransition(.forums);
         self.beginLoadingMotion(ctx);
@@ -1708,7 +1704,7 @@ pub const App = struct {
     }
 
     fn finishForumThreads(self: *App, ctx: *chasen.Ctx(Msg), task_result: ForumThreadsTaskResult) !void {
-        if (task_result.request_id != self.thread_list_request_id) {
+        if (task_result.request_id != self.forums.thread_list_request_id) {
             switch (task_result.result) {
                 .ok => |thread_page| bgg_xml.freeThreadList(self.allocator.?, thread_page),
                 .failed => {},
@@ -1726,16 +1722,16 @@ pub const App = struct {
     }
 
     fn backToForumList(self: *App) void {
-        self.thread_list_request_id +%= 1;
+        self.forums.thread_list_request_id +%= 1;
         self.forums.backToForumList(self.allocator.?);
     }
 
     fn startThread(self: *App, ctx: *chasen.Ctx(Msg), visible_index: usize) !void {
         if (visible_index >= self.forums.thread_page.threads.len) return;
         const thread = self.forums.thread_page.threads[visible_index];
-        self.thread_request_id +%= 1;
+        self.thread.request_id +%= 1;
         self.browser_request_id +%= 1;
-        const request_id = self.thread_request_id;
+        const request_id = self.thread.request_id;
 
         self.thread.startLoad(self.allocator.?, thread.id, self.config.display.thread_width);
         self.thread.setVisibleHeight(threadLayoutForTerminal(self).content_height);
@@ -1763,7 +1759,7 @@ pub const App = struct {
     }
 
     fn finishThread(self: *App, ctx: *chasen.Ctx(Msg), task_result: ThreadTaskResult) !void {
-        if (task_result.request_id != self.thread_request_id) {
+        if (task_result.request_id != self.thread.request_id) {
             switch (task_result.result) {
                 .ok => |thread| bgg_xml.freeThread(self.allocator.?, thread),
                 .failed => {},
@@ -1781,7 +1777,7 @@ pub const App = struct {
     }
 
     fn backToThreadList(self: *App, ctx: *chasen.Ctx(Msg)) void {
-        self.thread_request_id +%= 1;
+        self.thread.request_id +%= 1;
         self.browser_request_id +%= 1;
         self.thread.deinit(self.allocator.?);
         self.enterPreparedScreen(.forums, ctx);
@@ -4108,10 +4104,10 @@ test "forum back to list invalidates in-flight thread load" {
     app.allocator = std.testing.allocator;
     defer app.deinitOwnedState();
 
-    app.thread_list_request_id = 7;
+    app.forums.thread_list_request_id = 7;
     app.forums.mode = .thread_list;
     app.backToForumList();
-    try std.testing.expectEqual(@as(u64, 8), app.thread_list_request_id);
+    try std.testing.expectEqual(@as(u64, 8), app.forums.thread_list_request_id);
     try std.testing.expectEqual(screens.forum.Mode.forum_list, app.forums.mode);
 
     const threads = try std.testing.allocator.alloc(bgg_model.ThreadSummary, 1);
@@ -4219,7 +4215,7 @@ test "opening another thread invalidates in-flight browser result" {
 
     app.browser_request_id = 7;
     const next_thread = app.forums.thread_page.threads[0];
-    app.thread_request_id +%= 1;
+    app.thread.request_id +%= 1;
     app.browser_request_id +%= 1;
     app.thread.startLoad(std.testing.allocator, next_thread.id, app.config.display.thread_width);
     app.screen = .thread;
@@ -4736,7 +4732,7 @@ test "game detail load completion starts content transition when visible" {
     games[0] = .{ .id = 13, .name = try std.testing.allocator.dupe(u8, "Catan") };
 
     app.screen = .game_detail;
-    app.detail_request_id = 7;
+    app.game_detail.request_id = 7;
     tc.resetTransient();
     try app.finishGameDetail(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = games } });
 
@@ -4758,7 +4754,7 @@ test "game detail load completion stores hidden result without transition" {
     games[0] = .{ .id = 13, .name = try std.testing.allocator.dupe(u8, "Catan") };
 
     app.screen = .main_menu;
-    app.detail_request_id = 7;
+    app.game_detail.request_id = 7;
     tc.resetTransient();
     try app.finishGameDetail(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = games } });
 
@@ -4956,7 +4952,7 @@ test "forum list completion starts content transition when visible" {
     };
 
     app.screen = .forums;
-    app.forum_request_id = 7;
+    app.forums.request_id = 7;
     tc.resetTransient();
     try app.finishForumList(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = forums } });
 
@@ -4981,7 +4977,7 @@ test "forum list completion stores hidden result without transition" {
     };
 
     app.screen = .main_menu;
-    app.forum_request_id = 7;
+    app.forums.request_id = 7;
     tc.resetTransient();
     try app.finishForumList(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = forums } });
 
@@ -5039,7 +5035,7 @@ test "thread list completion starts content transition when visible" {
     };
 
     app.screen = .forums;
-    app.thread_list_request_id = 7;
+    app.forums.thread_list_request_id = 7;
     tc.resetTransient();
     try app.finishForumThreads(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = .{ .threads = threads, .page = 1, .total_pages = 1 } } });
 
@@ -5065,7 +5061,7 @@ test "thread list completion stores hidden result without transition" {
     };
 
     app.screen = .main_menu;
-    app.thread_list_request_id = 7;
+    app.forums.thread_list_request_id = 7;
     tc.resetTransient();
     try app.finishForumThreads(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = .{ .threads = threads, .page = 1, .total_pages = 1 } } });
 
@@ -5122,7 +5118,7 @@ test "thread completion starts content transition when visible" {
     };
 
     app.screen = .thread;
-    app.thread_request_id = 7;
+    app.thread.request_id = 7;
     tc.resetTransient();
     try app.finishThread(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = thread } });
 
@@ -5146,7 +5142,7 @@ test "thread completion stores hidden result without transition" {
     };
 
     app.screen = .main_menu;
-    app.thread_request_id = 7;
+    app.thread.request_id = 7;
     tc.resetTransient();
     try app.finishThread(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = thread } });
 

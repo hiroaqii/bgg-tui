@@ -21,6 +21,8 @@ pub const LoadState = union(enum) {
 };
 
 pub const State = struct {
+    request_id: u64 = 0,
+    thread_list_request_id: u64 = 0,
     game_id: u32 = 0,
     game_name: []const u8 = "",
     mode: Mode = .forum_list,

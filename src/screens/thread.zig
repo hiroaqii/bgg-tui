@@ -14,6 +14,7 @@ pub const LoadState = union(enum) {
 };
 
 pub const State = struct {
+    request_id: u64 = 0,
     thread_id: u32 = 0,
     load_state: LoadState = .idle,
     thread: ?bgg_model.Thread = null,
