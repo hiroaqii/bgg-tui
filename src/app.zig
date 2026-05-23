@@ -33,7 +33,6 @@ const code_rain_transition_frames: u64 = 110;
 const dissolve_transition_frames: u64 = 60;
 const glitch_transition_frames: u64 = 192;
 const lines_transition_frames: u64 = 90;
-const wipe_transition_frames: u64 = 90;
 const spiral_transition_frames: u64 = 104;
 const warp_transition_frames: u64 = 96;
 const scanline_transition_frames: u64 = 110;
@@ -3407,7 +3406,6 @@ fn screenTransitionKind(value: []const u8) anim.TransitionKind {
     if (std.mem.eql(u8, value, "spiral")) return .spiral;
     if (std.mem.eql(u8, value, "sweep")) return .sweep;
     if (std.mem.eql(u8, value, "warp")) return .warp;
-    if (std.mem.eql(u8, value, "wipe")) return .wipe;
     // Other configured transition names are preserved for settings/config
     // parity, but unsupported names remain no-op until their renderer is added.
     return .none;
@@ -3419,7 +3417,7 @@ fn screenTransitionKindForConfig(value: []const u8, seed: u64) anim.TransitionKi
 }
 
 fn randomScreenTransitionKind(seed: u64) anim.TransitionKind {
-    const candidates = [_]anim.TransitionKind{ .fade, .glitch, .code_rain, .dissolve, .sweep, .wipe, .spiral, .warp, .scanline, .iris, .shutter, .lines, .lines_cross };
+    const candidates = [_]anim.TransitionKind{ .fade, .glitch, .code_rain, .dissolve, .sweep, .spiral, .warp, .scanline, .iris, .shutter, .lines, .lines_cross };
     return candidates[transitionChoiceHash(seed) % candidates.len];
 }
 
@@ -3447,7 +3445,6 @@ fn screenTransitionFrames(kind: anim.TransitionKind) u64 {
         .shutter => shutter_transition_frames,
         .spiral => spiral_transition_frames,
         .warp => warp_transition_frames,
-        .wipe => wipe_transition_frames,
         else => screen_transition_frames,
     };
 }
@@ -3503,7 +3500,7 @@ fn parseSettingsWidth(text: []const u8) !u16 {
 }
 
 const color_theme_values = [_][]const u8{ "default", "blue", "orange", "mono", "matcha" };
-const transition_values = [_][]const u8{ "none", "fade", "glitch", "code-rain", "dissolve", "sweep", "wipe", "spiral", "warp", "scanline", "iris", "shutter", "lines", "lines-cross", "random" };
+const transition_values = [_][]const u8{ "none", "fade", "glitch", "code-rain", "dissolve", "sweep", "spiral", "warp", "scanline", "iris", "shutter", "lines", "lines-cross", "random" };
 const selection_values = [_][]const u8{ "none", "invert", "wave", "blink", "glitch", "scan" };
 const border_style_values = [_][]const u8{ "none", "rounded", "thick", "double", "block", "dots" };
 const list_density_values = [_][]const u8{ "compact", "normal", "comfortable", "relaxed" };
@@ -3569,7 +3566,7 @@ test "screen transition kind only enables implemented effects" {
     try std.testing.expectEqual(anim.TransitionKind.spiral, screenTransitionKind("spiral"));
     try std.testing.expectEqual(anim.TransitionKind.sweep, screenTransitionKind("sweep"));
     try std.testing.expectEqual(anim.TransitionKind.warp, screenTransitionKind("warp"));
-    try std.testing.expectEqual(anim.TransitionKind.wipe, screenTransitionKind("wipe"));
+    try std.testing.expectEqual(anim.TransitionKind.none, screenTransitionKind("wipe"));
     try std.testing.expectEqual(anim.TransitionKind.none, screenTransitionKind("random"));
 }
 
@@ -3579,7 +3576,6 @@ test "random screen transition resolves to implemented effects" {
     var saw_code_rain = false;
     var saw_dissolve = false;
     var saw_sweep = false;
-    var saw_wipe = false;
     var saw_spiral = false;
     var saw_warp = false;
     var saw_scanline = false;
@@ -3596,7 +3592,6 @@ test "random screen transition resolves to implemented effects" {
             .code_rain => saw_code_rain = true,
             .dissolve => saw_dissolve = true,
             .sweep => saw_sweep = true,
-            .wipe => saw_wipe = true,
             .spiral => saw_spiral = true,
             .warp => saw_warp = true,
             .scanline => saw_scanline = true,
@@ -3613,7 +3608,6 @@ test "random screen transition resolves to implemented effects" {
     try std.testing.expect(saw_code_rain);
     try std.testing.expect(saw_dissolve);
     try std.testing.expect(saw_sweep);
-    try std.testing.expect(saw_wipe);
     try std.testing.expect(saw_spiral);
     try std.testing.expect(saw_warp);
     try std.testing.expect(saw_scanline);
@@ -3636,7 +3630,6 @@ test "screen transition frame counts can differ by effect" {
     try std.testing.expectEqual(@as(u64, 72), screenTransitionFrames(.shutter));
     try std.testing.expectEqual(@as(u64, 104), screenTransitionFrames(.spiral));
     try std.testing.expectEqual(@as(u64, 96), screenTransitionFrames(.warp));
-    try std.testing.expectEqual(@as(u64, 90), screenTransitionFrames(.wipe));
 }
 
 test "screen titles match status labels" {
