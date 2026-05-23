@@ -723,7 +723,7 @@ pub const App = struct {
                         .col = 0,
                         .row = body_row,
                         .width = area.size().width,
-                        .height = area.size().height -| (body_row + 1 + picker_height),
+                        .height = area.size().height -| (body_row + 1 + list_footer_gap + picker_height),
                     });
                     list_view.viewListWithDensitySelection(list, &list_area, .{
                         .focused_style = self.focusedStyle(),
