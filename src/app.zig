@@ -111,10 +111,7 @@ pub const App = struct {
     pub const Msg = union(enum) {
         setup_token_input: ui.PasswordInput.Msg,
         setup_token_paste: []const u8,
-        hot_filter_start,
-        hot_filter_input: ui.TextInput.Msg,
-        hot_filter_paste: []const u8,
-        hot_filter_clear,
+        hot_games: HotGamesMsg,
         search: SearchMsg,
         collection: CollectionMsg,
         game_detail_loaded: GameDetailTaskResult,
@@ -142,9 +139,6 @@ pub const App = struct {
         terminal_resized: chasen.Size,
         frame: chasen.Frame,
         menu: ui.Menu.Msg,
-        hot_list: ui.List.Msg,
-        hot_sort_toggle,
-        hot_games_loaded: HotGamesResult,
         show_screen: Screen,
         quit,
     };
@@ -188,20 +182,7 @@ pub const App = struct {
                     try insertPastedCodepoints(input, text);
                 }
             },
-            .hot_filter_start => try self.startHotFilter(),
-            .hot_filter_input => |input_msg| {
-                if (input_msg != .submit) {
-                    if (self.hot_games.filter_input) |*input| try input.update(input_msg);
-                    try self.applyHotFilter();
-                }
-            },
-            .hot_filter_paste => |text| {
-                if (self.hot_games.filter_input) |*input| {
-                    try insertPastedCodepoints(input, text);
-                    try self.applyHotFilter();
-                }
-            },
-            .hot_filter_clear => try self.clearHotFilter(),
+            .hot_games => |hot_msg| try self.updateHotGames(hot_msg, ctx),
             .search => |search_msg| try self.updateSearch(search_msg, ctx),
             .collection => |collection_msg| try self.updateCollection(collection_msg, ctx),
             .game_detail_loaded => |result| try self.finishGameDetail(ctx, result),
@@ -244,14 +225,6 @@ pub const App = struct {
                     if (screenForMenuIndex(index)) |screen| try self.showScreen(screen, ctx);
                 },
             },
-            .hot_list => |list_msg| switch (list_msg) {
-                .move_prev, .move_next => self.hot_games.update(list_msg),
-                .activate => |index| {
-                    if (self.hot_games.sourceIndex(index)) |source_index| try self.openHotGame(source_index, ctx);
-                },
-            },
-            .hot_sort_toggle => try self.toggleHotSort(),
-            .hot_games_loaded => |result| try self.finishHotGamesLoad(ctx, result),
             .show_screen => |screen| try self.showScreen(screen, ctx),
             .quit => {
                 self.deinitOwnedState();
@@ -539,24 +512,24 @@ pub const App = struct {
             if (self.hot_games.filter_active) {
                 switch (event) {
                     .key_press => |key| {
-                        if (key.matches(chasen.Key.escape, .{})) return .hot_filter_clear;
+                        if (key.matches(chasen.Key.escape, .{})) return .{ .hot_games = .filter_clear };
                         if (key.matches(chasen.Key.enter, .{})) {
-                            if (self.hot_games.handleEvent(event)) |msg| return .{ .hot_list = msg };
+                            if (self.hot_games.handleEvent(event)) |msg| return .{ .hot_games = .{ .list = msg } };
                             return null;
                         }
                     },
-                    .paste => |text| return .{ .hot_filter_paste = text },
+                    .paste => |text| return .{ .hot_games = .{ .filter_paste = text } },
                     else => {},
                 }
                 if (self.hot_games.filter_input) |*input| {
-                    if (input.handleEvent(event)) |msg| return .{ .hot_filter_input = msg };
+                    if (input.handleEvent(event)) |msg| return .{ .hot_games = .{ .filter_input = msg } };
                 }
-                if (self.hot_games.handleEvent(event)) |msg| return .{ .hot_list = msg };
+                if (self.hot_games.handleEvent(event)) |msg| return .{ .hot_games = .{ .list = msg } };
                 return null;
             } else if (event == .key_press and event.key_press.codepoint == '/') {
-                return .hot_filter_start;
+                return .{ .hot_games = .filter_start };
             } else if (event == .key_press and event.key_press.codepoint == 's') {
-                return .hot_sort_toggle;
+                return .{ .hot_games = .sort_toggle };
             }
         }
 
@@ -578,7 +551,7 @@ pub const App = struct {
             if (self.menu.handleEvent(event)) |msg| return .{ .menu = msg };
         }
         if (self.screen == .hot_games) {
-            if (self.hot_games.handleEvent(event)) |msg| return .{ .hot_list = msg };
+            if (self.hot_games.handleEvent(event)) |msg| return .{ .hot_games = .{ .list = msg } };
         }
         return null;
     }
@@ -1175,6 +1148,33 @@ pub const App = struct {
 
     fn toggleHotSort(self: *App) !void {
         try self.hot_games.toggleSort(self.allocator.?);
+    }
+
+    fn updateHotGames(self: *App, msg: HotGamesMsg, ctx: *chasen.Ctx(Msg)) !void {
+        switch (msg) {
+            .filter_start => try self.startHotFilter(),
+            .filter_input => |input_msg| {
+                if (input_msg != .submit) {
+                    if (self.hot_games.filter_input) |*input| try input.update(input_msg);
+                    try self.applyHotFilter();
+                }
+            },
+            .filter_paste => |text| {
+                if (self.hot_games.filter_input) |*input| {
+                    try insertPastedCodepoints(input, text);
+                    try self.applyHotFilter();
+                }
+            },
+            .filter_clear => try self.clearHotFilter(),
+            .list => |list_msg| switch (list_msg) {
+                .move_prev, .move_next => self.hot_games.update(list_msg),
+                .activate => |index| {
+                    if (self.hot_games.sourceIndex(index)) |source_index| try self.openHotGame(source_index, ctx);
+                },
+            },
+            .sort_toggle => try self.toggleHotSort(),
+            .loaded => |result| try self.finishHotGamesLoad(ctx, result),
+        }
     }
 
     fn updateSearch(self: *App, msg: SearchMsg, ctx: *chasen.Ctx(Msg)) !void {
@@ -2388,6 +2388,16 @@ const HotGamesResult = union(enum) {
     failed: []const u8,
 };
 
+const HotGamesMsg = union(enum) {
+    filter_start,
+    filter_input: ui.TextInput.Msg,
+    filter_paste: []const u8,
+    filter_clear,
+    list: ui.List.Msg,
+    sort_toggle,
+    loaded: HotGamesResult,
+};
+
 const SearchState = struct {
     input: ?ui.TextInput = null,
     filter_input: ?ui.TextInput = null,
@@ -2849,7 +2859,7 @@ const HotGamesTask = struct {
             allocator.destroy(task);
         }
 
-        return .{ .hot_games_loaded = loadHotGames(allocator, io, task.token) catch |err| .{ .failed = @errorName(err) } };
+        return .{ .hot_games = .{ .loaded = loadHotGames(allocator, io, task.token) catch |err| .{ .failed = @errorName(err) } } };
     }
 };
 
@@ -5417,7 +5427,8 @@ test "hot games slash starts filter before global search shortcut" {
 
     const msg = app.handleEvent(.{ .key_press = .{ .codepoint = '/' } }).?;
 
-    try std.testing.expect(msg == .hot_filter_start);
+    try std.testing.expect(msg == .hot_games);
+    try std.testing.expect(msg.hot_games == .filter_start);
 }
 
 test "hot games global shortcuts work after clearing filter" {
@@ -5429,7 +5440,8 @@ test "hot games global shortcuts work after clearing filter" {
 
     try app.hot_games.applyFilter(std.testing.allocator, "");
     const clear_msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.escape } }).?;
-    try std.testing.expect(clear_msg == .hot_filter_clear);
+    try std.testing.expect(clear_msg == .hot_games);
+    try std.testing.expect(clear_msg.hot_games == .filter_clear);
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
     try app.update(clear_msg, &tc.ctx);
