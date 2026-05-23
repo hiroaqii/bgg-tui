@@ -70,6 +70,7 @@ pub fn applyScreenTransition(surface: *chasen.Surface, transition: anim.Transiti
         .lines_cross => applyLinesTransition(surface, transition.progress(), true),
         .scanline => applyScanlineTransition(surface, transition.progress()),
         .shutter => applyShutterTransition(surface, transition.progress()),
+        .spiral => applySpiralTransition(surface, transition.progress()),
         .sweep => applySweepTransition(surface, transition.progress()),
         .warp => applyWarpTransition(surface, transition.progress()),
         .wipe => applyWipeTransition(surface, transition.progress()),
@@ -355,6 +356,53 @@ fn applyWipeTransition(surface: *chasen.Surface, progress: f32) void {
         .width = size.width - visible_width,
         .height = size.height,
     });
+}
+
+fn applySpiralTransition(surface: *chasen.Surface, progress: f32) void {
+    const size = surface.size();
+    if (size.width == 0 or size.height == 0) return;
+
+    const clamped = anim.ease.clamp01(progress);
+    if (clamped >= 1.0) return;
+    const edge_style = (chasen.TextStyle{ .fg = transition_edge_color, .bold = true }).toVaxis();
+
+    var row: u16 = 0;
+    while (row < size.height) : (row += 1) {
+        var col: u16 = 0;
+        while (col < size.width) : (col += 1) {
+            var cell = surface.readCell(col, row) orelse continue;
+            if (cell.default or cell.char.grapheme.len == 0 or std.mem.eql(u8, cell.char.grapheme, " ")) continue;
+            if (cell.char.width != 1) continue;
+
+            const threshold = spiralThreshold(row, col, size);
+            if (clamped < threshold) {
+                clearCell(surface, col, row);
+                continue;
+            }
+            if (clamped - threshold < 0.035) {
+                cell.style = edge_style;
+                surface.writeCell(col, row, cell);
+            }
+        }
+    }
+}
+
+fn spiralThreshold(row: u16, col: u16, size: chasen.Size) f32 {
+    const half_width = @max(@as(f64, @floatFromInt(size.width -| 1)) / 2.0, 1.0);
+    const half_height = @max(@as(f64, @floatFromInt(size.height -| 1)) / 2.0, 1.0);
+    const center_col = @as(f64, @floatFromInt(size.width -| 1)) / 2.0;
+    const center_row = @as(f64, @floatFromInt(size.height -| 1)) / 2.0;
+    const dx = (@as(f64, @floatFromInt(col)) - center_col) / half_width;
+    const dy = (@as(f64, @floatFromInt(row)) - center_row) / half_height;
+    const radius = @min(@sqrt(dx * dx + dy * dy) / @sqrt(2.0), 1.0);
+    const angle = std.math.atan2(dy, dx);
+    const angle_norm = (angle + std.math.pi) / (std.math.pi * 2.0);
+    const twist = fract(angle_norm + radius * 1.35);
+    return @floatCast(@min(0.98, 0.06 + radius * 0.68 + twist * 0.26));
+}
+
+fn fract(value: f64) f64 {
+    return value - @floor(value);
 }
 
 fn applyWarpTransition(surface: *chasen.Surface, progress: f32) void {
@@ -878,6 +926,41 @@ test "wipe screen transition clears unrevealed right side" {
     try std.testing.expectEqualStrings("B", ts.surface.readCell(1, 0).?.char.grapheme);
     try std.testing.expectEqualStrings(" ", ts.surface.readCell(2, 0).?.char.grapheme);
     try std.testing.expectEqualStrings(" ", ts.surface.readCell(3, 0).?.char.grapheme);
+}
+
+test "spiral screen transition reveals center before corner" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(5, 5);
+    defer ts.deinit();
+
+    _ = ts.surface.borrowTextAt(0, 0, "A", .{});
+    _ = ts.surface.borrowTextAt(2, 2, "X", .{});
+    applyScreenTransition(&ts.surface, anim.Transition{
+        .kind = .spiral,
+        .frame = 25,
+        .max_frame = 100,
+    });
+
+    try std.testing.expectEqualStrings(" ", ts.surface.readCell(0, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("X", ts.surface.readCell(2, 2).?.char.grapheme);
+}
+
+test "spiral screen transition preserves completed content" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(4, 1);
+    defer ts.deinit();
+
+    _ = ts.surface.borrowTextAt(0, 0, "ABCD", .{});
+    applyScreenTransition(&ts.surface, anim.Transition{
+        .kind = .spiral,
+        .frame = 104,
+        .max_frame = 104,
+    });
+
+    try std.testing.expectEqualStrings("A", ts.surface.readCell(0, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("B", ts.surface.readCell(1, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("C", ts.surface.readCell(2, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("D", ts.surface.readCell(3, 0).?.char.grapheme);
 }
 
 test "warp screen transition shifts rows while settling" {
