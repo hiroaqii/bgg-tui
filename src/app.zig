@@ -160,24 +160,7 @@ pub const App = struct {
         thread_open_browser,
         browser_opened: BrowserOpenTaskResult,
         thread_back_to_forums,
-        settings_token_start,
-        settings_token_input: ui.PasswordInput.Msg,
-        settings_token_paste: []const u8,
-        settings_token_submit,
-        settings_token_cancel,
-        settings_username_start,
-        settings_username_input: ui.TextInput.Msg,
-        settings_username_paste: []const u8,
-        settings_username_submit,
-        settings_username_cancel,
-        settings_width_start: screens.settings.EditField,
-        settings_width_input: ui.TextInput.Msg,
-        settings_width_paste: []const u8,
-        settings_width_submit,
-        settings_width_cancel,
-        settings_show_images_toggle,
-        settings_cycle_next: screens.settings.CycleField,
-        settings_list: ui.List.Msg,
+        settings: screens.settings.Msg,
         terminal_resized: chasen.Size,
         frame: chasen.Frame,
         menu: ui.Menu.Msg,
@@ -342,54 +325,7 @@ pub const App = struct {
             .thread_open_browser => try self.openThreadInBrowser(ctx),
             .browser_opened => |result| try self.finishBrowserOpen(result),
             .thread_back_to_forums => self.backToThreadList(ctx),
-            .settings_token_start => try self.startSettingsTokenEdit(),
-            .settings_token_input => |input_msg| {
-                if (input_msg == .submit) {
-                    try self.submitSettingsToken(ctx);
-                } else if (self.settings.token_input) |*input| {
-                    try input.update(input_msg);
-                }
-            },
-            .settings_token_paste => |text| {
-                if (self.settings.token_input) |*input| {
-                    try insertPastedCodepoints(input, text);
-                }
-            },
-            .settings_token_submit => try self.submitSettingsToken(ctx),
-            .settings_token_cancel => self.cancelSettingsTokenEdit(),
-            .settings_username_start => try self.startSettingsUsernameEdit(),
-            .settings_username_input => |input_msg| {
-                if (input_msg == .submit) {
-                    try self.submitSettingsUsername(ctx);
-                } else if (self.settings.username_input) |*input| {
-                    try input.update(input_msg);
-                }
-            },
-            .settings_username_paste => |text| {
-                if (self.settings.username_input) |*input| {
-                    try insertPastedCodepoints(input, text);
-                }
-            },
-            .settings_username_submit => try self.submitSettingsUsername(ctx),
-            .settings_username_cancel => self.cancelSettingsUsernameEdit(),
-            .settings_width_start => |field| try self.startSettingsWidthEdit(field),
-            .settings_width_input => |input_msg| {
-                if (input_msg == .submit) {
-                    try self.submitSettingsWidth(ctx);
-                } else if (self.settings.width_input) |*input| {
-                    try input.update(input_msg);
-                }
-            },
-            .settings_width_paste => |text| {
-                if (self.settings.width_input) |*input| {
-                    try insertPastedCodepoints(input, text);
-                }
-            },
-            .settings_width_submit => try self.submitSettingsWidth(ctx),
-            .settings_width_cancel => self.cancelSettingsWidthEdit(),
-            .settings_show_images_toggle => try self.toggleSettingsShowImages(ctx),
-            .settings_cycle_next => |field| try self.cycleSettingsField(ctx, field),
-            .settings_list => |list_msg| self.settings.updateList(list_msg),
+            .settings => |settings_msg| try self.updateSettings(settings_msg, ctx),
             .terminal_resized => |size| self.handleResize(size),
             .frame => |frame| {
                 self.animation_frame = frame.index;
@@ -636,37 +572,37 @@ pub const App = struct {
                     .key_press => |key| {
                         if (key.matches(chasen.Key.escape, .{})) {
                             return switch (field) {
-                                .token => .settings_token_cancel,
-                                .username => .settings_username_cancel,
-                                .list_width, .thread_width, .detail_width => .settings_width_cancel,
+                                .token => .{ .settings = .token_cancel },
+                                .username => .{ .settings = .username_cancel },
+                                .list_width, .thread_width, .detail_width => .{ .settings = .width_cancel },
                             };
                         }
                         if (key.matches(chasen.Key.enter, .{})) {
                             return switch (field) {
-                                .token => .settings_token_submit,
-                                .username => .settings_username_submit,
-                                .list_width, .thread_width, .detail_width => .settings_width_submit,
+                                .token => .{ .settings = .token_submit },
+                                .username => .{ .settings = .username_submit },
+                                .list_width, .thread_width, .detail_width => .{ .settings = .width_submit },
                             };
                         }
                     },
                     .paste => |text| {
                         return switch (field) {
-                            .token => .{ .settings_token_paste = text },
-                            .username => .{ .settings_username_paste = text },
-                            .list_width, .thread_width, .detail_width => .{ .settings_width_paste = text },
+                            .token => .{ .settings = .{ .token_paste = text } },
+                            .username => .{ .settings = .{ .username_paste = text } },
+                            .list_width, .thread_width, .detail_width => .{ .settings = .{ .width_paste = text } },
                         };
                     },
                     else => {},
                 }
                 switch (field) {
                     .token => if (self.settings.token_input) |*input| {
-                        if (input.handleEvent(event)) |msg| return .{ .settings_token_input = msg };
+                        if (input.handleEvent(event)) |msg| return .{ .settings = .{ .token_input = msg } };
                     },
                     .username => if (self.settings.username_input) |*input| {
-                        if (input.handleEvent(event)) |msg| return .{ .settings_username_input = msg };
+                        if (input.handleEvent(event)) |msg| return .{ .settings = .{ .username_input = msg } };
                     },
                     .list_width, .thread_width, .detail_width => if (self.settings.width_input) |*input| {
-                        if (input.handleEvent(event)) |msg| return .{ .settings_width_input = msg };
+                        if (input.handleEvent(event)) |msg| return .{ .settings = .{ .width_input = msg } };
                     },
                 }
                 return null;
@@ -674,13 +610,13 @@ pub const App = struct {
             switch (event) {
                 .key_press => |key| {
                     if (key.matches(chasen.Key.enter, .{})) {
-                        if (self.settings.isShowImagesFocused()) return .settings_show_images_toggle;
-                        if (self.settings.focusedCycleField()) |field| return .{ .settings_cycle_next = field };
+                        if (self.settings.isShowImagesFocused()) return .{ .settings = .show_images_toggle };
+                        if (self.settings.focusedCycleField()) |field| return .{ .settings = .{ .cycle_next = field } };
                         if (self.settings.focusedEditField()) |field| {
                             return switch (field) {
-                                .token => .settings_token_start,
-                                .username => .settings_username_start,
-                                .list_width, .thread_width, .detail_width => .{ .settings_width_start = field },
+                                .token => .{ .settings = .token_start },
+                                .username => .{ .settings = .username_start },
+                                .list_width, .thread_width, .detail_width => .{ .settings = .{ .width_start = field } },
                             };
                         }
                     }
@@ -689,7 +625,7 @@ pub const App = struct {
                 },
                 else => {},
             }
-            if (self.settings.handleEvent(event)) |msg| return .{ .settings_list = msg };
+            if (self.settings.handleEvent(event)) |msg| return .{ .settings = .{ .list = msg } };
             return null;
         }
 
@@ -1115,6 +1051,59 @@ pub const App = struct {
         try self.saveConfigIfAvailable(ctx);
         try input.update(.clear);
         try self.showScreen(.main_menu, ctx);
+    }
+
+    fn updateSettings(self: *App, msg: screens.settings.Msg, ctx: *chasen.Ctx(Msg)) !void {
+        switch (msg) {
+            .token_start => try self.startSettingsTokenEdit(),
+            .token_input => |input_msg| {
+                if (input_msg == .submit) {
+                    try self.submitSettingsToken(ctx);
+                } else if (self.settings.token_input) |*input| {
+                    try input.update(input_msg);
+                }
+            },
+            .token_paste => |text| {
+                if (self.settings.token_input) |*input| {
+                    try insertPastedCodepoints(input, text);
+                }
+            },
+            .token_submit => try self.submitSettingsToken(ctx),
+            .token_cancel => self.cancelSettingsTokenEdit(),
+            .username_start => try self.startSettingsUsernameEdit(),
+            .username_input => |input_msg| {
+                if (input_msg == .submit) {
+                    try self.submitSettingsUsername(ctx);
+                } else if (self.settings.username_input) |*input| {
+                    try input.update(input_msg);
+                }
+            },
+            .username_paste => |text| {
+                if (self.settings.username_input) |*input| {
+                    try insertPastedCodepoints(input, text);
+                }
+            },
+            .username_submit => try self.submitSettingsUsername(ctx),
+            .username_cancel => self.cancelSettingsUsernameEdit(),
+            .width_start => |field| try self.startSettingsWidthEdit(field),
+            .width_input => |input_msg| {
+                if (input_msg == .submit) {
+                    try self.submitSettingsWidth(ctx);
+                } else if (self.settings.width_input) |*input| {
+                    try input.update(input_msg);
+                }
+            },
+            .width_paste => |text| {
+                if (self.settings.width_input) |*input| {
+                    try insertPastedCodepoints(input, text);
+                }
+            },
+            .width_submit => try self.submitSettingsWidth(ctx),
+            .width_cancel => self.cancelSettingsWidthEdit(),
+            .show_images_toggle => try self.toggleSettingsShowImages(ctx),
+            .cycle_next => |field| try self.cycleSettingsField(ctx, field),
+            .list => |list_msg| self.settings.updateList(list_msg),
+        }
     }
 
     fn startSettingsTokenEdit(self: *App) !void {

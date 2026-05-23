@@ -37,6 +37,27 @@ pub const CycleField = enum {
     image_protocol,
 };
 
+pub const Msg = union(enum) {
+    token_start,
+    token_input: ui.PasswordInput.Msg,
+    token_paste: []const u8,
+    token_submit,
+    token_cancel,
+    username_start,
+    username_input: ui.TextInput.Msg,
+    username_paste: []const u8,
+    username_submit,
+    username_cancel,
+    width_start: EditField,
+    width_input: ui.TextInput.Msg,
+    width_paste: []const u8,
+    width_submit,
+    width_cancel,
+    show_images_toggle,
+    cycle_next: CycleField,
+    list: ui.List.Msg,
+};
+
 const items = [_]Item{
     .{ .label = "Color Theme", .section = "Interface", .kind = .cycle },
     .{ .label = "Transition", .kind = .cycle },
