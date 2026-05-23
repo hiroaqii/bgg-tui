@@ -1257,7 +1257,10 @@ pub const App = struct {
     fn cycleSettingsField(self: *App, ctx: *chasen.Ctx(Msg), field: screens.settings.CycleField) !void {
         switch (field) {
             .color_theme => self.config.interface.color_theme = nextCycleValue(self.config.interface.color_theme, &color_theme_values),
-            .transition => self.config.interface.transition = nextCycleValue(self.config.interface.transition, &transition_values),
+            .transition => {
+                self.config.interface.transition = nextCycleValue(self.config.interface.transition, &transition_values);
+                self.startContentTransition(ctx);
+            },
             .selection => {
                 self.config.interface.selection = nextCycleValue(self.config.interface.selection, &selection_values);
                 self.requestMotionFrameIfNeeded(ctx);
@@ -4559,8 +4562,13 @@ test "settings interface cycle fields update supported values" {
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
     try app.cycleSettingsField(&tc.ctx, .color_theme);
     try std.testing.expectEqualStrings("blue", app.config.interface.color_theme);
+    tc.resetTransient();
     try app.cycleSettingsField(&tc.ctx, .transition);
     try std.testing.expectEqualStrings("fade", app.config.interface.transition);
+    try std.testing.expect(app.hasActiveScreenTransition());
+    try std.testing.expectEqual(Screen.setup_token, app.transition_from_screen.?);
+    try std.testing.expectEqual(Screen.setup_token, app.transition_to_screen.?);
+    try std.testing.expect(tc.ctx.frame_requested);
     try app.cycleSettingsField(&tc.ctx, .selection);
     try std.testing.expectEqualStrings("invert", app.config.interface.selection);
     try app.cycleSettingsField(&tc.ctx, .border_style);
