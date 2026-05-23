@@ -25,7 +25,8 @@ const setup_token_size = chasen.Size{ .width = 56, .height = 9 };
 const placeholder_size = chasen.Size{ .width = 56, .height = 6 };
 const search_input_size = chasen.Size{ .width = 56, .height = 9 };
 const collection_input_size = chasen.Size{ .width = 56, .height = 9 };
-const list_screen_max_size = chasen.Size{ .width = 72, .height = 34 };
+const list_screen_min_stats_width: u16 = 96;
+const list_screen_max_height: u16 = 34;
 const forum_screen_max_size = chasen.Size{ .width = 88, .height = 34 };
 const detail_outer_reserved_rows: u16 = 3;
 const thread_outer_reserved_rows: u16 = 3;
@@ -574,7 +575,7 @@ pub const App = struct {
     }
 
     fn viewHotGames(self: *const App, sfc: *chasen.Surface) !void {
-        var area = constrainedListSurface(sfc);
+        var area = listSurface(sfc, self.config.display.list_width);
         _ = try area.printAt(0, 0, self.titleStyle(), "Hot Games ({s})", .{self.hot_games.sort_mode.label(.hot_games)});
 
         switch (self.hot_games.load_state) {
@@ -604,7 +605,7 @@ pub const App = struct {
                         .focused_style = self.focusedStyle(),
                         .show_cursor = false,
                     }, self.listDensity(), self.config.interface.selection, self.animation_frame);
-                    try self.drawListPosition(&area, list);
+                    try self.drawListPositionWithLegend(&area, list, "trending games  ★ Rating  ⚖ Weight  #Rank");
                     self.drawSortMode(&area, self.hot_games.sort_mode.label(.hot_games));
                 }
             },
@@ -641,7 +642,7 @@ pub const App = struct {
     }
 
     fn viewSearchResults(self: *const App, sfc: *chasen.Surface) !void {
-        var area = constrainedListSurface(sfc);
+        var area = listSurface(sfc, self.config.display.list_width);
         _ = try area.printAt(0, 0, self.titleStyle(), "Search Results ({s})", .{self.search.sort_mode.label(.search_results)});
 
         switch (self.search.load_state) {
@@ -686,7 +687,7 @@ pub const App = struct {
     fn viewCollection(self: *const App, sfc: *chasen.Surface) !void {
         var area = switch (self.collection.load_state) {
             .idle, .failed => centeredSurface(sfc, collection_input_size),
-            else => constrainedListSurface(sfc),
+            else => listSurface(sfc, self.config.display.list_width),
         };
         _ = area.borrowTextAt(0, 0, "Collection", self.titleStyle());
 
@@ -728,7 +729,7 @@ pub const App = struct {
                         .focused_style = self.focusedStyle(),
                         .show_cursor = false,
                     }, self.listDensity(), self.config.interface.selection, self.animation_frame);
-                    try self.drawListPosition(&area, list);
+                    try self.drawListPositionWithLegend(&area, list, "games  ♥ User Rating  ★ Rating  #Rank");
                 }
                 if (self.collection.status_picker) {
                     const picker_row = area.size().height -| (collection_status_picker_lines + 1);
@@ -1139,6 +1140,7 @@ pub const App = struct {
             },
             .sort_toggle => try self.toggleHotSort(),
             .loaded => |result| try self.finishHotGamesLoad(ctx, result),
+            .stats_loaded => |result| try self.finishHotGameStatsLoad(result),
         }
     }
 
@@ -1420,9 +1422,45 @@ pub const App = struct {
         switch (result) {
             .ok => |games| {
                 try self.hot_games.setLoaded(self.allocator.?, games);
+                try self.startHotGameStatsLoad(ctx);
                 self.startContentTransitionIfVisible(ctx, .hot_games);
             },
             .failed => |message| self.hot_games.setFailed(message),
+        }
+    }
+
+    fn startHotGameStatsLoad(self: *App, ctx: *chasen.Ctx(Msg)) !void {
+        const token = self.config.apiClientToken() orelse return;
+        const ids = try ctx.allocator().alloc(u32, self.hot_games.games.len);
+        errdefer ctx.allocator().free(ids);
+        for (self.hot_games.games, 0..) |game, index| ids[index] = game.id;
+
+        const task = try ctx.allocator().create(HotGameStatsTask);
+        errdefer ctx.allocator().destroy(task);
+        task.* = .{
+            .token = try ctx.allocator().dupe(u8, token),
+            .ids = ids,
+            .request_id = self.hot_games.request_id,
+        };
+        errdefer ctx.allocator().free(task.token);
+
+        ctx.spawnWith(task, HotGameStatsTask.run) catch |err| {
+            return err;
+        };
+    }
+
+    fn finishHotGameStatsLoad(self: *App, task_result: HotGameStatsResult) !void {
+        if (task_result.request_id != self.hot_games.request_id) {
+            switch (task_result.result) {
+                .ok => |stats| bgg_xml.freeGames(self.allocator.?, stats),
+                .failed => {},
+            }
+            return;
+        }
+
+        switch (task_result.result) {
+            .ok => |stats| try self.hot_games.setStatsLoaded(self.allocator.?, stats),
+            .failed => {}, // Supplemental stats should not make the already-loaded list unusable.
         }
     }
 
@@ -1835,11 +1873,19 @@ pub const App = struct {
     }
 
     fn drawListPosition(self: *const App, surface: *chasen.Surface, list: *const ui.List) !void {
+        try self.drawListPositionWithLegend(surface, list, "");
+    }
+
+    fn drawListPositionWithLegend(self: *const App, surface: *chasen.Surface, list: *const ui.List, legend: []const u8) !void {
         const item_count = list.items.len;
         if (item_count == 0 or surface.size().height < 2) return;
 
         const text = try list_view.focusedPositionText(surface.frameAllocator(), list.focusedIndex(), item_count);
-        _ = surface.borrowTextAt(0, list_position_row, text, self.subtleStyle());
+        if (legend.len == 0) {
+            _ = surface.borrowTextAt(0, list_position_row, text, self.subtleStyle());
+        } else {
+            _ = try surface.printAt(0, list_position_row, self.subtleStyle(), "{s} {s}", .{ text, legend });
+        }
     }
 
     fn drawCenteredListPosition(self: *const App, surface: *chasen.Surface, list: *const ui.List) !void {
@@ -2243,6 +2289,7 @@ const HotGamesState = struct {
     filter_input: ?ui.TextInput = null,
     load_state: LoadState = .idle,
     games: []bgg_model.HotGame = &.{},
+    stats: []bgg_model.Game = &.{},
     labels: []const []const u8 = &.{},
     list: ui.List = ui.List.init(.{}),
     sort_mode: ListSortMode = .source,
@@ -2251,6 +2298,7 @@ const HotGamesState = struct {
     sorted_list: ui.List = ui.List.init(.{}),
     filter: list_filter.FilterState = .{},
     filter_active: bool = false,
+    request_id: u64 = 0,
 
     const LoadState = union(enum) {
         idle,
@@ -2273,6 +2321,7 @@ const HotGamesState = struct {
     }
 
     fn setLoading(self: *HotGamesState) void {
+        self.request_id +%= 1;
         self.load_state = .loading;
     }
 
@@ -2286,6 +2335,32 @@ const HotGamesState = struct {
         self.labels = try labels_mod.buildHotGameLabels(allocator, games);
         self.list = ui.List.init(.{ .items = self.labels });
         self.load_state = .loaded;
+    }
+
+    fn setStatsLoaded(self: *HotGamesState, allocator: std.mem.Allocator, stats: []bgg_model.Game) !void {
+        const focused_source_index = self.sourceIndex(self.activeList().focusedIndex());
+
+        bgg_xml.freeGames(allocator, self.stats);
+        self.stats = stats;
+
+        const filter_was_active = self.filter_active;
+        const filter_query = if (filter_was_active) try allocator.dupe(u8, self.filter.query) else &.{};
+        defer if (filter_was_active) allocator.free(filter_query);
+
+        labels_mod.freeHotGameLabels(allocator, self.labels);
+        self.freeSortedList(allocator);
+        self.filter.deinit(allocator);
+
+        self.labels = try labels_mod.buildHotGameLabelsWithStats(allocator, self.games, self.stats);
+        self.list = ui.List.init(.{ .items = self.labels });
+
+        if (self.sort_mode != .source) try self.rebuildSortedList(allocator, self.sort_mode);
+        if (filter_was_active) {
+            try self.applyFilter(allocator, filter_query);
+        } else {
+            self.filter_active = false;
+        }
+        if (focused_source_index) |source_index| self.focusSourceIndex(source_index);
     }
 
     fn update(self: *HotGamesState, msg: ui.List.Msg) void {
@@ -2319,6 +2394,28 @@ const HotGamesState = struct {
         }
         if (visible_index >= self.games.len) return null;
         return visible_index;
+    }
+
+    fn focusSourceIndex(self: *HotGamesState, source_index: usize) void {
+        if (self.filter_active) {
+            for (self.filter.source_indexes, 0..) |filter_source_index, visible_index| {
+                if (filter_source_index == source_index) {
+                    self.filter.list.focus.index = visible_index;
+                    return;
+                }
+            }
+            return;
+        }
+        if (self.sort_mode != .source) {
+            for (self.sorted_source_indexes, 0..) |sorted_source_index, visible_index| {
+                if (sorted_source_index == source_index) {
+                    self.sorted_list.focus.index = visible_index;
+                    return;
+                }
+            }
+            return;
+        }
+        if (source_index < self.list.items.len) self.list.focus.index = source_index;
     }
 
     fn applyFilter(self: *HotGamesState, allocator: std.mem.Allocator, query: []const u8) !void {
@@ -2384,8 +2481,10 @@ const HotGamesState = struct {
         self.filter.deinit(allocator);
         self.freeSortedList(allocator);
         labels_mod.freeHotGameLabels(allocator, self.labels);
+        bgg_xml.freeGames(allocator, self.stats);
         bgg_xml.freeHotGames(allocator, self.games);
         self.labels = &.{};
+        self.stats = &.{};
         self.games = &.{};
         self.list = ui.List.init(.{});
         self.sort_mode = .source;
@@ -2397,6 +2496,16 @@ const HotGamesState = struct {
 const HotGamesResult = union(enum) {
     ok: []bgg_model.HotGame,
     failed: []const u8,
+};
+
+const HotGameStatsResult = struct {
+    request_id: u64,
+    result: Result,
+
+    const Result = union(enum) {
+        ok: []bgg_model.Game,
+        failed: []const u8,
+    };
 };
 
 const SetupTokenMsg = union(enum) {
@@ -2412,6 +2521,7 @@ const HotGamesMsg = union(enum) {
     list: ui.List.Msg,
     sort_toggle,
     loaded: HotGamesResult,
+    stats_loaded: HotGameStatsResult,
 };
 
 const SearchState = struct {
@@ -2911,6 +3021,26 @@ const HotGamesTask = struct {
     }
 };
 
+const HotGameStatsTask = struct {
+    token: []const u8,
+    ids: []u32,
+    request_id: u64,
+
+    fn run(ctx_ptr: *anyopaque, allocator: std.mem.Allocator, io: std.Io) App.Msg {
+        const task: *HotGameStatsTask = @ptrCast(@alignCast(ctx_ptr));
+        defer {
+            allocator.free(task.token);
+            allocator.free(task.ids);
+            allocator.destroy(task);
+        }
+
+        return .{ .hot_games = .{ .stats_loaded = .{
+            .request_id = task.request_id,
+            .result = loadHotGameStats(allocator, io, task.token, task.ids) catch |err| .{ .failed = @errorName(err) },
+        } } };
+    }
+};
+
 const SearchTask = struct {
     token: []const u8,
     query: []const u8,
@@ -3074,6 +3204,45 @@ fn loadHotGames(allocator: std.mem.Allocator, io: std.Io, token: []const u8) !Ho
         },
         .api_error => |err| return .{ .failed = apiErrorMessage(err) },
     }
+}
+
+fn loadHotGameStats(allocator: std.mem.Allocator, io: std.Io, token: []const u8, ids: []const u32) !HotGameStatsResult.Result {
+    var client = bgg_client.Client.init(allocator, io, .{ .token = token });
+    defer client.deinit();
+
+    var stats: std.ArrayList(bgg_model.Game) = .empty;
+    errdefer {
+        bgg_xml.freeGameItems(allocator, stats.items);
+        stats.deinit(allocator);
+    }
+
+    var start: usize = 0;
+    while (start < ids.len) {
+        const end = @min(start + bgg_endpoint.max_thing_ids, ids.len);
+        const path = try bgg_endpoint.thing(allocator, ids[start..end]);
+        defer allocator.free(path);
+
+        const result = try client.getPath(path, .generic);
+        switch (result) {
+            .ok => |response| {
+                defer response.deinit(allocator);
+                const batch = bgg_xml.parseThingResponse(allocator, response.body) catch |parse_error| switch (parse_error) {
+                    error.OutOfMemory => return error.OutOfMemory,
+                    else => return .{ .failed = apiErrorMessage(bgg_error.classifyParseError(parse_error)) },
+                };
+                var batch_owned = true;
+                errdefer if (batch_owned) bgg_xml.freeGameItems(allocator, batch);
+                defer allocator.free(batch);
+                try stats.appendSlice(allocator, batch);
+                batch_owned = false;
+            },
+            .api_error => |err| return .{ .failed = apiErrorMessage(err) },
+        }
+
+        start = end;
+    }
+
+    return .{ .ok = try stats.toOwnedSlice(allocator) };
 }
 
 fn loadSearchResults(allocator: std.mem.Allocator, io: std.Io, token: []const u8, query: []const u8) !SearchResult {
@@ -3373,8 +3542,14 @@ fn detailSurface(surface: *chasen.Surface, configured_width: u16) chasen.Surface
     }));
 }
 
-fn constrainedListSurface(surface: *chasen.Surface) chasen.Surface {
-    return surface.child(ui.layout.center(surfaceRect(surface), list_screen_max_size));
+fn listSurface(surface: *chasen.Surface, configured_width: u16) chasen.Surface {
+    // Hot Games and Collection have stat legends/columns. Keep a practical
+    // minimum width so those columns are visible, while still allowing users to
+    // expand wider through the list width setting.
+    return surface.child(ui.layout.center(surfaceRect(surface), .{
+        .width = @max(configured_width, list_screen_min_stats_width),
+        .height = list_screen_max_height,
+    }));
 }
 
 fn forumSurface(surface: *chasen.Surface) chasen.Surface {
@@ -3435,6 +3610,16 @@ fn screenBodySizeForTerminal(terminal_size: chasen.Size) chasen.Size {
 fn surfaceRect(surface: *const chasen.Surface) chasen.Rect {
     const size = surface.size();
     return .{ .col = 0, .row = 0, .width = size.width, .height = size.height };
+}
+
+fn freePendingHotGameStatsTasks(ctx: *chasen.Ctx(App.Msg)) void {
+    for (ctx.pendingTaskWithSlice()) |entry| {
+        const task: *HotGameStatsTask = @ptrCast(@alignCast(entry.ctx));
+        ctx.allocator().free(task.token);
+        ctx.allocator().free(task.ids);
+        ctx.allocator().destroy(task);
+    }
+    ctx.pending_tasks_with_len = 0;
 }
 
 fn screenForMenuIndex(index: usize) ?Screen {
@@ -5285,6 +5470,7 @@ test "hot games completion starts content transition when visible" {
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
     try app.init(&tc.ctx);
     defer app.deinitOwnedState();
+    defer freePendingHotGameStatsTasks(&tc.ctx);
 
     const games = try std.testing.allocator.alloc(bgg_model.HotGame, 1);
     games[0] = .{ .id = 13, .rank = 1, .name = try std.testing.allocator.dupe(u8, "CATAN") };
@@ -5306,6 +5492,7 @@ test "hot games completion stores hidden result without transition" {
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
     try app.init(&tc.ctx);
     defer app.deinitOwnedState();
+    defer freePendingHotGameStatsTasks(&tc.ctx);
 
     const games = try std.testing.allocator.alloc(bgg_model.HotGame, 1);
     games[0] = .{ .id = 13, .rank = 1, .name = try std.testing.allocator.dupe(u8, "CATAN") };
@@ -5358,8 +5545,8 @@ test "hot games state owns labels for loaded games" {
 
     try std.testing.expect(state.load_state == .loaded);
     try std.testing.expectEqual(@as(usize, 2), state.list.items.len);
-    try std.testing.expectEqualStrings("# 1  First", state.list.items[0]);
-    try std.testing.expectEqualStrings("# 2  Second (2024)", state.list.items[1]);
+    try std.testing.expectEqualStrings("#1   First", state.list.items[0]);
+    try std.testing.expectEqualStrings("#2   Second (2024)", state.list.items[1]);
 }
 
 test "hot games filter maps visible focus back to source index" {
@@ -5392,7 +5579,7 @@ test "hot games name sort preserves source index activation" {
 
     try state.toggleSort(std.testing.allocator);
     try std.testing.expectEqual(ListSortMode.name_asc, state.sort_mode);
-    try std.testing.expectEqualStrings("# 2  Cascadia", state.activeList().items[0]);
+    try std.testing.expectEqualStrings("#2   Cascadia", state.activeList().items[0]);
     try std.testing.expectEqual(@as(usize, 1), state.sourceIndex(0).?);
 }
 
@@ -5452,7 +5639,7 @@ test "hot games sort failure keeps existing projection state" {
     try std.testing.expectEqual(ListSortMode.source, state.sort_mode);
     try std.testing.expectEqual(@as(usize, 0), state.sorted_source_indexes.len);
     try std.testing.expectEqual(@as(usize, 1), state.activeList().items.len);
-    try std.testing.expectEqualStrings("# 1  Root", state.activeList().items[0]);
+    try std.testing.expectEqualStrings("#1   Root", state.activeList().items[0]);
 }
 
 test "hot games filter uses current name sort order" {
@@ -5468,10 +5655,35 @@ test "hot games filter uses current name sort order" {
     try state.toggleSort(std.testing.allocator);
     try state.applyFilter(std.testing.allocator, "ca");
 
-    try std.testing.expectEqualStrings("# 2  Cascadia", state.activeList().items[0]);
-    try std.testing.expectEqualStrings("# 3  CATAN", state.activeList().items[1]);
+    try std.testing.expectEqualStrings("#2   Cascadia", state.activeList().items[0]);
+    try std.testing.expectEqualStrings("#3   CATAN", state.activeList().items[1]);
     try std.testing.expectEqual(@as(usize, 1), state.sourceIndex(0).?);
     try std.testing.expectEqual(@as(usize, 2), state.sourceIndex(1).?);
+}
+
+test "hot games stats refresh preserves filtered focus" {
+    const games = try std.testing.allocator.alloc(bgg_model.HotGame, 3);
+    games[0] = .{ .id = 1, .rank = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+    games[1] = .{ .id = 2, .rank = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia") };
+    games[2] = .{ .id = 3, .rank = 3, .name = try std.testing.allocator.dupe(u8, "CATAN") };
+
+    var state: HotGamesState = .{};
+    try state.setLoaded(std.testing.allocator, games);
+    defer state.deinit(std.testing.allocator);
+
+    try state.applyFilter(std.testing.allocator, "ca");
+    state.update(.move_next);
+    try std.testing.expectEqual(@as(usize, 2), state.sourceIndex(state.activeList().focusedIndex()).?);
+
+    const stats = try std.testing.allocator.alloc(bgg_model.Game, 3);
+    stats[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root"), .rating = 8.1 };
+    stats[1] = .{ .id = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia"), .rating = 7.5 };
+    stats[2] = .{ .id = 3, .name = try std.testing.allocator.dupe(u8, "CATAN"), .rating = 7.2 };
+    try state.setStatsLoaded(std.testing.allocator, stats);
+
+    const focused_index = state.activeList().focusedIndex();
+    try std.testing.expectEqual(@as(usize, 2), state.sourceIndex(focused_index).?);
+    try std.testing.expectEqualStrings("#3   CATAN     ★  7.20  ⚖     -      -", state.activeList().items[focused_index]);
 }
 
 test "hot games slash starts filter before global search shortcut" {
@@ -5736,23 +5948,34 @@ test "surfaceRect creates a root-relative rectangle" {
     }, surfaceRect(&ts.surface));
 }
 
-test "constrained list surface clamps to max size" {
+test "list surface keeps stats columns visible" {
     var ts: chasen.testing.TestSurface = undefined;
     try ts.init(120, 40);
     defer ts.deinit();
 
-    const area = constrainedListSurface(&ts.surface);
+    const area = listSurface(&ts.surface, 40);
 
-    try std.testing.expectEqual(list_screen_max_size.width, area.size().width);
-    try std.testing.expectEqual(list_screen_max_size.height, area.size().height);
+    try std.testing.expectEqual(list_screen_min_stats_width, area.size().width);
+    try std.testing.expectEqual(list_screen_max_height, area.size().height);
 }
 
-test "constrained list surface shrinks for small terminals" {
+test "list surface can expand beyond stats minimum" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(140, 40);
+    defer ts.deinit();
+
+    const area = listSurface(&ts.surface, 120);
+
+    try std.testing.expectEqual(@as(u16, 120), area.size().width);
+    try std.testing.expectEqual(list_screen_max_height, area.size().height);
+}
+
+test "list surface shrinks for small terminals" {
     var ts: chasen.testing.TestSurface = undefined;
     try ts.init(40, 12);
     defer ts.deinit();
 
-    const area = constrainedListSurface(&ts.surface);
+    const area = listSurface(&ts.surface, 40);
 
     try std.testing.expectEqual(@as(u16, 40), area.size().width);
     try std.testing.expectEqual(@as(u16, 12), area.size().height);

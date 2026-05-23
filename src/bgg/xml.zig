@@ -714,7 +714,7 @@ fn freeHotGameItems(allocator: Allocator, games: []model.HotGame) void {
     }
 }
 
-fn freeGameItems(allocator: Allocator, games: []model.Game) void {
+pub fn freeGameItems(allocator: Allocator, games: []model.Game) void {
     for (games) |game| {
         freeGame(allocator, game);
     }
