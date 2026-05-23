@@ -109,8 +109,7 @@ pub const App = struct {
     transition_from_screen: ?Screen = null,
     transition_to_screen: ?Screen = null,
     pub const Msg = union(enum) {
-        setup_token_input: ui.PasswordInput.Msg,
-        setup_token_paste: []const u8,
+        setup_token: SetupTokenMsg,
         hot_games: HotGamesMsg,
         search: SearchMsg,
         collection: CollectionMsg,
@@ -153,18 +152,7 @@ pub const App = struct {
 
     pub fn update(self: *App, msg: Msg, ctx: *chasen.Ctx(Msg)) !void {
         switch (msg) {
-            .setup_token_input => |input_msg| {
-                if (input_msg == .submit) {
-                    try self.submitToken(ctx);
-                } else if (self.setup_token_input) |*input| {
-                    try input.update(input_msg);
-                }
-            },
-            .setup_token_paste => |text| {
-                if (self.setup_token_input) |*input| {
-                    try insertPastedCodepoints(input, text);
-                }
-            },
+            .setup_token => |setup_msg| try self.updateSetupToken(setup_msg, ctx),
             .hot_games => |hot_msg| try self.updateHotGames(hot_msg, ctx),
             .search => |search_msg| try self.updateSearch(search_msg, ctx),
             .collection => |collection_msg| try self.updateCollection(collection_msg, ctx),
@@ -243,11 +231,11 @@ pub const App = struct {
         if (self.screen == .setup_token) {
             switch (event) {
                 .key_press => |key| if (key.matches(chasen.Key.escape, .{})) return .quit,
-                .paste => |text| return .{ .setup_token_paste = text },
+                .paste => |text| return .{ .setup_token = .{ .paste = text } },
                 else => {},
             }
             if (self.setup_token_input) |*input| {
-                if (input.handleEvent(event)) |msg| return .{ .setup_token_input = msg };
+                if (input.handleEvent(event)) |msg| return .{ .setup_token = .{ .input = msg } };
             }
             return null;
         }
@@ -890,6 +878,23 @@ pub const App = struct {
         try self.saveConfigIfAvailable(ctx);
         try input.update(.clear);
         try self.showScreen(.main_menu, ctx);
+    }
+
+    fn updateSetupToken(self: *App, msg: SetupTokenMsg, ctx: *chasen.Ctx(Msg)) !void {
+        switch (msg) {
+            .input => |input_msg| {
+                if (input_msg == .submit) {
+                    try self.submitToken(ctx);
+                } else if (self.setup_token_input) |*input| {
+                    try input.update(input_msg);
+                }
+            },
+            .paste => |text| {
+                if (self.setup_token_input) |*input| {
+                    try insertPastedCodepoints(input, text);
+                }
+            },
+        }
     }
 
     fn updateSettings(self: *App, msg: screens.settings.Msg, ctx: *chasen.Ctx(Msg)) !void {
@@ -2394,6 +2399,11 @@ const HotGamesResult = union(enum) {
     failed: []const u8,
 };
 
+const SetupTokenMsg = union(enum) {
+    input: ui.PasswordInput.Msg,
+    paste: []const u8,
+};
+
 const HotGamesMsg = union(enum) {
     filter_start,
     filter_input: ui.TextInput.Msg,
@@ -3760,8 +3770,8 @@ test "setup token screen maps paste to paste message" {
     defer app.deinitOwnedState();
 
     const msg = app.handleEvent(.{ .paste = "token" }).?;
-    try std.testing.expect(msg == .setup_token_paste);
-    try std.testing.expectEqualStrings("token", msg.setup_token_paste);
+    try std.testing.expect(msg == .setup_token);
+    try std.testing.expectEqualStrings("token", msg.setup_token.paste);
 }
 
 test "search paste inserts printable query text" {
