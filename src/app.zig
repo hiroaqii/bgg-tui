@@ -114,10 +114,7 @@ pub const App = struct {
         hot_games: HotGamesMsg,
         search: SearchMsg,
         collection: CollectionMsg,
-        game_detail_loaded: GameDetailTaskResult,
-        game_detail_move_prev,
-        game_detail_move_next,
-        game_detail_open_browser,
+        game_detail: GameDetailMsg,
         forum_open,
         forums_loaded: ForumListTaskResult,
         forum_list: ui.List.Msg,
@@ -185,10 +182,7 @@ pub const App = struct {
             .hot_games => |hot_msg| try self.updateHotGames(hot_msg, ctx),
             .search => |search_msg| try self.updateSearch(search_msg, ctx),
             .collection => |collection_msg| try self.updateCollection(collection_msg, ctx),
-            .game_detail_loaded => |result| try self.finishGameDetail(ctx, result),
-            .game_detail_move_prev => self.game_detail.moveUp(),
-            .game_detail_move_next => self.game_detail.moveDown(self.game_detail.visible_height),
-            .game_detail_open_browser => try self.openGameInBrowser(ctx),
+            .game_detail => |detail_msg| try self.updateGameDetail(detail_msg, ctx),
             .forum_open => try self.startForumList(ctx),
             .forums_loaded => |result| try self.finishForumList(ctx, result),
             .forum_list => |list_msg| switch (list_msg) {
@@ -338,11 +332,11 @@ pub const App = struct {
         if (self.screen == .game_detail) {
             switch (event) {
                 .key_press => |key| {
-                    if (key.matches(chasen.Key.up, .{}) or key.codepoint == 'k') return .game_detail_move_prev;
-                    if (key.matches(chasen.Key.down, .{}) or key.codepoint == 'j') return .game_detail_move_next;
+                    if (key.matches(chasen.Key.up, .{}) or key.codepoint == 'k') return .{ .game_detail = .move_prev };
+                    if (key.matches(chasen.Key.down, .{}) or key.codepoint == 'j') return .{ .game_detail = .move_next };
                     if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'b') return .{ .show_screen = self.navigation.detail_back_screen };
                     if (key.codepoint == 'f' and self.game_detail.load_state == .loaded and self.game_detail.games.len > 0) return .forum_open;
-                    if (key.codepoint == 'o' and self.game_detail.load_state == .loaded and self.game_detail.games.len > 0) return .game_detail_open_browser;
+                    if (key.codepoint == 'o' and self.game_detail.load_state == .loaded and self.game_detail.games.len > 0) return .{ .game_detail = .open_browser };
                     if (key.codepoint == 'm') return .{ .show_screen = .main_menu };
                     if (key.codepoint == 'q') return .quit;
                 },
@@ -1277,6 +1271,15 @@ pub const App = struct {
                     if (self.collection.sourceIndex(index)) |source_index| try self.openCollectionItem(source_index, ctx);
                 },
             },
+        }
+    }
+
+    fn updateGameDetail(self: *App, msg: GameDetailMsg, ctx: *chasen.Ctx(Msg)) !void {
+        switch (msg) {
+            .loaded => |result| try self.finishGameDetail(ctx, result),
+            .move_prev => self.game_detail.moveUp(),
+            .move_next => self.game_detail.moveDown(self.game_detail.visible_height),
+            .open_browser => try self.openGameInBrowser(ctx),
         }
     }
 
@@ -2778,6 +2781,13 @@ const GameDetailTaskResult = struct {
     result: GameDetailResult,
 };
 
+const GameDetailMsg = union(enum) {
+    loaded: GameDetailTaskResult,
+    move_prev,
+    move_next,
+    open_browser,
+};
+
 const ForumListResult = union(enum) {
     ok: []bgg_model.Forum,
     failed: []const u8,
@@ -2915,10 +2925,10 @@ const GameDetailTask = struct {
             allocator.destroy(task);
         }
 
-        return .{ .game_detail_loaded = .{
+        return .{ .game_detail = .{ .loaded = .{
             .request_id = task.request_id,
             .result = loadGameDetail(allocator, io, task.token, task.game_id) catch |err| .{ .failed = @errorName(err) },
-        } };
+        } } };
     }
 };
 
@@ -4112,7 +4122,8 @@ test "loaded game detail o opens browser" {
     app.screen = .game_detail;
 
     const msg = app.handleEvent(.{ .key_press = .{ .codepoint = 'o' } }).?;
-    try std.testing.expect(msg == .game_detail_open_browser);
+    try std.testing.expect(msg == .game_detail);
+    try std.testing.expect(msg.game_detail == .open_browser);
 }
 
 test "forum back key returns to detail or forum list" {
@@ -4198,7 +4209,7 @@ test "detail scroll uses resized body height" {
     app.game_detail.load_state = .loaded;
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
-    for (0..10) |_| try app.update(.game_detail_move_next, &tc.ctx);
+    for (0..10) |_| try app.update(.{ .game_detail = .move_next }, &tc.ctx);
     try std.testing.expectEqual(app.game_detail.maxScroll(detailLayoutForTerminal(&app).content_height), app.game_detail.scroll);
 }
 
