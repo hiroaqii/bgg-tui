@@ -116,14 +116,8 @@ pub const App = struct {
         collection: CollectionMsg,
         game_detail: GameDetailMsg,
         forum: ForumMsg,
-        thread_open: usize,
-        thread_loaded: ThreadTaskResult,
-        thread_move_prev,
-        thread_move_next,
-        thread_sort_toggle,
-        thread_open_browser,
-        browser_opened: BrowserOpenTaskResult,
-        thread_back_to_forums,
+        thread: ThreadMsg,
+        browser: BrowserMsg,
         settings: screens.settings.Msg,
         terminal_resized: chasen.Size,
         frame: chasen.Frame,
@@ -176,14 +170,8 @@ pub const App = struct {
             .collection => |collection_msg| try self.updateCollection(collection_msg, ctx),
             .game_detail => |detail_msg| try self.updateGameDetail(detail_msg, ctx),
             .forum => |forum_msg| try self.updateForum(forum_msg, ctx),
-            .thread_open => |index| try self.startThread(ctx, index),
-            .thread_loaded => |result| try self.finishThread(ctx, result),
-            .thread_move_prev => self.thread.moveUp(),
-            .thread_move_next => self.thread.moveDown(threadLayoutForTerminal(self).content_height),
-            .thread_sort_toggle => try self.thread.toggleSort(self.allocator.?),
-            .thread_open_browser => try self.openThreadInBrowser(ctx),
-            .browser_opened => |result| try self.finishBrowserOpen(result),
-            .thread_back_to_forums => self.backToThreadList(ctx),
+            .thread => |thread_msg| try self.updateThread(thread_msg, ctx),
+            .browser => |browser_msg| try self.updateBrowser(browser_msg),
             .settings => |settings_msg| try self.updateSettings(settings_msg, ctx),
             .terminal_resized => |size| self.handleResize(size),
             .frame => |frame| {
@@ -349,12 +337,12 @@ pub const App = struct {
                 .key_press => |key| {
                     if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'm') return .{ .show_screen = .main_menu };
                     if (key.codepoint == 'q') return .quit;
-                    if (key.codepoint == 'b') return .thread_back_to_forums;
+                    if (key.codepoint == 'b') return .{ .thread = .back_to_forums };
                     if (self.thread.load_state == .loaded) {
-                        if (key.matches(chasen.Key.up, .{}) or key.codepoint == 'k') return .thread_move_prev;
-                        if (key.matches(chasen.Key.down, .{}) or key.codepoint == 'j') return .thread_move_next;
-                        if (key.codepoint == 's') return .thread_sort_toggle;
-                        if (key.codepoint == 'o') return .thread_open_browser;
+                        if (key.matches(chasen.Key.up, .{}) or key.codepoint == 'k') return .{ .thread = .move_prev };
+                        if (key.matches(chasen.Key.down, .{}) or key.codepoint == 'j') return .{ .thread = .move_next };
+                        if (key.codepoint == 's') return .{ .thread = .sort_toggle };
+                        if (key.codepoint == 'o') return .{ .thread = .open_browser };
                     }
                 },
                 else => {},
@@ -1278,6 +1266,23 @@ pub const App = struct {
             .back_to_list => self.backToForumList(),
             .next_page => try self.openForumPage(ctx, self.forums.thread_page.page + 1),
             .previous_page => try self.openForumPage(ctx, self.forums.thread_page.page -| 1),
+        }
+    }
+
+    fn updateThread(self: *App, msg: ThreadMsg, ctx: *chasen.Ctx(Msg)) !void {
+        switch (msg) {
+            .loaded => |result| try self.finishThread(ctx, result),
+            .move_prev => self.thread.moveUp(),
+            .move_next => self.thread.moveDown(threadLayoutForTerminal(self).content_height),
+            .sort_toggle => try self.thread.toggleSort(self.allocator.?),
+            .open_browser => try self.openThreadInBrowser(ctx),
+            .back_to_forums => self.backToThreadList(ctx),
+        }
+    }
+
+    fn updateBrowser(self: *App, msg: BrowserMsg) !void {
+        switch (msg) {
+            .opened => |result| try self.finishBrowserOpen(result),
         }
     }
 
@@ -2828,6 +2833,15 @@ const ThreadTaskResult = struct {
     result: ThreadResult,
 };
 
+const ThreadMsg = union(enum) {
+    loaded: ThreadTaskResult,
+    move_prev,
+    move_next,
+    sort_toggle,
+    open_browser,
+    back_to_forums,
+};
+
 const BrowserOpenResult = union(enum) {
     ok,
     failed: []u8,
@@ -2842,6 +2856,10 @@ const BrowserOpenTaskResult = struct {
     request_id: u64,
     target: BrowserTarget,
     result: BrowserOpenResult,
+};
+
+const BrowserMsg = union(enum) {
+    opened: BrowserOpenTaskResult,
 };
 
 const ListSortMode = enum {
@@ -2993,10 +3011,10 @@ const ThreadTask = struct {
             allocator.destroy(task);
         }
 
-        return .{ .thread_loaded = .{
+        return .{ .thread = .{ .loaded = .{
             .request_id = task.request_id,
             .result = loadThread(allocator, io, task.token, task.thread_id) catch |err| .{ .failed = @errorName(err) },
-        } };
+        } } };
     }
 };
 
@@ -3012,18 +3030,18 @@ const BrowserOpenTask = struct {
         }
 
         browser.openUrl(io, task.url) catch {
-            return .{ .browser_opened = .{
+            return .{ .browser = .{ .opened = .{
                 .request_id = task.request_id,
                 .target = task.target,
                 .result = .{ .failed = task.url },
-            } };
+            } } };
         };
         allocator.free(task.url);
-        return .{ .browser_opened = .{
+        return .{ .browser = .{ .opened = .{
             .request_id = task.request_id,
             .target = task.target,
             .result = .ok,
-        } };
+        } } };
     }
 };
 
@@ -4233,7 +4251,8 @@ test "loaded thread o opens browser" {
     app.thread.load_state = .loaded;
 
     const msg = app.handleEvent(.{ .key_press = .{ .codepoint = 'o' } }).?;
-    try std.testing.expect(msg == .thread_open_browser);
+    try std.testing.expect(msg == .thread);
+    try std.testing.expect(msg.thread == .open_browser);
 }
 
 test "stale browser failure does not update current thread" {
