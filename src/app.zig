@@ -17,6 +17,7 @@ const list_view = @import("list_view.zig");
 const motion = @import("motion.zig");
 const screens = @import("screens/root.zig");
 const style_mod = @import("style.zig");
+const transitions = @import("transitions.zig");
 
 // Keep top-level screens centered until a screen needs its own full-page layout.
 const main_menu_size = chasen.Size{ .width = 48, .height = 12 };
@@ -28,16 +29,6 @@ const list_screen_max_size = chasen.Size{ .width = 72, .height = 34 };
 const forum_screen_max_size = chasen.Size{ .width = 88, .height = 34 };
 const detail_outer_reserved_rows: u16 = 3;
 const thread_outer_reserved_rows: u16 = 3;
-const screen_transition_frames: u64 = 84;
-const code_rain_transition_frames: u64 = 110;
-const dissolve_transition_frames: u64 = 60;
-const glitch_transition_frames: u64 = 192;
-const lines_transition_frames: u64 = 90;
-const spiral_transition_frames: u64 = 104;
-const warp_transition_frames: u64 = 96;
-const scanline_transition_frames: u64 = 110;
-const iris_transition_frames: u64 = 90;
-const shutter_transition_frames: u64 = 72;
 
 // List screens follow the Go version's vertical rhythm:
 // row 0 title, row 1 blank, row 2 position, row 3 blank, row 4 list body.
@@ -3394,31 +3385,15 @@ fn screenTitle(screen: Screen) []const u8 {
 }
 
 fn screenTransitionKind(value: []const u8) anim.TransitionKind {
-    if (std.mem.eql(u8, value, "code-rain")) return .code_rain;
-    if (std.mem.eql(u8, value, "dissolve")) return .dissolve;
-    if (std.mem.eql(u8, value, "fade")) return .fade;
-    if (std.mem.eql(u8, value, "glitch")) return .glitch;
-    if (std.mem.eql(u8, value, "iris")) return .iris;
-    if (std.mem.eql(u8, value, "lines")) return .lines;
-    if (std.mem.eql(u8, value, "lines-cross")) return .lines_cross;
-    if (std.mem.eql(u8, value, "scanline")) return .scanline;
-    if (std.mem.eql(u8, value, "shutter")) return .shutter;
-    if (std.mem.eql(u8, value, "spiral")) return .spiral;
-    if (std.mem.eql(u8, value, "sweep")) return .sweep;
-    if (std.mem.eql(u8, value, "warp")) return .warp;
-    // Other configured transition names are preserved for settings/config
-    // parity, but unsupported names remain no-op until their renderer is added.
-    return .none;
+    return transitions.kindForValue(value);
 }
 
 fn screenTransitionKindForConfig(value: []const u8, seed: u64) anim.TransitionKind {
-    if (std.mem.eql(u8, value, "random")) return randomScreenTransitionKind(seed);
-    return screenTransitionKind(value);
+    return transitions.kindForConfig(value, seed);
 }
 
 fn randomScreenTransitionKind(seed: u64) anim.TransitionKind {
-    const candidates = [_]anim.TransitionKind{ .fade, .glitch, .code_rain, .dissolve, .sweep, .spiral, .warp, .scanline, .iris, .shutter, .lines, .lines_cross };
-    return candidates[transitionChoiceHash(seed) % candidates.len];
+    return transitions.randomKind(seed);
 }
 
 fn transitionChoiceSeed(counter: u64, frame: u64, previous_screen: Screen, next_screen: Screen) u64 {
@@ -3427,26 +3402,8 @@ fn transitionChoiceSeed(counter: u64, frame: u64, previous_screen: Screen, next_
         (@as(u64, @intCast(@intFromEnum(next_screen))) *% 0x94d0_49bb_1331_11eb);
 }
 
-fn transitionChoiceHash(seed: u64) usize {
-    var value = seed +% 0x9e37_79b9_7f4a_7c15;
-    value = (value ^ (value >> 30)) *% 0xbf58_476d_1ce4_e5b9;
-    value = (value ^ (value >> 27)) *% 0x94d0_49bb_1331_11eb;
-    return @intCast(value ^ (value >> 31));
-}
-
 fn screenTransitionFrames(kind: anim.TransitionKind) u64 {
-    return switch (kind) {
-        .code_rain => code_rain_transition_frames,
-        .dissolve => dissolve_transition_frames,
-        .glitch => glitch_transition_frames,
-        .iris => iris_transition_frames,
-        .lines, .lines_cross => lines_transition_frames,
-        .scanline => scanline_transition_frames,
-        .shutter => shutter_transition_frames,
-        .spiral => spiral_transition_frames,
-        .warp => warp_transition_frames,
-        else => screen_transition_frames,
-    };
+    return transitions.framesForKind(kind);
 }
 
 fn insertPastedCodepoints(input: anytype, text: []const u8) !void {
@@ -3500,7 +3457,7 @@ fn parseSettingsWidth(text: []const u8) !u16 {
 }
 
 const color_theme_values = [_][]const u8{ "default", "blue", "orange", "mono", "matcha" };
-const transition_values = [_][]const u8{ "none", "fade", "glitch", "code-rain", "dissolve", "sweep", "spiral", "warp", "scanline", "iris", "shutter", "lines", "lines-cross", "random" };
+const transition_values = transitions.values;
 const selection_values = [_][]const u8{ "none", "invert", "wave", "blink", "glitch", "scan" };
 const border_style_values = [_][]const u8{ "none", "rounded", "thick", "double", "block", "dots" };
 const list_density_values = [_][]const u8{ "compact", "normal", "comfortable", "relaxed" };

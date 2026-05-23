@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const transitions = @import("transitions.zig");
 
 pub const config_path_env = "BGG_TUI_CONFIG_PATH";
 pub const primary_token_env = "BGG_TUI_API_TOKEN";
@@ -78,7 +79,7 @@ pub const Config = struct {
         try validateWidth(config.display.thread_width);
         try validateWidth(config.display.detail_width);
         if (!isOneOf(config.interface.color_theme, &.{ "default", "blue", "orange", "mono", "matcha" })) return error.InvalidColorTheme;
-        if (!isOneOf(config.interface.transition, &.{ "none", "fade", "glitch", "code-rain", "dissolve", "sweep", "spiral", "warp", "scanline", "iris", "shutter", "lines", "lines-cross", "random" })) return error.InvalidTransition;
+        if (!transitions.isValidValue(config.interface.transition)) return error.InvalidTransition;
         if (!isOneOf(config.interface.selection, &.{ "none", "invert", "wave", "blink", "glitch", "scan" })) return error.InvalidSelection;
         if (!isOneOf(config.interface.list_density, &.{ "compact", "normal", "comfortable", "relaxed" })) return error.InvalidListDensity;
         if (!isOneOf(config.interface.date_format, &.{ "yyyy-mm-dd", "yyyy/mm/dd", "relative", "YYYY-MM-DD" })) return error.InvalidDateFormat;
