@@ -444,7 +444,7 @@ pub const App = struct {
                 },
             },
             .hot_sort_toggle => try self.toggleHotSort(),
-            .hot_games_loaded => |result| try self.finishHotGamesLoad(result),
+            .hot_games_loaded => |result| try self.finishHotGamesLoad(ctx, result),
             .show_screen => |screen| try self.showScreen(screen, ctx),
             .quit => {
                 self.deinitOwnedState();
@@ -1462,7 +1462,14 @@ pub const App = struct {
     }
 
     fn startHotGamesLoad(self: *App, ctx: *chasen.Ctx(Msg)) !void {
-        if (self.hot_games.load_state == .loading or self.hot_games.load_state == .loaded) return;
+        if (self.hot_games.load_state == .loading) {
+            self.switchScreenWithoutTransition(.hot_games);
+            self.requestMotionFrameIfNeeded(ctx);
+            return;
+        }
+        if (self.hot_games.load_state == .loaded) return;
+
+        self.switchScreenWithoutTransition(.hot_games);
 
         const token = self.config.apiClientToken() orelse {
             self.hot_games.setFailed("BGG API token is required");
@@ -1482,9 +1489,12 @@ pub const App = struct {
         };
     }
 
-    fn finishHotGamesLoad(self: *App, result: HotGamesResult) !void {
+    fn finishHotGamesLoad(self: *App, ctx: *chasen.Ctx(Msg), result: HotGamesResult) !void {
         switch (result) {
-            .ok => |games| try self.hot_games.setLoaded(self.allocator.?, games),
+            .ok => |games| {
+                try self.hot_games.setLoaded(self.allocator.?, games);
+                self.startContentTransitionIfVisible(ctx, .hot_games);
+            },
             .failed => |message| self.hot_games.setFailed(message),
         }
     }
@@ -5137,6 +5147,90 @@ test "thread completion stores hidden result without transition" {
     try app.finishThread(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = thread } });
 
     try std.testing.expect(app.thread.load_state == .loaded);
+    try std.testing.expect(!app.hasActiveScreenTransition());
+    try std.testing.expect(!tc.ctx.frame_requested);
+}
+
+test "hot games loading enters hot games without screen transition" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    try app.showScreen(.settings, &tc.ctx);
+    try std.testing.expect(app.hasActiveScreenTransition());
+
+    tc.resetTransient();
+    try app.showScreen(.hot_games, &tc.ctx);
+    defer {
+        const task: *HotGamesTask = @ptrCast(@alignCast(tc.ctx.pendingTaskWithSlice()[0].ctx));
+        std.testing.allocator.free(task.token);
+        std.testing.allocator.destroy(task);
+    }
+
+    try std.testing.expectEqual(Screen.hot_games, app.screen);
+    try std.testing.expect(app.hot_games.load_state == .loading);
+    try std.testing.expect(!app.hasActiveScreenTransition());
+    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expectEqual(@as(u8, 1), tc.ctx.pending_tasks_with_len);
+}
+
+test "hot games loading re-entry clears screen transition" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    app.hot_games.setLoading();
+    app.screen = .settings;
+    tc.resetTransient();
+    try app.showScreen(.hot_games, &tc.ctx);
+
+    try std.testing.expectEqual(Screen.hot_games, app.screen);
+    try std.testing.expect(app.hot_games.load_state == .loading);
+    try std.testing.expect(!app.hasActiveScreenTransition());
+    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expectEqual(@as(u8, 0), tc.ctx.pending_tasks_with_len);
+}
+
+test "hot games completion starts content transition when visible" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    const games = try std.testing.allocator.alloc(bgg_model.HotGame, 1);
+    games[0] = .{ .id = 13, .rank = 1, .name = try std.testing.allocator.dupe(u8, "CATAN") };
+
+    app.screen = .hot_games;
+    tc.resetTransient();
+    try app.finishHotGamesLoad(&tc.ctx, .{ .ok = games });
+
+    try std.testing.expect(app.hot_games.load_state == .loaded);
+    try std.testing.expect(app.hasActiveScreenTransition());
+    try std.testing.expectEqual(Screen.hot_games, app.transition_from_screen.?);
+    try std.testing.expectEqual(Screen.hot_games, app.transition_to_screen.?);
+    try std.testing.expect(tc.ctx.frame_requested);
+}
+
+test "hot games completion stores hidden result without transition" {
+    var app = App.create(.{ .api = .{ .token = "token" }, .interface = .{ .transition = "sweep" } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.init(&tc.ctx);
+    defer app.deinitOwnedState();
+
+    const games = try std.testing.allocator.alloc(bgg_model.HotGame, 1);
+    games[0] = .{ .id = 13, .rank = 1, .name = try std.testing.allocator.dupe(u8, "CATAN") };
+
+    app.screen = .main_menu;
+    tc.resetTransient();
+    try app.finishHotGamesLoad(&tc.ctx, .{ .ok = games });
+
+    try std.testing.expect(app.hot_games.load_state == .loaded);
     try std.testing.expect(!app.hasActiveScreenTransition());
     try std.testing.expect(!tc.ctx.frame_requested);
 }
