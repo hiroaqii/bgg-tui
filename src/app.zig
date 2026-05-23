@@ -81,7 +81,6 @@ pub const App = struct {
     screen: Screen,
     allocator: ?std.mem.Allocator = null,
     setup_token_input: ?ui.PasswordInput = null,
-    hot_filter_input: ?ui.TextInput = null,
     owned_token: ?[]u8 = null,
     owned_default_username: ?[]u8 = null,
     hot_games: HotGamesState = .{},
@@ -203,9 +202,7 @@ pub const App = struct {
         self.setup_token_input = try ui.PasswordInput.init(ctx.allocator(), .{
             .placeholder = "Paste BGG API token",
         });
-        self.hot_filter_input = try ui.TextInput.init(ctx.allocator(), .{
-            .placeholder = "Filter hot games",
-        });
+        try self.hot_games.initInputs(ctx.allocator());
         try self.search.initInputs(ctx.allocator());
         try self.collection.initInputs(ctx.allocator(), self.config.collection.default_username);
         try self.settings.initInputs(ctx.allocator(), self.config.collection.default_username);
@@ -229,12 +226,12 @@ pub const App = struct {
             .hot_filter_start => try self.startHotFilter(),
             .hot_filter_input => |input_msg| {
                 if (input_msg != .submit) {
-                    if (self.hot_filter_input) |*input| try input.update(input_msg);
+                    if (self.hot_games.filter_input) |*input| try input.update(input_msg);
                     try self.applyHotFilter();
                 }
             },
             .hot_filter_paste => |text| {
-                if (self.hot_filter_input) |*input| {
+                if (self.hot_games.filter_input) |*input| {
                     try insertPastedCodepoints(input, text);
                     try self.applyHotFilter();
                 }
@@ -705,7 +702,7 @@ pub const App = struct {
                     .paste => |text| return .{ .hot_filter_paste = text },
                     else => {},
                 }
-                if (self.hot_filter_input) |*input| {
+                if (self.hot_games.filter_input) |*input| {
                     if (input.handleEvent(event)) |msg| return .{ .hot_filter_input = msg };
                 }
                 if (self.hot_games.handleEvent(event)) |msg| return .{ .hot_list = msg };
@@ -1242,10 +1239,7 @@ pub const App = struct {
             input.deinit();
             self.setup_token_input = null;
         }
-        if (self.hot_filter_input) |*input| {
-            input.deinit();
-            self.hot_filter_input = null;
-        }
+        self.hot_games.deinitInputs();
         self.search.deinitInputs();
         self.collection.deinitInputs();
         self.settings.deinitInputs();
@@ -1266,17 +1260,17 @@ pub const App = struct {
     }
 
     fn startHotFilter(self: *App) !void {
-        if (self.hot_filter_input) |*input| try input.update(.clear);
+        if (self.hot_games.filter_input) |*input| try input.update(.clear);
         try self.hot_games.applyFilter(self.allocator.?, "");
     }
 
     fn applyHotFilter(self: *App) !void {
-        const input = if (self.hot_filter_input) |*input| input else return;
+        const input = if (self.hot_games.filter_input) |*input| input else return;
         try self.hot_games.applyFilter(self.allocator.?, input.text());
     }
 
     fn clearHotFilter(self: *App) !void {
-        if (self.hot_filter_input) |*input| try input.update(.clear);
+        if (self.hot_games.filter_input) |*input| try input.update(.clear);
         self.hot_games.clearFilter(self.allocator.?);
     }
 
@@ -1986,7 +1980,7 @@ pub const App = struct {
 
     fn drawHotFilterInput(self: *const App, surface: *chasen.Surface) !void {
         _ = surface.borrowTextAt(0, list_filter_row, "Filter:", self.subtleStyle());
-        if (self.hot_filter_input) |*input| {
+        if (self.hot_games.filter_input) |*input| {
             var input_area = surface.child(.{
                 .col = 8,
                 .row = list_filter_row,
@@ -2252,6 +2246,7 @@ pub const App = struct {
 };
 
 const HotGamesState = struct {
+    filter_input: ?ui.TextInput = null,
     load_state: LoadState = .idle,
     games: []bgg_model.HotGame = &.{},
     labels: []const []const u8 = &.{},
@@ -2269,6 +2264,19 @@ const HotGamesState = struct {
         loaded,
         failed: []const u8,
     };
+
+    fn initInputs(self: *HotGamesState, allocator: std.mem.Allocator) !void {
+        self.filter_input = try ui.TextInput.init(allocator, .{
+            .placeholder = "Filter hot games",
+        });
+    }
+
+    fn deinitInputs(self: *HotGamesState) void {
+        if (self.filter_input) |*input| {
+            input.deinit();
+            self.filter_input = null;
+        }
+    }
 
     fn setLoading(self: *HotGamesState) void {
         self.load_state = .loading;
@@ -5399,7 +5407,7 @@ test "hot games global shortcuts work after clearing filter" {
     var app = App.create(.{ .api = .{ .token = "token" } }, .{});
     app.allocator = std.testing.allocator;
     app.screen = .hot_games;
-    app.hot_filter_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "ca" });
+    app.hot_games.filter_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "ca" });
     defer app.deinitOwnedState();
 
     try app.hot_games.applyFilter(std.testing.allocator, "");
