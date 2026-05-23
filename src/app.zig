@@ -82,15 +82,12 @@ pub const App = struct {
     allocator: ?std.mem.Allocator = null,
     setup_token_input: ?ui.PasswordInput = null,
     hot_filter_input: ?ui.TextInput = null,
-    search_input: ?ui.TextInput = null,
-    search_filter_input: ?ui.TextInput = null,
     collection_username_input: ?ui.TextInput = null,
     collection_filter_input: ?ui.TextInput = null,
     owned_token: ?[]u8 = null,
     owned_default_username: ?[]u8 = null,
     hot_games: HotGamesState = .{},
     search: SearchState = .{},
-    search_request_id: u64 = 0,
     collection: CollectionState = .{},
     collection_request_id: u64 = 0,
     collection_status_picker: bool = false,
@@ -215,12 +212,7 @@ pub const App = struct {
         self.hot_filter_input = try ui.TextInput.init(ctx.allocator(), .{
             .placeholder = "Filter hot games",
         });
-        self.search_input = try ui.TextInput.init(ctx.allocator(), .{
-            .placeholder = "Search board games",
-        });
-        self.search_filter_input = try ui.TextInput.init(ctx.allocator(), .{
-            .placeholder = "Filter search results",
-        });
+        try self.search.initInputs(ctx.allocator());
         self.collection_username_input = try ui.TextInput.init(ctx.allocator(), .{
             .value = self.config.collection.default_username orelse "",
             .placeholder = "BGG username",
@@ -263,24 +255,24 @@ pub const App = struct {
             .search_input => |input_msg| {
                 if (input_msg == .submit) {
                     try self.startSearch(ctx);
-                } else if (self.search_input) |*input| {
+                } else if (self.search.input) |*input| {
                     try input.update(input_msg);
                 }
             },
             .search_paste => |text| {
-                if (self.search_input) |*input| {
+                if (self.search.input) |*input| {
                     try insertPastedCodepoints(input, text);
                 }
             },
             .search_filter_start => try self.startSearchFilter(),
             .search_filter_input => |input_msg| {
                 if (input_msg != .submit) {
-                    if (self.search_filter_input) |*input| try input.update(input_msg);
+                    if (self.search.filter_input) |*input| try input.update(input_msg);
                     try self.applySearchFilter();
                 }
             },
             .search_filter_paste => |text| {
-                if (self.search_filter_input) |*input| {
+                if (self.search.filter_input) |*input| {
                     try insertPastedCodepoints(input, text);
                     try self.applySearchFilter();
                 }
@@ -502,7 +494,7 @@ pub const App = struct {
                 .paste => |text| return .{ .search_paste = text },
                 else => {},
             }
-            if (self.search_input) |*input| {
+            if (self.search.input) |*input| {
                 if (input.handleEvent(event)) |msg| return .{ .search_input = msg };
             }
             return null;
@@ -531,7 +523,7 @@ pub const App = struct {
                 else => {},
             }
             if (self.search.filter_active) {
-                if (self.search_filter_input) |*input| {
+                if (self.search.filter_input) |*input| {
                     if (input.handleEvent(event)) |msg| return .{ .search_filter_input = msg };
                 }
             }
@@ -873,7 +865,7 @@ pub const App = struct {
         var area = centeredSurface(sfc, search_input_size);
         _ = area.borrowTextAt(0, 0, "Search Games", self.titleStyle());
 
-        if (self.search_input) |*input| {
+        if (self.search.input) |*input| {
             var input_area = area.child(.{ .col = 0, .row = 2, .width = @min(area.size().width, 48), .height = 1 });
             input.view(&input_area, .{});
         }
@@ -1266,14 +1258,7 @@ pub const App = struct {
             input.deinit();
             self.hot_filter_input = null;
         }
-        if (self.search_input) |*input| {
-            input.deinit();
-            self.search_input = null;
-        }
-        if (self.search_filter_input) |*input| {
-            input.deinit();
-            self.search_filter_input = null;
-        }
+        self.search.deinitInputs();
         if (self.collection_username_input) |*input| {
             input.deinit();
             self.collection_username_input = null;
@@ -1319,17 +1304,17 @@ pub const App = struct {
     }
 
     fn startSearchFilter(self: *App) !void {
-        if (self.search_filter_input) |*input| try input.update(.clear);
+        if (self.search.filter_input) |*input| try input.update(.clear);
         try self.search.applyFilter(self.allocator.?, "");
     }
 
     fn applySearchFilter(self: *App) !void {
-        const input = if (self.search_filter_input) |*input| input else return;
+        const input = if (self.search.filter_input) |*input| input else return;
         try self.search.applyFilter(self.allocator.?, input.text());
     }
 
     fn clearSearchFilter(self: *App) !void {
-        if (self.search_filter_input) |*input| try input.update(.clear);
+        if (self.search.filter_input) |*input| try input.update(.clear);
         self.search.clearFilter(self.allocator.?);
     }
 
@@ -1412,10 +1397,10 @@ pub const App = struct {
     }
 
     fn resetSearchScreen(self: *App) !void {
-        if (self.search_input) |*input| {
+        if (self.search.input) |*input| {
             try input.update(.clear);
         }
-        self.search_request_id +%= 1;
+        self.search.request_id +%= 1;
         self.search.deinit(self.allocator.?);
     }
 
@@ -1473,13 +1458,13 @@ pub const App = struct {
     }
 
     fn startSearch(self: *App, ctx: *chasen.Ctx(Msg)) !void {
-        const input = if (self.search_input) |*input| input else return;
+        const input = if (self.search.input) |*input| input else return;
         const query = std.mem.trim(u8, input.text(), " \t\r\n");
         // Every submit represents the current search intent. Bump the request
         // id before validation so older in-flight tasks cannot replace a new
         // validation or auth failure state.
-        self.search_request_id +%= 1;
-        const request_id = self.search_request_id;
+        self.search.request_id +%= 1;
+        const request_id = self.search.request_id;
 
         if (query.len < 3) {
             self.search.setFailed(self.allocator.?, "Search query must be at least 3 characters");
@@ -1511,7 +1496,7 @@ pub const App = struct {
     }
 
     fn finishSearch(self: *App, ctx: *chasen.Ctx(Msg), task_result: SearchTaskResult) !void {
-        if (task_result.request_id != self.search_request_id) {
+        if (task_result.request_id != self.search.request_id) {
             switch (task_result.result) {
                 .ok => |results| bgg_xml.freeSearchResults(self.allocator.?, results),
                 .failed => {},
@@ -2033,7 +2018,7 @@ pub const App = struct {
 
     fn drawSearchFilterInput(self: *const App, surface: *chasen.Surface) !void {
         _ = surface.borrowTextAt(0, list_filter_row, "Filter:", self.subtleStyle());
-        if (self.search_filter_input) |*input| {
+        if (self.search.filter_input) |*input| {
             var input_area = surface.child(.{
                 .col = 8,
                 .row = list_filter_row,
@@ -2432,6 +2417,9 @@ const HotGamesResult = union(enum) {
 };
 
 const SearchState = struct {
+    input: ?ui.TextInput = null,
+    filter_input: ?ui.TextInput = null,
+    request_id: u64 = 0,
     load_state: LoadState = .idle,
     results: []bgg_model.GameSearchResult = &.{},
     labels: []const []const u8 = &.{},
@@ -2449,6 +2437,30 @@ const SearchState = struct {
         loaded,
         failed: []const u8,
     };
+
+    fn initInputs(self: *SearchState, allocator: std.mem.Allocator) !void {
+        self.input = try ui.TextInput.init(allocator, .{
+            .placeholder = "Search board games",
+        });
+        errdefer {
+            self.input.?.deinit();
+            self.input = null;
+        }
+        self.filter_input = try ui.TextInput.init(allocator, .{
+            .placeholder = "Filter search results",
+        });
+    }
+
+    fn deinitInputs(self: *SearchState) void {
+        if (self.input) |*input| {
+            input.deinit();
+            self.input = null;
+        }
+        if (self.filter_input) |*input| {
+            input.deinit();
+            self.filter_input = null;
+        }
+    }
 
     fn setLoading(self: *SearchState, allocator: std.mem.Allocator) void {
         self.clearResults(allocator);
@@ -3712,7 +3724,7 @@ test "detail list line text uses dash for missing metadata" {
 test "search query shorter than three characters fails before spawning task" {
     var app = App.create(.{ .api = .{ .token = "token" } }, .{});
     app.allocator = std.testing.allocator;
-    app.search_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "go" });
+    app.search.input = try ui.TextInput.init(std.testing.allocator, .{ .value = "go" });
     defer app.deinitOwnedState();
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
@@ -3788,51 +3800,51 @@ test "showing search from non-detail screen resets previous query and results" {
     var app = App.create(.{ .api = .{ .token = "token" } }, .{});
     app.allocator = std.testing.allocator;
     app.screen = .hot_games;
-    app.search_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "root" });
+    app.search.input = try ui.TextInput.init(std.testing.allocator, .{ .value = "root" });
     defer app.deinitOwnedState();
 
     const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
     results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
     try app.search.setLoaded(std.testing.allocator, results);
-    app.search_request_id = 7;
+    app.search.request_id = 7;
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
     try app.showScreen(.search, &tc.ctx);
 
     try std.testing.expectEqual(Screen.search, app.screen);
-    try std.testing.expectEqualStrings("", app.search_input.?.text());
+    try std.testing.expectEqualStrings("", app.search.input.?.text());
     try std.testing.expect(app.search.load_state == .idle);
     try std.testing.expectEqual(@as(usize, 0), app.search.results.len);
-    try std.testing.expectEqual(@as(u64, 8), app.search_request_id);
+    try std.testing.expectEqual(@as(u64, 8), app.search.request_id);
 }
 
 test "showing search from search results preserves previous query and results" {
     var app = App.create(.{ .api = .{ .token = "token" } }, .{});
     app.allocator = std.testing.allocator;
     app.screen = .search_results;
-    app.search_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "root" });
+    app.search.input = try ui.TextInput.init(std.testing.allocator, .{ .value = "root" });
     defer app.deinitOwnedState();
 
     const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
     results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
     try app.search.setLoaded(std.testing.allocator, results);
-    app.search_request_id = 7;
+    app.search.request_id = 7;
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
     try app.showScreen(.search, &tc.ctx);
 
     try std.testing.expectEqual(Screen.search, app.screen);
-    try std.testing.expectEqualStrings("root", app.search_input.?.text());
+    try std.testing.expectEqualStrings("root", app.search.input.?.text());
     try std.testing.expect(app.search.load_state == .loaded);
     try std.testing.expectEqual(@as(usize, 1), app.search.results.len);
-    try std.testing.expectEqual(@as(u64, 7), app.search_request_id);
+    try std.testing.expectEqual(@as(u64, 7), app.search.request_id);
 }
 
 test "loaded search results receive activation on search results screen" {
     var app = App.create(.{ .api = .{ .token = "token" } }, .{});
     app.allocator = std.testing.allocator;
     app.screen = .search_results;
-    app.search_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "root" });
+    app.search.input = try ui.TextInput.init(std.testing.allocator, .{ .value = "root" });
     defer app.deinitOwnedState();
 
     const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
@@ -4745,11 +4757,11 @@ test "search loading enters results without screen transition" {
     try app.showScreen(.settings, &tc.ctx);
     try std.testing.expect(app.hasActiveScreenTransition());
 
-    try app.search_input.?.update(.clear);
-    try app.search_input.?.update(.{ .insert = 'r' });
-    try app.search_input.?.update(.{ .insert = 'o' });
-    try app.search_input.?.update(.{ .insert = 'o' });
-    try app.search_input.?.update(.{ .insert = 't' });
+    try app.search.input.?.update(.clear);
+    try app.search.input.?.update(.{ .insert = 'r' });
+    try app.search.input.?.update(.{ .insert = 'o' });
+    try app.search.input.?.update(.{ .insert = 'o' });
+    try app.search.input.?.update(.{ .insert = 't' });
     tc.resetTransient();
     try app.startSearch(&tc.ctx);
     defer {
@@ -4777,7 +4789,7 @@ test "search completion starts content transition when results are visible" {
     results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
 
     app.screen = .search_results;
-    app.search_request_id = 7;
+    app.search.request_id = 7;
     tc.resetTransient();
     try app.finishSearch(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = results } });
 
@@ -4799,7 +4811,7 @@ test "search completion stores hidden result without transition" {
     results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
 
     app.screen = .main_menu;
-    app.search_request_id = 7;
+    app.search.request_id = 7;
     tc.resetTransient();
     try app.finishSearch(&tc.ctx, .{ .request_id = 7, .result = .{ .ok = results } });
 
@@ -5512,7 +5524,7 @@ test "successful search completion loads result list" {
     defer app.deinitOwnedState();
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
-    app.search_request_id = 7;
+    app.search.request_id = 7;
     const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
     results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
 
@@ -5534,7 +5546,7 @@ test "failed search completion clears previous loaded results" {
     try app.search.setLoaded(std.testing.allocator, results);
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
-    app.search_request_id = 3;
+    app.search.request_id = 3;
     try app.finishSearch(&tc.ctx, .{
         .request_id = 3,
         .result = .{ .failed = "rate limited" },
@@ -5567,7 +5579,7 @@ test "outdated search results do not replace current search state" {
     app.allocator = std.testing.allocator;
     defer app.deinitOwnedState();
 
-    app.search_request_id = 2;
+    app.search.request_id = 2;
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
     const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
@@ -5585,15 +5597,15 @@ test "outdated search results do not replace current search state" {
 test "invalid search submit invalidates in-flight search results" {
     var app = App.create(.{ .api = .{ .token = "token" } }, .{});
     app.allocator = std.testing.allocator;
-    app.search_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "go" });
+    app.search.input = try ui.TextInput.init(std.testing.allocator, .{ .value = "go" });
     defer app.deinitOwnedState();
 
-    app.search_request_id = 1;
+    app.search.request_id = 1;
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
     try app.startSearch(&tc.ctx);
 
-    try std.testing.expectEqual(@as(u64, 2), app.search_request_id);
+    try std.testing.expectEqual(@as(u64, 2), app.search.request_id);
     try std.testing.expect(app.search.load_state == .failed);
 
     const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
