@@ -71,6 +71,7 @@ pub fn applyScreenTransition(surface: *chasen.Surface, transition: anim.Transiti
         .scanline => applyScanlineTransition(surface, transition.progress()),
         .shutter => applyShutterTransition(surface, transition.progress()),
         .sweep => applySweepTransition(surface, transition.progress()),
+        .warp => applyWarpTransition(surface, transition.progress()),
         .wipe => applyWipeTransition(surface, transition.progress()),
         else => {},
     }
@@ -354,6 +355,69 @@ fn applyWipeTransition(surface: *chasen.Surface, progress: f32) void {
         .width = size.width - visible_width,
         .height = size.height,
     });
+}
+
+fn applyWarpTransition(surface: *chasen.Surface, progress: f32) void {
+    const size = surface.size();
+    if (size.width == 0 or size.height == 0) return;
+
+    const clamped = anim.ease.clamp01(progress);
+    if (clamped >= 1.0) return;
+
+    const remaining = 1.0 - smoothStep(clamped);
+    const amplitude = @as(i16, @intFromFloat(@floor(6.0 * remaining)));
+    if (amplitude == 0) return;
+
+    var row: u16 = 0;
+    while (row < size.height) : (row += 1) {
+        const row_phase = @as(f64, @floatFromInt(row)) * 0.72 + @as(f64, @floatCast(clamped)) * 8.0;
+        const offset: i16 = @intFromFloat(@round(std.math.sin(row_phase) * @as(f64, @floatFromInt(amplitude))));
+        shiftRow(surface, row, offset);
+    }
+}
+
+fn shiftRow(surface: *chasen.Surface, row: u16, offset: i16) void {
+    const size = surface.size();
+    if (offset == 0 or size.width == 0) return;
+
+    const magnitude: u16 = @intCast(@abs(offset));
+    if (magnitude >= size.width) {
+        clearRowRange(surface, row, 0, size.width);
+        return;
+    }
+
+    if (offset > 0) {
+        var remaining = size.width;
+        while (remaining > 0) {
+            remaining -= 1;
+            const target_col = remaining;
+            if (target_col < magnitude) {
+                clearCell(surface, target_col, row);
+                continue;
+            }
+            copyCellOrClear(surface, target_col - magnitude, target_col, row);
+        }
+    } else {
+        var target_col: u16 = 0;
+        while (target_col < size.width) : (target_col += 1) {
+            const source_col = target_col + magnitude;
+            if (source_col >= size.width) {
+                clearCell(surface, target_col, row);
+                continue;
+            }
+            copyCellOrClear(surface, source_col, target_col, row);
+        }
+    }
+}
+
+fn copyCellOrClear(surface: *chasen.Surface, source_col: u16, target_col: u16, row: u16) void {
+    if (surface.readCell(source_col, row)) |cell| {
+        if (!cell.default and cell.char.width == 1) {
+            surface.writeCell(target_col, row, cell);
+            return;
+        }
+    }
+    clearCell(surface, target_col, row);
 }
 
 fn applyIrisTransition(surface: *chasen.Surface, progress: f32) void {
@@ -814,6 +878,68 @@ test "wipe screen transition clears unrevealed right side" {
     try std.testing.expectEqualStrings("B", ts.surface.readCell(1, 0).?.char.grapheme);
     try std.testing.expectEqualStrings(" ", ts.surface.readCell(2, 0).?.char.grapheme);
     try std.testing.expectEqualStrings(" ", ts.surface.readCell(3, 0).?.char.grapheme);
+}
+
+test "warp screen transition shifts rows while settling" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(6, 2);
+    defer ts.deinit();
+
+    _ = ts.surface.borrowTextAt(0, 0, "ABCDEF", .{});
+    _ = ts.surface.borrowTextAt(0, 1, "GHIJKL", .{});
+    applyScreenTransition(&ts.surface, anim.Transition{
+        .kind = .warp,
+        .frame = 12,
+        .max_frame = 96,
+    });
+
+    var changed = false;
+    var row: u16 = 0;
+    while (row < 2) : (row += 1) {
+        var col: u16 = 0;
+        while (col < 6) : (col += 1) {
+            const expected = if (row == 0) "ABCDEF"[col .. col + 1] else "GHIJKL"[col .. col + 1];
+            const actual = ts.surface.readCell(col, row).?.char.grapheme;
+            if (!std.mem.eql(u8, expected, actual)) changed = true;
+        }
+    }
+    try std.testing.expect(changed);
+}
+
+test "warp screen transition preserves completed content" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(4, 1);
+    defer ts.deinit();
+
+    _ = ts.surface.borrowTextAt(0, 0, "ABCD", .{});
+    applyScreenTransition(&ts.surface, anim.Transition{
+        .kind = .warp,
+        .frame = 96,
+        .max_frame = 96,
+    });
+
+    try std.testing.expectEqualStrings("A", ts.surface.readCell(0, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("B", ts.surface.readCell(1, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("C", ts.surface.readCell(2, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("D", ts.surface.readCell(3, 0).?.char.grapheme);
+}
+
+test "warp screen transition settles before the final frame" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(4, 1);
+    defer ts.deinit();
+
+    _ = ts.surface.borrowTextAt(0, 0, "ABCD", .{});
+    applyScreenTransition(&ts.surface, anim.Transition{
+        .kind = .warp,
+        .frame = 95,
+        .max_frame = 96,
+    });
+
+    try std.testing.expectEqualStrings("A", ts.surface.readCell(0, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("B", ts.surface.readCell(1, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("C", ts.surface.readCell(2, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("D", ts.surface.readCell(3, 0).?.char.grapheme);
 }
 
 test "scanline screen transition highlights current row and clears following rows" {
