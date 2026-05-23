@@ -17,6 +17,7 @@ const scan_colors = [_]chasen.Color{
 };
 const transition_edge_color = chasen.Color{ .rgb = .{ 0x4e, 0xcd, 0xc4 } };
 const glitch_chars = [_][]const u8{ "@", "#", "$", "%", "&", "*", "!", "?", "+", "=", "~", "^", "x", "X", "░", "▒", "▓", "█" };
+const code_rain_chars = [_][]const u8{ "0", "1", "3", "7", "9", "A", "B", "C", "D", "E", "F", "$", "#", "@", "%", "&", "+", "=", "░", "▒", "▓" };
 
 pub fn selectionNeedsFrame(selection: []const u8) bool {
     return std.mem.eql(u8, selection, "blink") or
@@ -60,6 +61,7 @@ pub fn drawStatusScanText(surface: *chasen.Surface, col: u16, row: u16, text: []
 
 pub fn applyScreenTransition(surface: *chasen.Surface, transition: anim.Transition) void {
     switch (transition.kind) {
+        .code_rain => applyCodeRainTransition(surface, transition),
         .dissolve => applyDissolveTransition(surface, transition.progress()),
         .fade => applyFadeTransition(surface, transition.progress()),
         .glitch => applyGlitchTransition(surface, transition),
@@ -191,6 +193,68 @@ fn transitionGlitchReplacement(frame: u64, row: u16, col: u16) []const u8 {
 fn transitionGlitchHash(frame: u64, row: u16, col: u16) usize {
     const index = @as(u32, row) *% 4099 + @as(u32, col);
     return glitchHash(frame, index);
+}
+
+fn applyCodeRainTransition(surface: *chasen.Surface, transition: anim.Transition) void {
+    const size = surface.size();
+    if (size.width == 0 or size.height == 0) return;
+
+    const progress = anim.ease.clamp01(transition.progress());
+    if (progress >= 1.0) return;
+
+    var row: u16 = 0;
+    while (row < size.height) : (row += 1) {
+        var col: u16 = 0;
+        while (col < size.width) : (col += 1) {
+            var cell = surface.readCell(col, row) orelse continue;
+            if (cell.default or cell.char.grapheme.len == 0 or std.mem.eql(u8, cell.char.grapheme, " ")) continue;
+            if (cell.char.width != 1) continue;
+            if (progress >= codeRainRevealThreshold(row, col, size.height)) continue;
+
+            if (!codeRainShouldRender(progress, transition.frame, row, col, size.height)) {
+                clearCell(surface, col, row);
+                continue;
+            }
+
+            cell.char.grapheme = codeRainReplacement(transition.frame, row, col);
+            cell.style = codeRainStyle(progress, transition.frame, row, col, size.height).toVaxis();
+            surface.writeCell(col, row, cell);
+        }
+    }
+}
+
+fn codeRainRevealThreshold(row: u16, col: u16, height: u16) f32 {
+    const height_f = @max(@as(f32, @floatFromInt(height)), 1.0);
+    const row_delay = @as(f32, @floatFromInt(row)) / height_f * 0.48;
+    const jitter_hash = transitionGlitchHash(23, row, col) % 100;
+    const jitter = @as(f32, @floatFromInt(jitter_hash)) / 100.0 * 0.28;
+    return @min(0.96, 0.22 + row_delay + jitter);
+}
+
+fn codeRainShouldRender(progress: f32, frame: u64, row: u16, col: u16, height: u16) bool {
+    const head = codeRainHead(progress, frame, col, height);
+    const row_f = @as(f32, @floatFromInt(row));
+    const trail = 6.0;
+    return row_f <= head and row_f >= head - trail;
+}
+
+fn codeRainStyle(progress: f32, frame: u64, row: u16, col: u16, height: u16) chasen.TextStyle {
+    const head = codeRainHead(progress, frame, col, height);
+    const row_f = @as(f32, @floatFromInt(row));
+    if (head - row_f <= 1.0) {
+        return .{ .fg = .{ .rgb = .{ 0xd8, 0xff, 0xd8 } }, .bold = true };
+    }
+    return .{ .fg = .{ .rgb = .{ 0x00, 0xd7, 0x5f } } };
+}
+
+fn codeRainHead(progress: f32, frame: u64, col: u16, height: u16) f32 {
+    const height_f = @as(f32, @floatFromInt(height));
+    const column_offset = @as(f32, @floatFromInt(transitionGlitchHash(frame / 8, 0, col) % 7));
+    return progress * (height_f + 10.0) - 5.0 + column_offset;
+}
+
+fn codeRainReplacement(frame: u64, row: u16, col: u16) []const u8 {
+    return code_rain_chars[transitionGlitchHash(frame / 5 + 41, row, col) % code_rain_chars.len];
 }
 
 fn applyLinesTransition(surface: *chasen.Surface, progress: f32, cross: bool) void {
@@ -628,6 +692,50 @@ test "glitch screen transition replaces matching visible cells" {
         if (!std.mem.eql(u8, expected, actual)) replaced = true;
     }
     try std.testing.expect(replaced);
+}
+
+test "code-rain screen transition replaces unrevealed visible cells" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(8, 2);
+    defer ts.deinit();
+
+    _ = ts.surface.borrowTextAt(0, 0, "ABCDEFGH", .{});
+    _ = ts.surface.borrowTextAt(0, 1, "IJKLMNOP", .{});
+    applyScreenTransition(&ts.surface, anim.Transition{
+        .kind = .code_rain,
+        .frame = 20,
+        .max_frame = 110,
+    });
+
+    var changed = false;
+    var row: u16 = 0;
+    while (row < 2) : (row += 1) {
+        var col: u16 = 0;
+        while (col < 8) : (col += 1) {
+            const expected = if (row == 0) "ABCDEFGH"[col .. col + 1] else "IJKLMNOP"[col .. col + 1];
+            const actual = ts.surface.readCell(col, row).?.char.grapheme;
+            if (!std.mem.eql(u8, expected, actual)) changed = true;
+        }
+    }
+    try std.testing.expect(changed);
+}
+
+test "code-rain screen transition preserves completed content" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(4, 1);
+    defer ts.deinit();
+
+    _ = ts.surface.borrowTextAt(0, 0, "ABCD", .{});
+    applyScreenTransition(&ts.surface, anim.Transition{
+        .kind = .code_rain,
+        .frame = 110,
+        .max_frame = 110,
+    });
+
+    try std.testing.expectEqualStrings("A", ts.surface.readCell(0, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("B", ts.surface.readCell(1, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("C", ts.surface.readCell(2, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("D", ts.surface.readCell(3, 0).?.char.grapheme);
 }
 
 test "dissolve threshold follows go version formula" {

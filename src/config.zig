@@ -78,7 +78,7 @@ pub const Config = struct {
         try validateWidth(config.display.thread_width);
         try validateWidth(config.display.detail_width);
         if (!isOneOf(config.interface.color_theme, &.{ "default", "blue", "orange", "mono", "matcha" })) return error.InvalidColorTheme;
-        if (!isOneOf(config.interface.transition, &.{ "none", "fade", "glitch", "dissolve", "sweep", "wipe", "scanline", "iris", "shutter", "lines", "lines-cross", "random" })) return error.InvalidTransition;
+        if (!isOneOf(config.interface.transition, &.{ "none", "fade", "glitch", "code-rain", "dissolve", "sweep", "wipe", "scanline", "iris", "shutter", "lines", "lines-cross", "random" })) return error.InvalidTransition;
         if (!isOneOf(config.interface.selection, &.{ "none", "invert", "wave", "blink", "glitch", "scan" })) return error.InvalidSelection;
         if (!isOneOf(config.interface.list_density, &.{ "compact", "normal", "comfortable", "relaxed" })) return error.InvalidListDensity;
         if (!isOneOf(config.interface.date_format, &.{ "yyyy-mm-dd", "yyyy/mm/dd", "relative", "YYYY-MM-DD" })) return error.InvalidDateFormat;
