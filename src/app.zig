@@ -115,15 +115,7 @@ pub const App = struct {
         hot_filter_input: ui.TextInput.Msg,
         hot_filter_paste: []const u8,
         hot_filter_clear,
-        search_input: ui.TextInput.Msg,
-        search_paste: []const u8,
-        search_filter_start,
-        search_filter_input: ui.TextInput.Msg,
-        search_filter_paste: []const u8,
-        search_filter_clear,
-        search_sort_toggle,
-        search_results_loaded: SearchTaskResult,
-        search_list: ui.List.Msg,
+        search: SearchMsg,
         collection_username_input: ui.TextInput.Msg,
         collection_username_paste: []const u8,
         collection_filter_start,
@@ -224,40 +216,7 @@ pub const App = struct {
                 }
             },
             .hot_filter_clear => try self.clearHotFilter(),
-            .search_input => |input_msg| {
-                if (input_msg == .submit) {
-                    try self.startSearch(ctx);
-                } else if (self.search.input) |*input| {
-                    try input.update(input_msg);
-                }
-            },
-            .search_paste => |text| {
-                if (self.search.input) |*input| {
-                    try insertPastedCodepoints(input, text);
-                }
-            },
-            .search_filter_start => try self.startSearchFilter(),
-            .search_filter_input => |input_msg| {
-                if (input_msg != .submit) {
-                    if (self.search.filter_input) |*input| try input.update(input_msg);
-                    try self.applySearchFilter();
-                }
-            },
-            .search_filter_paste => |text| {
-                if (self.search.filter_input) |*input| {
-                    try insertPastedCodepoints(input, text);
-                    try self.applySearchFilter();
-                }
-            },
-            .search_filter_clear => try self.clearSearchFilter(),
-            .search_sort_toggle => try self.toggleSearchSort(),
-            .search_results_loaded => |result| try self.finishSearch(ctx, result),
-            .search_list => |list_msg| switch (list_msg) {
-                .move_prev, .move_next => self.search.update(list_msg),
-                .activate => |index| {
-                    if (self.search.sourceIndex(index)) |source_index| try self.openSearchResult(source_index, ctx);
-                },
-            },
+            .search => |search_msg| try self.updateSearch(search_msg, ctx),
             .collection_username_input => |input_msg| {
                 if (input_msg == .submit) {
                     try self.startCollectionLoad(ctx);
@@ -416,11 +375,11 @@ pub const App = struct {
         if (self.screen == .search) {
             switch (event) {
                 .key_press => |key| if (key.matches(chasen.Key.escape, .{})) return .{ .show_screen = .main_menu },
-                .paste => |text| return .{ .search_paste = text },
+                .paste => |text| return .{ .search = .{ .paste = text } },
                 else => {},
             }
             if (self.search.input) |*input| {
-                if (input.handleEvent(event)) |msg| return .{ .search_input = msg };
+                if (input.handleEvent(event)) |msg| return .{ .search = .{ .input = msg } };
             }
             return null;
         }
@@ -429,30 +388,30 @@ pub const App = struct {
             switch (event) {
                 .key_press => |key| {
                     if (self.search.filter_active) {
-                        if (key.matches(chasen.Key.escape, .{})) return .search_filter_clear;
+                        if (key.matches(chasen.Key.escape, .{})) return .{ .search = .filter_clear };
                         if (key.codepoint == 'b') return .{ .show_screen = .search };
                         if (key.matches(chasen.Key.enter, .{})) {
-                            if (self.search.handleEvent(event)) |msg| return .{ .search_list = msg };
+                            if (self.search.handleEvent(event)) |msg| return .{ .search = .{ .list = msg } };
                             return null;
                         }
                     } else if (key.codepoint == '/') {
-                        return .search_filter_start;
+                        return .{ .search = .filter_start };
                     } else {
                         if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'b') return .{ .show_screen = .search };
                         if (key.codepoint == 'm') return .{ .show_screen = .main_menu };
-                        if (key.codepoint == 's') return .search_sort_toggle;
+                        if (key.codepoint == 's') return .{ .search = .sort_toggle };
                         if (key.codepoint == 'q') return .quit;
                     }
                 },
-                .paste => |text| if (self.search.filter_active) return .{ .search_filter_paste = text },
+                .paste => |text| if (self.search.filter_active) return .{ .search = .{ .filter_paste = text } },
                 else => {},
             }
             if (self.search.filter_active) {
                 if (self.search.filter_input) |*input| {
-                    if (input.handleEvent(event)) |msg| return .{ .search_filter_input = msg };
+                    if (input.handleEvent(event)) |msg| return .{ .search = .{ .filter_input = msg } };
                 }
             }
-            if (self.search.handleEvent(event)) |msg| return .{ .search_list = msg };
+            if (self.search.handleEvent(event)) |msg| return .{ .search = .{ .list = msg } };
             return null;
         }
 
@@ -1269,6 +1228,45 @@ pub const App = struct {
 
     fn toggleHotSort(self: *App) !void {
         try self.hot_games.toggleSort(self.allocator.?);
+    }
+
+    fn updateSearch(self: *App, msg: SearchMsg, ctx: *chasen.Ctx(Msg)) !void {
+        switch (msg) {
+            .input => |input_msg| {
+                if (input_msg == .submit) {
+                    try self.startSearch(ctx);
+                } else if (self.search.input) |*input| {
+                    try input.update(input_msg);
+                }
+            },
+            .paste => |text| {
+                if (self.search.input) |*input| {
+                    try insertPastedCodepoints(input, text);
+                }
+            },
+            .filter_start => try self.startSearchFilter(),
+            .filter_input => |input_msg| {
+                if (input_msg != .submit) {
+                    if (self.search.filter_input) |*input| try input.update(input_msg);
+                    try self.applySearchFilter();
+                }
+            },
+            .filter_paste => |text| {
+                if (self.search.filter_input) |*input| {
+                    try insertPastedCodepoints(input, text);
+                    try self.applySearchFilter();
+                }
+            },
+            .filter_clear => try self.clearSearchFilter(),
+            .sort_toggle => try self.toggleSearchSort(),
+            .results_loaded => |result| try self.finishSearch(ctx, result),
+            .list => |list_msg| switch (list_msg) {
+                .move_prev, .move_next => self.search.update(list_msg),
+                .activate => |index| {
+                    if (self.search.sourceIndex(index)) |source_index| try self.openSearchResult(source_index, ctx);
+                },
+            },
+        }
     }
 
     fn startSearchFilter(self: *App) !void {
@@ -2582,6 +2580,18 @@ const SearchTaskResult = struct {
     result: SearchResult,
 };
 
+const SearchMsg = union(enum) {
+    input: ui.TextInput.Msg,
+    paste: []const u8,
+    filter_start,
+    filter_input: ui.TextInput.Msg,
+    filter_paste: []const u8,
+    filter_clear,
+    sort_toggle,
+    results_loaded: SearchTaskResult,
+    list: ui.List.Msg,
+};
+
 const CollectionState = struct {
     username_input: ?ui.TextInput = null,
     filter_input: ?ui.TextInput = null,
@@ -2846,10 +2856,10 @@ const SearchTask = struct {
             allocator.destroy(task);
         }
 
-        return .{ .search_results_loaded = .{
+        return .{ .search = .{ .results_loaded = .{
             .request_id = task.request_id,
             .result = loadSearchResults(allocator, io, task.token, task.query) catch |err| .{ .failed = @errorName(err) },
-        } };
+        } } };
     }
 };
 
@@ -3866,8 +3876,8 @@ test "loaded search results receive activation on search results screen" {
     try app.search.setLoaded(std.testing.allocator, results);
 
     const msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
-    try std.testing.expect(msg == .search_list);
-    try std.testing.expectEqual(ui.List.Msg{ .activate = 0 }, msg.search_list);
+    try std.testing.expect(msg == .search);
+    try std.testing.expectEqual(ui.List.Msg{ .activate = 0 }, msg.search.list);
 }
 
 test "loaded collection receives activation on collection screen" {
@@ -5528,7 +5538,8 @@ test "search results slash starts filter" {
 
     const msg = app.handleEvent(.{ .key_press = .{ .codepoint = '/' } }).?;
 
-    try std.testing.expect(msg == .search_filter_start);
+    try std.testing.expect(msg == .search);
+    try std.testing.expect(msg.search == .filter_start);
 }
 
 test "successful search completion loads result list" {
