@@ -75,6 +75,14 @@ pub const Screen = enum {
     settings,
 };
 
+const NavigationState = struct {
+    detail_back_screen: Screen = .main_menu,
+};
+
+const BrowserState = struct {
+    request_id: u64 = 0,
+};
+
 pub const App = struct {
     config: config_mod.Config,
     config_path: ?[]const u8 = null,
@@ -87,10 +95,10 @@ pub const App = struct {
     search: SearchState = .{},
     collection: CollectionState = .{},
     game_detail: screens.detail.State = .{},
-    detail_back_screen: Screen = .main_menu,
     forums: screens.forum.State = .{},
     thread: screens.thread.State = .{},
-    browser_request_id: u64 = 0,
+    navigation: NavigationState = .{},
+    browser: BrowserState = .{},
     settings: screens.settings.State = .{},
     terminal_size: chasen.Size = forum_screen_max_size,
     menu: ui.Menu = ui.Menu.init(.{ .items = &menu_items }),
@@ -517,7 +525,7 @@ pub const App = struct {
                 .key_press => |key| {
                     if (key.matches(chasen.Key.up, .{}) or key.codepoint == 'k') return .game_detail_move_prev;
                     if (key.matches(chasen.Key.down, .{}) or key.codepoint == 'j') return .game_detail_move_next;
-                    if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'b') return .{ .show_screen = self.detail_back_screen };
+                    if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'b') return .{ .show_screen = self.navigation.detail_back_screen };
                     if (key.codepoint == 'f' and self.game_detail.load_state == .loaded and self.game_detail.games.len > 0) return .forum_open;
                     if (key.codepoint == 'o' and self.game_detail.load_state == .loaded and self.game_detail.games.len > 0) return .game_detail_open_browser;
                     if (key.codepoint == 'm') return .{ .show_screen = .main_menu };
@@ -1544,9 +1552,9 @@ pub const App = struct {
 
     fn startGameDetail(self: *App, ctx: *chasen.Ctx(Msg), game_id: u32, back_screen: Screen) !void {
         self.game_detail.request_id +%= 1;
-        self.browser_request_id +%= 1;
+        self.browser.request_id +%= 1;
         const request_id = self.game_detail.request_id;
-        self.detail_back_screen = back_screen;
+        self.navigation.detail_back_screen = back_screen;
         self.game_detail.deinit(self.allocator.?);
         self.game_detail.setVisibleHeight(detailLayoutForTerminal(self).content_height);
 
@@ -1599,8 +1607,8 @@ pub const App = struct {
         const url = try formatOwnedText(ctx.allocator(), format.writeBggGameUrl, .{game.id});
         errdefer ctx.allocator().free(url);
 
-        self.browser_request_id +%= 1;
-        const request_id = self.browser_request_id;
+        self.browser.request_id +%= 1;
+        const request_id = self.browser.request_id;
 
         const task = try ctx.allocator().create(BrowserOpenTask);
         errdefer ctx.allocator().destroy(task);
@@ -1730,7 +1738,7 @@ pub const App = struct {
         if (visible_index >= self.forums.thread_page.threads.len) return;
         const thread = self.forums.thread_page.threads[visible_index];
         self.thread.request_id +%= 1;
-        self.browser_request_id +%= 1;
+        self.browser.request_id +%= 1;
         const request_id = self.thread.request_id;
 
         self.thread.startLoad(self.allocator.?, thread.id, self.config.display.thread_width);
@@ -1778,7 +1786,7 @@ pub const App = struct {
 
     fn backToThreadList(self: *App, ctx: *chasen.Ctx(Msg)) void {
         self.thread.request_id +%= 1;
-        self.browser_request_id +%= 1;
+        self.browser.request_id +%= 1;
         self.thread.deinit(self.allocator.?);
         self.enterPreparedScreen(.forums, ctx);
     }
@@ -1789,8 +1797,8 @@ pub const App = struct {
         const url = try formatOwnedText(ctx.allocator(), format.writeBggThreadUrl, .{self.thread.thread_id});
         errdefer ctx.allocator().free(url);
 
-        self.browser_request_id +%= 1;
-        const request_id = self.browser_request_id;
+        self.browser.request_id +%= 1;
+        const request_id = self.browser.request_id;
 
         const task = try ctx.allocator().create(BrowserOpenTask);
         errdefer ctx.allocator().destroy(task);
@@ -1803,7 +1811,7 @@ pub const App = struct {
     }
 
     fn finishBrowserOpen(self: *App, task_result: BrowserOpenTaskResult) !void {
-        if (task_result.request_id != self.browser_request_id) {
+        if (task_result.request_id != self.browser.request_id) {
             switch (task_result.result) {
                 .ok => {},
                 .failed => |url| self.allocator.?.free(url),
@@ -4050,7 +4058,7 @@ test "search results escape returns to search input screen" {
 test "game detail escape returns to previous list screen" {
     var app = App.create(.{ .api = .{ .token = "token" } }, .{});
     app.screen = .game_detail;
-    app.detail_back_screen = .search_results;
+    app.navigation.detail_back_screen = .search_results;
 
     const msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.escape } }).?;
     try std.testing.expectEqual(App.Msg{ .show_screen = .search_results }, msg);
@@ -4186,7 +4194,7 @@ test "stale browser failure does not update current thread" {
     app.allocator = std.testing.allocator;
     defer app.deinitOwnedState();
 
-    app.browser_request_id = 2;
+    app.browser.request_id = 2;
     try app.finishBrowserOpen(.{
         .request_id = 1,
         .target = .thread,
@@ -4213,13 +4221,13 @@ test "opening another thread invalidates in-flight browser result" {
         .total_pages = 1,
     });
 
-    app.browser_request_id = 7;
+    app.browser.request_id = 7;
     const next_thread = app.forums.thread_page.threads[0];
     app.thread.request_id +%= 1;
-    app.browser_request_id +%= 1;
+    app.browser.request_id +%= 1;
     app.thread.startLoad(std.testing.allocator, next_thread.id, app.config.display.thread_width);
     app.screen = .thread;
-    try std.testing.expectEqual(@as(u64, 8), app.browser_request_id);
+    try std.testing.expectEqual(@as(u64, 8), app.browser.request_id);
 
     try app.finishBrowserOpen(.{
         .request_id = 7,
