@@ -63,9 +63,11 @@ pub fn applyScreenTransition(surface: *chasen.Surface, transition: anim.Transiti
         .dissolve => applyDissolveTransition(surface, transition.progress()),
         .fade => applyFadeTransition(surface, transition.progress()),
         .glitch => applyGlitchTransition(surface, transition),
+        .iris => applyIrisTransition(surface, transition.progress()),
         .lines => applyLinesTransition(surface, transition.progress(), false),
         .lines_cross => applyLinesTransition(surface, transition.progress(), true),
         .scanline => applyScanlineTransition(surface, transition.progress()),
+        .shutter => applyShutterTransition(surface, transition.progress()),
         .sweep => applySweepTransition(surface, transition.progress()),
         .wipe => applyWipeTransition(surface, transition.progress()),
         else => {},
@@ -290,6 +292,74 @@ fn applyWipeTransition(surface: *chasen.Surface, progress: f32) void {
     });
 }
 
+fn applyIrisTransition(surface: *chasen.Surface, progress: f32) void {
+    const size = surface.size();
+    if (size.width == 0 or size.height == 0) return;
+
+    const clamped = anim.ease.clamp01(progress);
+    const half_width = @max(@as(f32, @floatFromInt(size.width -| 1)) / 2.0, 1.0);
+    const half_height = @max(@as(f32, @floatFromInt(size.height -| 1)) / 2.0, 1.0);
+    const center_col = @as(f32, @floatFromInt(size.width -| 1)) / 2.0;
+    const center_row = @as(f32, @floatFromInt(size.height -| 1)) / 2.0;
+    const max_distance = @sqrt(1.0 * 1.0 + 1.0 * 1.0);
+
+    var row: u16 = 0;
+    while (row < size.height) : (row += 1) {
+        var col: u16 = 0;
+        while (col < size.width) : (col += 1) {
+            const dx = (@as(f32, @floatFromInt(col)) - center_col) / half_width;
+            const dy = (@as(f32, @floatFromInt(row)) - center_row) / half_height;
+            const distance = @sqrt(dx * dx + dy * dy) / max_distance;
+            if (distance <= clamped) continue;
+            clearCell(surface, col, row);
+        }
+    }
+}
+
+fn applyShutterTransition(surface: *chasen.Surface, progress: f32) void {
+    const size = surface.size();
+    if (size.width == 0 or size.height == 0) return;
+
+    const visible_height: u16 = @intFromFloat(@ceil(smoothStep(progress) * @as(f32, @floatFromInt(size.height))));
+    if (visible_height >= size.height) return;
+
+    const start_row = (size.height - visible_height) / 2;
+    const end_row = start_row + visible_height;
+    if (start_row > 0) {
+        surface.clear(.{
+            .col = 0,
+            .row = 0,
+            .width = size.width,
+            .height = start_row,
+        });
+    }
+    if (end_row < size.height) {
+        surface.clear(.{
+            .col = 0,
+            .row = end_row,
+            .width = size.width,
+            .height = size.height - end_row,
+        });
+    }
+    drawShutterEdge(surface, start_row, end_row);
+}
+
+fn drawShutterEdge(surface: *chasen.Surface, start_row: u16, end_row: u16) void {
+    const size = surface.size();
+    if (size.width == 0 or size.height == 0) return;
+
+    if (start_row > 0) drawHorizontalEdge(surface, start_row - 1);
+    if (end_row < size.height) drawHorizontalEdge(surface, end_row);
+}
+
+fn drawHorizontalEdge(surface: *chasen.Surface, row: u16) void {
+    const size = surface.size();
+    var col: u16 = 0;
+    while (col < size.width) : (col += 1) {
+        _ = surface.borrowTextAt(col, row, "─", .{ .fg = transition_edge_color });
+    }
+}
+
 fn applySweepTransition(surface: *chasen.Surface, progress: f32) void {
     const size = surface.size();
     if (size.width == 0 or size.height == 0) return;
@@ -324,6 +394,11 @@ fn drawSweepEdge(surface: *chasen.Surface, col: u16) void {
 fn easeOutQuad(progress: f32) f32 {
     const clamped = anim.ease.clamp01(progress);
     return 1.0 - (1.0 - clamped) * (1.0 - clamped);
+}
+
+fn smoothStep(progress: f32) f32 {
+    const clamped = anim.ease.clamp01(progress);
+    return clamped * clamped * (3.0 - 2.0 * clamped);
 }
 
 fn drawWaveText(surface: *chasen.Surface, col: u16, row: u16, text: []const u8, base: chasen.TextStyle, frame: u64) void {
@@ -651,4 +726,57 @@ test "scanline screen transition highlights current row and clears following row
     try std.testing.expect(ts.surface.readCell(0, 0).?.style.fg.eql(.{ .rgb = .{ 0x4e, 0xcd, 0xc4 } }));
     try std.testing.expectEqualStrings(" ", ts.surface.readCell(0, 1).?.char.grapheme);
     try std.testing.expectEqualStrings(" ", ts.surface.readCell(0, 2).?.char.grapheme);
+}
+
+test "iris screen transition reveals from center outward" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(5, 5);
+    defer ts.deinit();
+
+    _ = ts.surface.borrowTextAt(0, 0, "A", .{});
+    _ = ts.surface.borrowTextAt(2, 2, "X", .{});
+    applyScreenTransition(&ts.surface, anim.Transition{
+        .kind = .iris,
+        .frame = 10,
+        .max_frame = 100,
+    });
+
+    try std.testing.expectEqualStrings(" ", ts.surface.readCell(0, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("X", ts.surface.readCell(2, 2).?.char.grapheme);
+}
+
+test "iris screen transition reveals corners at completion" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(5, 5);
+    defer ts.deinit();
+
+    _ = ts.surface.borrowTextAt(0, 0, "A", .{});
+    _ = ts.surface.borrowTextAt(4, 4, "Z", .{});
+    applyScreenTransition(&ts.surface, anim.Transition{
+        .kind = .iris,
+        .frame = 100,
+        .max_frame = 100,
+    });
+
+    try std.testing.expectEqualStrings("A", ts.surface.readCell(0, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("Z", ts.surface.readCell(4, 4).?.char.grapheme);
+}
+
+test "shutter screen transition reveals a centered horizontal band" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(1, 5);
+    defer ts.deinit();
+
+    _ = ts.surface.borrowTextAt(0, 0, "A", .{});
+    _ = ts.surface.borrowTextAt(0, 2, "C", .{});
+    _ = ts.surface.borrowTextAt(0, 4, "E", .{});
+    applyScreenTransition(&ts.surface, anim.Transition{
+        .kind = .shutter,
+        .frame = 40,
+        .max_frame = 100,
+    });
+
+    try std.testing.expectEqualStrings("─", ts.surface.readCell(0, 0).?.char.grapheme);
+    try std.testing.expectEqualStrings("C", ts.surface.readCell(0, 2).?.char.grapheme);
+    try std.testing.expectEqualStrings(" ", ts.surface.readCell(0, 4).?.char.grapheme);
 }
