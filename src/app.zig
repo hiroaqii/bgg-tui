@@ -11,6 +11,7 @@ const bgg_xml = @import("bgg/xml.zig");
 const browser = @import("browser.zig");
 const config_mod = @import("config.zig");
 const format = @import("format.zig");
+const image_mod = @import("image.zig");
 const labels_mod = @import("labels.zig");
 const list_filter = @import("list_filter.zig");
 const list_view = @import("list_view.zig");
@@ -87,6 +88,7 @@ const BrowserState = struct {
 pub const App = struct {
     config: config_mod.Config,
     config_path: ?[]const u8 = null,
+    image_cache_dir: ?[]const u8 = null,
     screen: Screen,
     allocator: ?std.mem.Allocator = null,
     setup_token_input: ?ui.PasswordInput = null,
@@ -128,12 +130,14 @@ pub const App = struct {
 
     pub const Options = struct {
         config_path: ?[]const u8 = null,
+        image_cache_dir: ?[]const u8 = null,
     };
 
     pub fn create(config: config_mod.Config, options: Options) App {
         return .{
             .config = config,
             .config_path = options.config_path,
+            .image_cache_dir = options.image_cache_dir,
             .screen = if (config.apiClientToken() == null) .setup_token else .main_menu,
             .collection = .{ .status_mask = config.collection.status_filter.mask },
         };
@@ -1250,6 +1254,7 @@ pub const App = struct {
     fn updateGameDetail(self: *App, msg: GameDetailMsg, ctx: *chasen.Ctx(Msg)) !void {
         switch (msg) {
             .loaded => |result| try self.finishGameDetail(ctx, result),
+            .image_cached => |result| self.finishGameDetailImageCache(result),
             .move_prev => self.game_detail.moveUp(),
             .move_next => self.game_detail.moveDown(self.game_detail.visible_height),
             .open_browser => try self.openGameInBrowser(ctx),
@@ -1580,6 +1585,7 @@ pub const App = struct {
 
     fn startGameDetail(self: *App, ctx: *chasen.Ctx(Msg), game_id: u32, back_screen: Screen) !void {
         self.game_detail.request_id +%= 1;
+        self.game_detail.image_request_id +%= 1;
         self.browser.request_id +%= 1;
         const request_id = self.game_detail.request_id;
         self.navigation.detail_back_screen = back_screen;
@@ -1600,7 +1606,7 @@ pub const App = struct {
         };
         errdefer ctx.allocator().free(task.token);
 
-        self.game_detail.setLoading();
+        self.game_detail.setLoading(self.allocator.?);
         self.switchScreenWithoutTransition(.game_detail);
         self.beginLoadingMotion(ctx);
         ctx.spawnWith(task, GameDetailTask.run) catch |err| {
@@ -1622,10 +1628,75 @@ pub const App = struct {
             .ok => |games| {
                 try self.game_detail.setLoaded(self.allocator.?, games, self.config.display.detail_width);
                 self.game_detail.setVisibleHeight(detailLayoutForTerminal(self).content_height);
+                try self.startGameDetailImageCache(ctx);
                 self.startContentTransitionIfVisible(ctx, .game_detail);
             },
             .failed => |message| self.game_detail.setFailed(message),
         }
+    }
+
+    fn startGameDetailImageCache(self: *App, ctx: *chasen.Ctx(Msg)) !void {
+        self.game_detail.image_request_id +%= 1;
+        const request_id = self.game_detail.image_request_id;
+
+        if (!self.config.display.show_images or self.config.display.image_protocol == .off) {
+            self.game_detail.setImageDisabled(self.allocator.?);
+            return;
+        }
+
+        const cache_dir = self.image_cache_dir orelse {
+            self.game_detail.setImageFailed(self.allocator.?, "Image cache directory is unavailable");
+            return;
+        };
+
+        const url = self.gameDetailImageUrl() orelse {
+            self.game_detail.setImageUnavailable(self.allocator.?);
+            return;
+        };
+
+        const task = try ctx.allocator().create(GameDetailImageTask);
+        errdefer ctx.allocator().destroy(task);
+
+        task.* = .{
+            .cache_dir = try ctx.allocator().dupe(u8, cache_dir),
+            .url = try ctx.allocator().dupe(u8, url),
+            .request_id = request_id,
+        };
+        errdefer ctx.allocator().free(task.cache_dir);
+        errdefer ctx.allocator().free(task.url);
+
+        self.game_detail.setImageLoading(self.allocator.?);
+        ctx.spawnWith(task, GameDetailImageTask.run) catch |err| {
+            self.game_detail.setImageFailed(self.allocator.?, "Could not start image cache task");
+            return err;
+        };
+    }
+
+    fn finishGameDetailImageCache(self: *App, task_result: GameDetailImageTaskResult) void {
+        if (task_result.request_id != self.game_detail.image_request_id) {
+            switch (task_result.result) {
+                .ok => |path| self.allocator.?.free(path),
+                .failed => {},
+            }
+            return;
+        }
+
+        switch (task_result.result) {
+            .ok => |path| self.game_detail.setImageCached(self.allocator.?, path),
+            .failed => |message| self.game_detail.setImageFailed(self.allocator.?, message),
+        }
+    }
+
+    fn gameDetailImageUrl(self: *const App) ?[]const u8 {
+        if (self.game_detail.load_state != .loaded or self.game_detail.games.len == 0) return null;
+        const game = self.game_detail.games[0];
+        if (game.image_url) |url| {
+            if (url.len > 0) return url;
+        }
+        if (game.thumbnail_url) |url| {
+            if (url.len > 0) return url;
+        }
+        return null;
     }
 
     fn openGameInBrowser(self: *App, ctx: *chasen.Ctx(Msg)) !void {
@@ -2899,13 +2970,24 @@ const GameDetailResult = union(enum) {
     failed: []const u8,
 };
 
+const GameDetailImageResult = union(enum) {
+    ok: []u8,
+    failed: []const u8,
+};
+
 const GameDetailTaskResult = struct {
     request_id: u64,
     result: GameDetailResult,
 };
 
+const GameDetailImageTaskResult = struct {
+    request_id: u64,
+    result: GameDetailImageResult,
+};
+
 const GameDetailMsg = union(enum) {
     loaded: GameDetailTaskResult,
+    image_cached: GameDetailImageTaskResult,
     move_prev,
     move_next,
     open_browser,
@@ -3096,6 +3178,33 @@ const GameDetailTask = struct {
         return .{ .game_detail = .{ .loaded = .{
             .request_id = task.request_id,
             .result = loadGameDetail(allocator, io, task.token, task.game_id) catch |err| .{ .failed = @errorName(err) },
+        } } };
+    }
+};
+
+const GameDetailImageTask = struct {
+    cache_dir: []const u8,
+    url: []const u8,
+    request_id: u64,
+
+    fn run(ctx_ptr: *anyopaque, allocator: std.mem.Allocator, io: std.Io) App.Msg {
+        const task: *GameDetailImageTask = @ptrCast(@alignCast(ctx_ptr));
+        defer {
+            allocator.free(task.cache_dir);
+            allocator.free(task.url);
+            allocator.destroy(task);
+        }
+
+        const cached = image_mod.downloadToCache(allocator, io, task.cache_dir, task.url) catch |err| {
+            return .{ .game_detail = .{ .image_cached = .{
+                .request_id = task.request_id,
+                .result = .{ .failed = @errorName(err) },
+            } } };
+        };
+
+        return .{ .game_detail = .{ .image_cached = .{
+            .request_id = task.request_id,
+            .result = .{ .ok = cached.path },
         } } };
     }
 };
@@ -5030,6 +5139,81 @@ test "game detail load completion stores hidden result without transition" {
     try std.testing.expect(app.game_detail.load_state == .loaded);
     try std.testing.expect(!app.hasActiveScreenTransition());
     try std.testing.expect(!tc.ctx.frame_requested);
+}
+
+test "game detail image url prefers full image over thumbnail" {
+    var app = App.create(.{}, .{});
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    const games = try std.testing.allocator.alloc(bgg_model.Game, 1);
+    games[0] = .{
+        .id = 13,
+        .name = try std.testing.allocator.dupe(u8, "Catan"),
+        .thumbnail_url = try std.testing.allocator.dupe(u8, "https://example.test/thumb.jpg"),
+        .image_url = try std.testing.allocator.dupe(u8, "https://example.test/full.jpg"),
+    };
+
+    try app.game_detail.setLoaded(std.testing.allocator, games, app.config.display.detail_width);
+
+    try std.testing.expectEqualStrings("https://example.test/full.jpg", app.gameDetailImageUrl().?);
+}
+
+test "game detail image url falls back to thumbnail" {
+    var app = App.create(.{}, .{});
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    const games = try std.testing.allocator.alloc(bgg_model.Game, 1);
+    games[0] = .{
+        .id = 13,
+        .name = try std.testing.allocator.dupe(u8, "Catan"),
+        .thumbnail_url = try std.testing.allocator.dupe(u8, "https://example.test/thumb.jpg"),
+    };
+
+    try app.game_detail.setLoaded(std.testing.allocator, games, app.config.display.detail_width);
+
+    try std.testing.expectEqualStrings("https://example.test/thumb.jpg", app.gameDetailImageUrl().?);
+}
+
+test "stale game detail image cache result is ignored" {
+    var app = App.create(.{}, .{});
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    app.game_detail.image_request_id = 2;
+    const stale_path = try std.testing.allocator.dupe(u8, "/tmp/stale-cover.png");
+
+    app.finishGameDetailImageCache(.{
+        .request_id = 1,
+        .result = .{ .ok = stale_path },
+    });
+
+    try std.testing.expect(app.game_detail.image_state == .idle);
+}
+
+test "starting a new game detail invalidates in-flight image cache results" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    app.game_detail.image_request_id = 4;
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.startGameDetail(&tc.ctx, 13, .hot_games);
+    defer {
+        const task: *GameDetailTask = @ptrCast(@alignCast(tc.ctx.pendingTaskWithSlice()[0].ctx));
+        std.testing.allocator.free(task.token);
+        std.testing.allocator.destroy(task);
+    }
+
+    const stale_path = try std.testing.allocator.dupe(u8, "/tmp/stale-cover.png");
+    app.finishGameDetailImageCache(.{
+        .request_id = 4,
+        .result = .{ .ok = stale_path },
+    });
+
+    try std.testing.expect(app.game_detail.image_state == .idle);
 }
 
 test "search loading enters results without screen transition" {

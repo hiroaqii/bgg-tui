@@ -14,6 +14,10 @@ pub fn main(init: std.process.Init) !void {
     else
         bgg_tui.config.LoadedConfig{ .config = bgg_tui.config.Config.fromEnvironment(init.environ_map) };
     const config = loaded_config.config;
+    const image_cache_dir = bgg_tui.image.resolveCacheDir(allocator, init.environ_map) catch |err| switch (err) {
+        error.MissingCacheDirectory => null,
+        else => return err,
+    };
 
     // Terminal image support stays optional: app code decides when to load an
     // image, while Chasen owns local path -> terminal image handle conversion.
@@ -27,5 +31,8 @@ pub fn main(init: std.process.Init) !void {
         .io = init.io,
         .env_map = init.environ_map,
         .terminal_image_path_loader = image_loader,
-    }, bgg_tui.app.App.create(config, .{ .config_path = config_path }));
+    }, bgg_tui.app.App.create(config, .{
+        .config_path = config_path,
+        .image_cache_dir = image_cache_dir,
+    }));
 }

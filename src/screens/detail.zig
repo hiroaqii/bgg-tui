@@ -14,9 +14,20 @@ pub const LoadState = union(enum) {
     failed: []const u8,
 };
 
+pub const ImageState = union(enum) {
+    idle,
+    disabled,
+    unavailable,
+    loading,
+    cached: []u8,
+    failed: []const u8,
+};
+
 pub const State = struct {
     request_id: u64 = 0,
+    image_request_id: u64 = 0,
     load_state: LoadState = .idle,
+    image_state: ImageState = .idle,
     games: []bgg_model.Game = &.{},
     rendered_text: []u8 = "",
     lines: []const []const u8 = &.{},
@@ -24,8 +35,9 @@ pub const State = struct {
     visible_height: usize = 1,
     browser_error_url: []u8 = "",
 
-    pub fn setLoading(self: *State) void {
+    pub fn setLoading(self: *State, allocator: std.mem.Allocator) void {
         self.load_state = .loading;
+        self.clearImage(allocator);
     }
 
     pub fn setFailed(self: *State, message: []const u8) void {
@@ -38,6 +50,38 @@ pub const State = struct {
         try self.rebuildLines(allocator, detail_width);
         self.scroll = 0;
         self.load_state = .loaded;
+    }
+
+    pub fn setImageDisabled(self: *State, allocator: std.mem.Allocator) void {
+        self.clearImage(allocator);
+        self.image_state = .disabled;
+    }
+
+    pub fn setImageUnavailable(self: *State, allocator: std.mem.Allocator) void {
+        self.clearImage(allocator);
+        self.image_state = .unavailable;
+    }
+
+    pub fn setImageLoading(self: *State, allocator: std.mem.Allocator) void {
+        self.clearImage(allocator);
+        self.image_state = .loading;
+    }
+
+    pub fn setImageCached(self: *State, allocator: std.mem.Allocator, path: []u8) void {
+        self.clearImage(allocator);
+        self.image_state = .{ .cached = path };
+    }
+
+    pub fn setImageFailed(self: *State, allocator: std.mem.Allocator, message: []const u8) void {
+        self.clearImage(allocator);
+        self.image_state = .{ .failed = message };
+    }
+
+    pub fn imagePath(self: *const State) ?[]const u8 {
+        return switch (self.image_state) {
+            .cached => |path| path,
+            else => null,
+        };
     }
 
     pub fn moveUp(self: *State) void {
@@ -82,6 +126,7 @@ pub const State = struct {
 
     pub fn deinit(self: *State, allocator: std.mem.Allocator) void {
         bgg_xml.freeGames(allocator, self.games);
+        self.clearImage(allocator);
         allocator.free(self.lines);
         allocator.free(self.rendered_text);
         self.clearBrowserErrorUrl(allocator);
@@ -91,6 +136,14 @@ pub const State = struct {
         self.scroll = 0;
         self.visible_height = 1;
         self.load_state = .idle;
+    }
+
+    fn clearImage(self: *State, allocator: std.mem.Allocator) void {
+        switch (self.image_state) {
+            .cached => |path| allocator.free(path),
+            else => {},
+        }
+        self.image_state = .idle;
     }
 
     fn rebuildLines(self: *State, allocator: std.mem.Allocator, detail_width: usize) !void {

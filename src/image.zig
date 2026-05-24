@@ -10,7 +10,7 @@ pub const CachePathError = std.mem.Allocator.Error || error{
     MissingCacheDirectory,
 };
 
-pub const DownloadError = std.mem.Allocator.Error || std.http.Client.RequestError || std.http.Client.Request.SendError || std.http.Client.Request.ReceiveHeadError || std.http.Client.Request.TransferReadError || std.Io.Dir.CreateDirPathError || std.Io.Dir.WriteFileError || error{
+pub const DownloadError = std.mem.Allocator.Error || std.Io.Dir.CreateDirPathError || std.Io.Dir.WriteFileError || error{
     InvalidImageUrl,
     UnsupportedImageScheme,
     ImageRequestFailed,
@@ -19,7 +19,7 @@ pub const DownloadError = std.mem.Allocator.Error || std.http.Client.RequestErro
 
 pub const CachedImage = struct {
     url: []const u8,
-    path: []const u8,
+    path: []u8,
 };
 
 /// Resolves the app image cache directory without creating it.
@@ -91,18 +91,20 @@ fn downloadImage(allocator: std.mem.Allocator, io: std.Io, url: []const u8) Down
     var client = std.http.Client{ .allocator = allocator, .io = io };
     defer client.deinit();
 
-    var request = try client.request(.GET, uri, .{});
+    var request = client.request(.GET, uri, .{}) catch return error.ImageRequestFailed;
     defer request.deinit();
 
-    try request.sendBodiless();
+    request.sendBodiless() catch return error.ImageRequestFailed;
 
     var redirect_buffer: [8 * 1024]u8 = undefined;
-    var response = try request.receiveHead(&redirect_buffer);
+    var response = request.receiveHead(&redirect_buffer) catch return error.ImageRequestFailed;
     if (response.head.status != .ok) return error.ImageRequestFailed;
 
-    return response.reader().allocRemaining(allocator, .limited(max_image_bytes)) catch |err| switch (err) {
+    var transfer_buffer: [8 * 1024]u8 = undefined;
+    return response.reader(&transfer_buffer).allocRemaining(allocator, .limited(max_image_bytes)) catch |err| switch (err) {
         error.StreamTooLong => error.ImageTooLarge,
-        else => |e| e,
+        error.OutOfMemory => error.OutOfMemory,
+        else => error.ImageRequestFailed,
     };
 }
 
