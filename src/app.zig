@@ -1000,7 +1000,12 @@ pub const App = struct {
         content.clearAll();
 
         if (self.game_detail.terminal_image_handle) |handle| {
-            content.drawTerminalImage(handle, .{ .fit = .fit, .z_index = 1 }) catch {
+            content.drawTerminalImage(handle, .{
+                .fit = .fit,
+                .horizontal_align = .center,
+                .vertical_align = .middle,
+                .z_index = 1,
+            }) catch {
                 self.drawCenteredLabel(&content, "Could not draw image", self.subtleStyle());
             };
             return;
