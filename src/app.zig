@@ -34,6 +34,11 @@ const detail_image_panel_width: u16 = 28;
 const detail_image_panel_height: u16 = 14;
 const detail_image_panel_gap: u16 = 2;
 const detail_image_min_text_width: u16 = 56;
+const list_image_panel_width: u16 = 20;
+const list_image_panel_height: u16 = 10;
+const list_image_panel_gap: u16 = 2;
+const list_image_min_text_width: u16 = 72;
+const list_image_focus_settle_frames: u64 = 8;
 const thread_outer_reserved_rows: u16 = 3;
 
 // List screens follow the Go version's vertical rhythm:
@@ -89,6 +94,117 @@ const BrowserState = struct {
     request_id: u64 = 0,
 };
 
+const ListImageSource = struct {
+    screen: Screen,
+    id: u32,
+    url: []const u8,
+
+    fn eql(self: ListImageSource, other: ListImageSource) bool {
+        return self.screen == other.screen and
+            self.id == other.id and
+            std.mem.eql(u8, self.url, other.url);
+    }
+};
+
+const ListImageState = struct {
+    request_id: u64 = 0,
+    source: ?ListImageSource = null,
+    candidate: ?ListImageSource = null,
+    candidate_start_frame: u64 = 0,
+    image_state: screens.detail.ImageState = .idle,
+    terminal_image_handle: ?chasen.TerminalImageHandle = null,
+    terminal_image_load_error: ?chasen.TerminalImageLoadError = null,
+    cache_task_pending: bool = false,
+
+    fn reset(self: *ListImageState, allocator: std.mem.Allocator) void {
+        self.clearImage(allocator);
+        self.source = null;
+        self.candidate = null;
+        self.candidate_start_frame = 0;
+        self.cache_task_pending = false;
+    }
+
+    fn setSourceImmediate(self: *ListImageState, allocator: std.mem.Allocator, source: ?ListImageSource) bool {
+        if (sameOptionalListImageSource(self.source, source)) return false;
+        self.clearImage(allocator);
+        self.request_id +%= 1;
+        self.source = source;
+        self.candidate = null;
+        self.candidate_start_frame = 0;
+        self.cache_task_pending = false;
+        return true;
+    }
+
+    fn setCandidate(self: *ListImageState, source: ?ListImageSource, frame: u64) bool {
+        if (sameOptionalListImageSource(self.candidate, source)) return false;
+        self.candidate = source;
+        self.candidate_start_frame = frame;
+        return true;
+    }
+
+    fn candidateSettled(self: *const ListImageState, frame: u64) bool {
+        return self.candidate != null and frame -| self.candidate_start_frame >= list_image_focus_settle_frames;
+    }
+
+    fn setImageDisabled(self: *ListImageState, allocator: std.mem.Allocator) void {
+        self.clearImage(allocator);
+        self.image_state = .disabled;
+    }
+
+    fn setImageUnavailable(self: *ListImageState, allocator: std.mem.Allocator) void {
+        self.clearImage(allocator);
+        self.image_state = .unavailable;
+    }
+
+    fn setImageLoading(self: *ListImageState, allocator: std.mem.Allocator) void {
+        self.clearImage(allocator);
+        self.image_state = .loading;
+    }
+
+    fn setImageCached(self: *ListImageState, allocator: std.mem.Allocator, path: []u8) void {
+        self.clearImage(allocator);
+        self.image_state = .{ .cached = path };
+    }
+
+    fn setImageFailed(self: *ListImageState, allocator: std.mem.Allocator, message: []const u8) void {
+        self.clearImage(allocator);
+        self.image_state = .{ .failed = message };
+    }
+
+    fn setTerminalImageLoading(self: *ListImageState) void {
+        self.terminal_image_handle = null;
+        self.terminal_image_load_error = null;
+    }
+
+    fn setTerminalImageLoaded(self: *ListImageState, handle: chasen.TerminalImageHandle) void {
+        self.terminal_image_handle = handle;
+        self.terminal_image_load_error = null;
+    }
+
+    fn setTerminalImageFailed(self: *ListImageState, reason: chasen.TerminalImageLoadError) void {
+        self.terminal_image_handle = null;
+        self.terminal_image_load_error = reason;
+    }
+
+    fn imagePath(self: *const ListImageState) ?[]const u8 {
+        return switch (self.image_state) {
+            .cached => |path| path,
+            else => null,
+        };
+    }
+
+    fn clearImage(self: *ListImageState, allocator: std.mem.Allocator) void {
+        switch (self.image_state) {
+            .cached => |path| allocator.free(path),
+            else => {},
+        }
+        self.image_state = .idle;
+        self.terminal_image_handle = null;
+        self.terminal_image_load_error = null;
+        self.cache_task_pending = false;
+    }
+};
+
 pub const App = struct {
     config: config_mod.Config,
     config_path: ?[]const u8 = null,
@@ -106,6 +222,7 @@ pub const App = struct {
     thread: screens.thread.State = .{},
     navigation: NavigationState = .{},
     browser: BrowserState = .{},
+    list_image: ListImageState = .{},
     settings: screens.settings.State = .{},
     terminal_size: chasen.Size = forum_screen_max_size,
     menu: ui.Menu = ui.Menu.init(.{ .items = &menu_items }),
@@ -121,6 +238,7 @@ pub const App = struct {
         search: SearchMsg,
         collection: CollectionMsg,
         game_detail: GameDetailMsg,
+        list_image: ListImageMsg,
         forum: ForumMsg,
         thread: ThreadMsg,
         browser: BrowserMsg,
@@ -166,6 +284,7 @@ pub const App = struct {
             .search => |search_msg| try self.updateSearch(search_msg, ctx),
             .collection => |collection_msg| try self.updateCollection(collection_msg, ctx),
             .game_detail => |detail_msg| try self.updateGameDetail(detail_msg, ctx),
+            .list_image => |image_msg| try self.updateListImage(image_msg, ctx),
             .forum => |forum_msg| try self.updateForum(forum_msg, ctx),
             .thread => |thread_msg| try self.updateThread(thread_msg, ctx),
             .browser => |browser_msg| try self.updateBrowser(browser_msg),
@@ -177,7 +296,9 @@ pub const App = struct {
                 self.stepScreenTransition();
                 if (transition_was_active and !self.hasActiveScreenTransition()) {
                     try self.startDeferredGameDetailTerminalImageLoad(ctx);
+                    try self.syncListImagePreview(ctx);
                 }
+                try self.maybeStartSettledListImageDownload(ctx);
                 self.requestMotionFrameIfNeeded(ctx);
             },
             .menu => |menu_msg| switch (menu_msg) {
@@ -607,16 +728,21 @@ pub const App = struct {
                     const body_row = if (self.hot_games.filter_active) list_filtered_body_row else list_body_row;
                     if (self.hot_games.filter_active) try self.drawHotFilterInput(&area);
                     const list = self.hot_games.activeList();
+                    const image_panel_rect = self.hotListImagePanelRect(&area);
+                    const list_width = if (image_panel_rect) |rect| rect.col -| list_image_panel_gap else area.size().width;
                     var list_area = area.child(.{
                         .col = 0,
                         .row = body_row,
-                        .width = area.size().width,
+                        .width = list_width,
                         .height = area.size().height -| (body_row + 1 + list_footer_gap),
                     });
                     list_view.viewListWithDensitySelection(list, &list_area, .{
                         .focused_style = self.focusedStyle(),
                         .show_cursor = false,
                     }, self.listDensity(), self.config.interface.selection, self.animation_frame);
+                    if (image_panel_rect) |rect| {
+                        try self.drawListImagePanel(&area, rect);
+                    }
                     try self.drawListPositionWithLegend(&area, list, "trending games  ★ Rating  ⚖ Weight  #Rank");
                     self.drawSortMode(&area, self.hot_games.sort_mode.label(.hot_games));
                 }
@@ -887,6 +1013,40 @@ pub const App = struct {
         self.drawCenteredLabel(&content, label, self.subtleStyle());
     }
 
+    fn drawListImagePanel(self: *const App, area: *chasen.Surface, rect: chasen.Rect) !void {
+        var panel_area = area.child(rect);
+        panel_area.clearAll();
+
+        const frame = ui.Panel.frame(&panel_area, .{
+            .title = "Preview",
+            .border = self.panelBorder(),
+            .border_style = self.theme().border,
+            .title_style = self.theme().title,
+        });
+        frame.view();
+
+        var content = frame.contentSurface();
+        content.clearAll();
+
+        if (self.list_image.terminal_image_handle) |handle| {
+            content.drawTerminalImage(handle, .{ .fit = .fit, .z_index = 1 }) catch {
+                self.drawCenteredLabel(&content, "Could not draw image", self.subtleStyle());
+            };
+            return;
+        }
+
+        const label = switch (self.list_image.image_state) {
+            .idle, .loading, .cached => if (self.list_image.terminal_image_load_error) |reason|
+                detailImageLoadErrorText(reason)
+            else
+                "Loading cover...",
+            .disabled => "Images disabled",
+            .unavailable => "No cover image",
+            .failed => |message| listImagePanelMessage(message),
+        };
+        self.drawCenteredLabel(&content, label, self.subtleStyle());
+    }
+
     fn drawCenteredLabel(self: *const App, surface: *chasen.Surface, text: []const u8, style: chasen.TextStyle) void {
         _ = self;
         const size = surface.size();
@@ -899,6 +1059,10 @@ pub const App = struct {
 
     fn detailImagePanelRect(self: *const App, area: *const chasen.Surface, detail_layout: screens.detail.Layout) ?chasen.Rect {
         return detailImagePanelRectForSize(self.config, area.size(), detail_layout);
+    }
+
+    fn hotListImagePanelRect(self: *const App, area: *const chasen.Surface) ?chasen.Rect {
+        return listImagePanelRectForSize(self.config, area.size());
     }
 
     fn effectiveDetailContentWidth(self: *const App) usize {
@@ -1126,6 +1290,7 @@ pub const App = struct {
 
     fn toggleSettingsShowImages(self: *App, ctx: *chasen.Ctx(Msg)) !void {
         self.config.display.show_images = !self.config.display.show_images;
+        try self.syncListImagePreview(ctx);
         try self.saveConfigIfAvailable(ctx);
     }
 
@@ -1143,7 +1308,10 @@ pub const App = struct {
             .border_style => self.config.interface.border_style = nextCycleValue(self.config.interface.border_style, &border_style_values),
             .list_density => self.config.interface.list_density = nextCycleValue(self.config.interface.list_density, &list_density_values),
             .date_format => self.config.interface.date_format = nextCycleValue(self.config.interface.date_format, &date_format_values),
-            .image_protocol => self.config.display.image_protocol = nextImageProtocol(self.config.display.image_protocol),
+            .image_protocol => {
+                self.config.display.image_protocol = nextImageProtocol(self.config.display.image_protocol);
+                try self.syncListImagePreview(ctx);
+            },
         }
         try self.saveConfigIfAvailable(ctx);
     }
@@ -1174,6 +1342,8 @@ pub const App = struct {
         self.search.deinit(self.allocator.?);
         self.collection.deinit(self.allocator.?);
         self.game_detail.deinit(self.allocator.?);
+        self.releaseListImageTerminalImage(null);
+        self.list_image.reset(self.allocator.?);
         self.forums.deinit(self.allocator.?);
         self.thread.deinit(self.allocator.?);
     }
@@ -1199,27 +1369,41 @@ pub const App = struct {
 
     fn updateHotGames(self: *App, msg: HotGamesMsg, ctx: *chasen.Ctx(Msg)) !void {
         switch (msg) {
-            .filter_start => try self.startHotFilter(),
+            .filter_start => {
+                try self.startHotFilter();
+                try self.syncListImagePreview(ctx);
+            },
             .filter_input => |input_msg| {
                 if (input_msg != .submit) {
                     if (self.hot_games.filter_input) |*input| try input.update(input_msg);
                     try self.applyHotFilter();
+                    try self.syncListImagePreview(ctx);
                 }
             },
             .filter_paste => |text| {
                 if (self.hot_games.filter_input) |*input| {
                     try insertPastedCodepoints(input, text);
                     try self.applyHotFilter();
+                    try self.syncListImagePreview(ctx);
                 }
             },
-            .filter_clear => try self.clearHotFilter(),
+            .filter_clear => {
+                try self.clearHotFilter();
+                try self.syncListImagePreview(ctx);
+            },
             .list => |list_msg| switch (list_msg) {
-                .move_prev, .move_next => self.hot_games.update(list_msg),
+                .move_prev, .move_next => {
+                    self.hot_games.update(list_msg);
+                    try self.syncListImagePreview(ctx);
+                },
                 .activate => |index| {
                     if (self.hot_games.sourceIndex(index)) |source_index| try self.openHotGame(source_index, ctx);
                 },
             },
-            .sort_toggle => try self.toggleHotSort(),
+            .sort_toggle => {
+                try self.toggleHotSort();
+                try self.syncListImagePreview(ctx);
+            },
             .loaded => |result| try self.finishHotGamesLoad(ctx, result),
             .stats_loaded => |result| try self.finishHotGameStatsLoad(result),
         }
@@ -1340,6 +1524,14 @@ pub const App = struct {
         }
     }
 
+    fn updateListImage(self: *App, msg: ListImageMsg, ctx: *chasen.Ctx(Msg)) !void {
+        switch (msg) {
+            .image_cached => |result| try self.finishListImageCache(ctx, result),
+            .terminal_image_loaded => |result| self.finishListImageTerminalImageLoad(ctx, result),
+            .terminal_image_failed => |result| self.finishListImageTerminalImageFailure(result),
+        }
+    }
+
     fn updateForum(self: *App, msg: ForumMsg, ctx: *chasen.Ctx(Msg)) !void {
         switch (msg) {
             .open => try self.startForumList(ctx),
@@ -1452,6 +1644,7 @@ pub const App = struct {
         if (screen == .game_detail) {
             try self.startDeferredGameDetailTerminalImageLoad(ctx);
         }
+        try self.syncListImagePreview(ctx);
     }
 
     fn resetSearchScreen(self: *App) !void {
@@ -1509,6 +1702,7 @@ pub const App = struct {
         switch (result) {
             .ok => |games| {
                 try self.hot_games.setLoaded(self.allocator.?, games);
+                try self.syncListImagePreview(ctx);
                 try self.startHotGameStatsLoad(ctx);
                 self.startContentTransitionIfVisible(ctx, .hot_games);
             },
@@ -1826,6 +2020,184 @@ pub const App = struct {
             self.game_detail.terminal_image_handle = null;
         }
         self.game_detail.terminal_image_load_error = null;
+    }
+
+    fn syncListImagePreview(self: *App, ctx: *chasen.Ctx(Msg)) !void {
+        const allocator = self.allocator orelse ctx.allocator();
+        const source = self.currentListImageSource();
+        if (!detailWantsImagePanel(self.config)) {
+            self.releaseListImageTerminalImage(ctx);
+            _ = self.list_image.setSourceImmediate(allocator, null);
+            self.list_image.setImageDisabled(allocator);
+            return;
+        }
+
+        if (source == null) {
+            self.releaseListImageTerminalImage(ctx);
+            if (self.list_image.setSourceImmediate(allocator, null)) {}
+            self.list_image.setImageUnavailable(allocator);
+            return;
+        }
+
+        const image_source = source.?;
+        if (!image_mod.canLoadTerminalImageFromUrl(image_source.url)) {
+            self.releaseListImageTerminalImage(ctx);
+            _ = self.list_image.setSourceImmediate(allocator, image_source);
+            self.list_image.setImageFailed(allocator, detailUnsupportedImageFormatText(image_mod.sourceFormatFromUrl(image_source.url)));
+            return;
+        }
+
+        if (sameOptionalListImageSource(self.list_image.source, image_source)) {
+            try self.startDeferredListImageTerminalImageLoad(ctx);
+            try self.maybeStartSettledListImageDownload(ctx);
+            return;
+        }
+
+        self.releaseListImageTerminalImage(ctx);
+        _ = self.list_image.setSourceImmediate(allocator, image_source);
+
+        const cache_dir = self.image_cache_dir orelse {
+            self.list_image.setImageFailed(allocator, "Image cache directory is unavailable");
+            return;
+        };
+        const path = try image_mod.cachePathForUrl(allocator, cache_dir, image_source.url);
+        errdefer allocator.free(path);
+
+        if (image_mod.cacheHit(ctx.io(), path)) {
+            self.list_image.setImageCached(allocator, path);
+            try self.startDeferredListImageTerminalImageLoad(ctx);
+            return;
+        }
+
+        allocator.free(path);
+        self.list_image.setImageLoading(allocator);
+        _ = self.list_image.setCandidate(image_source, self.animation_frame);
+        self.requestMotionFrameIfNeeded(ctx);
+    }
+
+    fn maybeStartSettledListImageDownload(self: *App, ctx: *chasen.Ctx(Msg)) !void {
+        if (self.hasActiveScreenTransition()) return;
+        if (self.list_image.cache_task_pending) return;
+        if (!self.list_image.candidateSettled(self.animation_frame)) {
+            if (self.list_image.candidate != null) self.requestMotionFrameIfNeeded(ctx);
+            return;
+        }
+        const source = self.list_image.candidate orelse return;
+        if (!sameOptionalListImageSource(self.list_image.source, source)) return;
+        if (self.list_image.imagePath() != null or self.list_image.terminal_image_handle != null) return;
+
+        try self.startListImageCache(ctx, source);
+    }
+
+    fn startListImageCache(self: *App, ctx: *chasen.Ctx(Msg), source: ListImageSource) !void {
+        const cache_dir = self.image_cache_dir orelse {
+            self.list_image.setImageFailed(self.allocator.?, "Image cache directory is unavailable");
+            return;
+        };
+
+        const task = try ctx.allocator().create(ListImageTask);
+        errdefer ctx.allocator().destroy(task);
+
+        task.* = .{
+            .cache_dir = try ctx.allocator().dupe(u8, cache_dir),
+            .url = try ctx.allocator().dupe(u8, source.url),
+            .request_id = self.list_image.request_id,
+        };
+        errdefer ctx.allocator().free(task.cache_dir);
+        errdefer ctx.allocator().free(task.url);
+
+        self.list_image.cache_task_pending = true;
+        ctx.spawnWith(task, ListImageTask.run) catch |err| {
+            self.list_image.cache_task_pending = false;
+            self.list_image.setImageFailed(self.allocator.?, "Could not start image cache task");
+            return err;
+        };
+    }
+
+    fn finishListImageCache(self: *App, ctx: *chasen.Ctx(Msg), task_result: ListImageTaskResult) !void {
+        if (task_result.request_id != self.list_image.request_id) {
+            switch (task_result.result) {
+                .ok => |path| self.allocator.?.free(path),
+                .failed => {},
+            }
+            return;
+        }
+
+        self.list_image.cache_task_pending = false;
+        switch (task_result.result) {
+            .ok => |path| {
+                self.list_image.setImageCached(self.allocator.?, path);
+                try self.startDeferredListImageTerminalImageLoad(ctx);
+            },
+            .failed => |message| self.list_image.setImageFailed(self.allocator.?, message),
+        }
+    }
+
+    fn startDeferredListImageTerminalImageLoad(self: *App, ctx: *chasen.Ctx(Msg)) !void {
+        if (!isListImageScreen(self.screen)) return;
+        if (self.hasActiveScreenTransition()) return;
+        if (self.list_image.terminal_image_handle != null or self.list_image.terminal_image_load_error != null) return;
+
+        const path = self.list_image.imagePath() orelse return;
+        try self.startListImageTerminalImageLoad(ctx, path);
+    }
+
+    fn startListImageTerminalImageLoad(self: *App, ctx: *chasen.Ctx(Msg), path: []const u8) !void {
+        self.releaseListImageTerminalImage(ctx);
+
+        const load_ctx = try self.allocator.?.create(ListImageTerminalImageLoadContext);
+        errdefer self.allocator.?.destroy(load_ctx);
+        load_ctx.* = .{ .request_id = self.list_image.request_id };
+
+        self.list_image.setTerminalImageLoading();
+        ctx.loadTerminalImagePath(path, load_ctx, &listImageTerminalImageLoaded, &listImageTerminalImageFailed) catch |err| {
+            self.list_image.setTerminalImageFailed(.load_failed);
+            return err;
+        };
+    }
+
+    fn finishListImageTerminalImageLoad(self: *App, ctx: *chasen.Ctx(Msg), result: ListImageTerminalImageLoaded) void {
+        const load_ctx = result.load_ctx;
+        defer self.allocator.?.destroy(load_ctx);
+
+        if (load_ctx.request_id != self.list_image.request_id) {
+            ctx.unloadTerminalImage(result.handle) catch {};
+            return;
+        }
+
+        self.list_image.setTerminalImageLoaded(result.handle);
+    }
+
+    fn finishListImageTerminalImageFailure(self: *App, result: ListImageTerminalImageFailed) void {
+        const load_ctx = result.load_ctx;
+        defer self.allocator.?.destroy(load_ctx);
+
+        if (load_ctx.request_id != self.list_image.request_id) return;
+        self.list_image.setTerminalImageFailed(result.reason);
+    }
+
+    fn releaseListImageTerminalImage(self: *App, ctx: ?*chasen.Ctx(Msg)) void {
+        if (self.list_image.terminal_image_handle) |handle| {
+            if (ctx) |ctx_ptr| ctx_ptr.unloadTerminalImage(handle) catch {};
+            self.list_image.terminal_image_handle = null;
+        }
+        self.list_image.terminal_image_load_error = null;
+    }
+
+    fn currentListImageSource(self: *const App) ?ListImageSource {
+        return switch (self.screen) {
+            .hot_games => self.hotListImageSource(),
+            else => null,
+        };
+    }
+
+    fn hotListImageSource(self: *const App) ?ListImageSource {
+        if (self.hot_games.load_state != .loaded) return null;
+        const focused_index = self.hot_games.activeList().focusedIndex();
+        const source_index = self.hot_games.sourceIndex(focused_index) orelse return null;
+        const game = self.hot_games.games[source_index];
+        const url = game.thumbnail_url orelse return null;
+        return .{ .screen = .hot_games, .id = game.id, .url = url };
     }
 
     fn gameDetailImageUrl(self: *const App) ?[]const u8 {
@@ -2346,9 +2718,13 @@ pub const App = struct {
     }
 
     fn requestMotionFrameIfNeeded(self: *const App, ctx: *chasen.Ctx(Msg)) void {
-        if (motion.selectionNeedsFrame(self.config.interface.selection) or self.hasActiveLoadingScan() or self.hasActiveScreenTransition()) {
+        if (motion.selectionNeedsFrame(self.config.interface.selection) or self.hasActiveLoadingScan() or self.hasActiveScreenTransition() or self.listImageCandidateWaiting()) {
             ctx.requestFrame();
         }
+    }
+
+    fn listImageCandidateWaiting(self: *const App) bool {
+        return self.list_image.candidate != null and !self.list_image.candidateSettled(self.animation_frame);
     }
 
     fn enterPreparedScreen(self: *App, screen: Screen, ctx: *chasen.Ctx(Msg)) void {
@@ -3141,6 +3517,30 @@ const GameDetailTerminalImageFailed = struct {
     reason: chasen.TerminalImageLoadError,
 };
 
+const ListImageResult = union(enum) {
+    ok: []u8,
+    failed: []const u8,
+};
+
+const ListImageTaskResult = struct {
+    request_id: u64,
+    result: ListImageResult,
+};
+
+const ListImageTerminalImageLoadContext = struct {
+    request_id: u64,
+};
+
+const ListImageTerminalImageLoaded = struct {
+    load_ctx: *ListImageTerminalImageLoadContext,
+    handle: chasen.TerminalImageHandle,
+};
+
+const ListImageTerminalImageFailed = struct {
+    load_ctx: *ListImageTerminalImageLoadContext,
+    reason: chasen.TerminalImageLoadError,
+};
+
 const GameDetailMsg = union(enum) {
     loaded: GameDetailTaskResult,
     image_cached: GameDetailImageTaskResult,
@@ -3149,6 +3549,12 @@ const GameDetailMsg = union(enum) {
     move_prev,
     move_next,
     open_browser,
+};
+
+const ListImageMsg = union(enum) {
+    image_cached: ListImageTaskResult,
+    terminal_image_loaded: ListImageTerminalImageLoaded,
+    terminal_image_failed: ListImageTerminalImageFailed,
 };
 
 const ForumListResult = union(enum) {
@@ -3367,6 +3773,33 @@ const GameDetailImageTask = struct {
     }
 };
 
+const ListImageTask = struct {
+    cache_dir: []const u8,
+    url: []const u8,
+    request_id: u64,
+
+    fn run(ctx_ptr: *anyopaque, allocator: std.mem.Allocator, io: std.Io) App.Msg {
+        const task: *ListImageTask = @ptrCast(@alignCast(ctx_ptr));
+        defer {
+            allocator.free(task.cache_dir);
+            allocator.free(task.url);
+            allocator.destroy(task);
+        }
+
+        const cached = image_mod.downloadToCache(allocator, io, task.cache_dir, task.url) catch |err| {
+            return .{ .list_image = .{ .image_cached = .{
+                .request_id = task.request_id,
+                .result = .{ .failed = @errorName(err) },
+            } } };
+        };
+
+        return .{ .list_image = .{ .image_cached = .{
+            .request_id = task.request_id,
+            .result = .{ .ok = cached.path },
+        } } };
+    }
+};
+
 fn gameDetailTerminalImageLoaded(ctx_ptr: *anyopaque, handle: chasen.TerminalImageHandle) App.Msg {
     const load_ctx: *GameDetailTerminalImageLoadContext = @ptrCast(@alignCast(ctx_ptr));
     return .{ .game_detail = .{ .terminal_image_loaded = .{
@@ -3378,6 +3811,22 @@ fn gameDetailTerminalImageLoaded(ctx_ptr: *anyopaque, handle: chasen.TerminalIma
 fn gameDetailTerminalImageFailed(ctx_ptr: *anyopaque, reason: chasen.TerminalImageLoadError) App.Msg {
     const load_ctx: *GameDetailTerminalImageLoadContext = @ptrCast(@alignCast(ctx_ptr));
     return .{ .game_detail = .{ .terminal_image_failed = .{
+        .load_ctx = load_ctx,
+        .reason = reason,
+    } } };
+}
+
+fn listImageTerminalImageLoaded(ctx_ptr: *anyopaque, handle: chasen.TerminalImageHandle) App.Msg {
+    const load_ctx: *ListImageTerminalImageLoadContext = @ptrCast(@alignCast(ctx_ptr));
+    return .{ .list_image = .{ .terminal_image_loaded = .{
+        .load_ctx = load_ctx,
+        .handle = handle,
+    } } };
+}
+
+fn listImageTerminalImageFailed(ctx_ptr: *anyopaque, reason: chasen.TerminalImageLoadError) App.Msg {
+    const load_ctx: *ListImageTerminalImageLoadContext = @ptrCast(@alignCast(ctx_ptr));
+    return .{ .list_image = .{ .terminal_image_failed = .{
         .load_ctx = load_ctx,
         .reason = reason,
     } } };
@@ -3860,6 +4309,34 @@ fn detailImagePanelRectForSize(config: config_mod.Config, size: chasen.Size, det
     };
 }
 
+fn listImagePanelRectForSize(config: config_mod.Config, size: chasen.Size) ?chasen.Rect {
+    if (!detailWantsImagePanel(config)) return null;
+    if (size.width < list_image_min_text_width + list_image_panel_gap + list_image_panel_width)
+        return null;
+    if (size.height <= list_body_row + 6) return null;
+
+    const available_height = size.height - list_body_row - 2;
+    return .{
+        .col = size.width - list_image_panel_width,
+        .row = list_body_row,
+        .width = list_image_panel_width,
+        .height = @min(list_image_panel_height, available_height),
+    };
+}
+
+fn sameOptionalListImageSource(a: ?ListImageSource, b: ?ListImageSource) bool {
+    if (a == null and b == null) return true;
+    if (a == null or b == null) return false;
+    return a.?.eql(b.?);
+}
+
+fn isListImageScreen(screen: Screen) bool {
+    return switch (screen) {
+        .hot_games => true,
+        else => false,
+    };
+}
+
 fn detailImageLoadErrorText(reason: chasen.TerminalImageLoadError) []const u8 {
     return switch (reason) {
         .unsupported => "Images unsupported",
@@ -3875,6 +4352,13 @@ fn detailUnsupportedImageFormatText(format_kind: image_mod.SourceFormat) []const
         .unknown => "Cover format not supported",
         .png => "Could not load image",
     };
+}
+
+fn listImagePanelMessage(message: []const u8) []const u8 {
+    if (std.mem.eql(u8, message, "JPEG covers not supported yet")) return "JPEG not supported";
+    if (std.mem.eql(u8, message, "WebP covers not supported yet")) return "WebP not supported";
+    if (std.mem.eql(u8, message, "Cover format not supported")) return "Unsupported format";
+    return message;
 }
 
 fn listSurface(surface: *chasen.Surface, configured_width: u16) chasen.Surface {
@@ -5424,6 +5908,112 @@ test "game detail skips unsupported cover formats before cache task" {
         .failed => |message| try std.testing.expectEqualStrings("JPEG covers not supported yet", message),
         else => return error.TestExpectedEqual,
     }
+}
+
+test "hot list image preview reports unsupported JPEG thumbnail without cache task" {
+    var app = App.create(.{}, .{ .image_cache_dir = "/tmp/bgg-tui-images" });
+    app.allocator = std.testing.allocator;
+    app.screen = .hot_games;
+    defer app.deinitOwnedState();
+
+    const games = try std.testing.allocator.alloc(bgg_model.HotGame, 1);
+    games[0] = .{
+        .id = 13,
+        .rank = 1,
+        .name = try std.testing.allocator.dupe(u8, "Catan"),
+        .thumbnail_url = try std.testing.allocator.dupe(u8, "https://example.test/thumb.jpg"),
+    };
+    try app.hot_games.setLoaded(std.testing.allocator, games);
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{
+        .ctx = .{ ._allocator = std.testing.allocator, ._io = std.testing.io },
+    };
+    try app.syncListImagePreview(&tc.ctx);
+
+    try std.testing.expectEqual(@as(usize, 0), tc.ctx.pendingTaskWithSlice().len);
+    switch (app.list_image.image_state) {
+        .failed => |message| try std.testing.expectEqualStrings("JPEG covers not supported yet", message),
+        else => return error.TestExpectedEqual,
+    }
+}
+
+test "hot list image preview waits before uncached PNG download" {
+    var app = App.create(.{}, .{ .image_cache_dir = ".zig-cache/test-bgg-tui-list-image" });
+    app.allocator = std.testing.allocator;
+    app.screen = .hot_games;
+    defer app.deinitOwnedState();
+
+    const games = try std.testing.allocator.alloc(bgg_model.HotGame, 1);
+    games[0] = .{
+        .id = 13,
+        .rank = 1,
+        .name = try std.testing.allocator.dupe(u8, "Catan"),
+        .thumbnail_url = try std.testing.allocator.dupe(u8, "https://example.test/thumb.png"),
+    };
+    try app.hot_games.setLoaded(std.testing.allocator, games);
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{
+        .ctx = .{ ._allocator = std.testing.allocator, ._io = std.testing.io },
+    };
+    try app.syncListImagePreview(&tc.ctx);
+    try std.testing.expectEqual(@as(usize, 0), tc.ctx.pendingTaskWithSlice().len);
+
+    try app.update(.{ .frame = .{ .now_ns = 16, .delta_ns = 16, .index = list_image_focus_settle_frames } }, &tc.ctx);
+    defer {
+        for (tc.ctx.pendingTaskWithSlice()) |entry| {
+            const task: *ListImageTask = @ptrCast(@alignCast(entry.ctx));
+            std.testing.allocator.free(task.cache_dir);
+            std.testing.allocator.free(task.url);
+            std.testing.allocator.destroy(task);
+        }
+        tc.ctx.pending_tasks_with_len = 0;
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), tc.ctx.pendingTaskWithSlice().len);
+}
+
+test "hot list image preview retries cached terminal load after transition" {
+    var app = App.create(.{ .interface = .{ .transition = "sweep" } }, .{ .image_cache_dir = ".zig-cache/test-bgg-tui-list-image-cached" });
+    app.allocator = std.testing.allocator;
+    app.screen = .hot_games;
+    defer app.deinitOwnedState();
+
+    const games = try std.testing.allocator.alloc(bgg_model.HotGame, 1);
+    games[0] = .{
+        .id = 13,
+        .rank = 1,
+        .name = try std.testing.allocator.dupe(u8, "Catan"),
+        .thumbnail_url = try std.testing.allocator.dupe(u8, "https://example.test/thumb.png"),
+    };
+    try app.hot_games.setLoaded(std.testing.allocator, games);
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{
+        .ctx = .{ ._allocator = std.testing.allocator, ._io = std.testing.io },
+    };
+
+    const cached_path = try image_mod.cachePathForUrl(std.testing.allocator, app.image_cache_dir.?, games[0].thumbnail_url.?);
+    defer std.testing.allocator.free(cached_path);
+    if (std.fs.path.dirname(cached_path)) |parent| try std.Io.Dir.cwd().createDirPath(std.testing.io, parent);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = cached_path, .data = "png" });
+
+    app.startContentTransition(&tc.ctx);
+    try app.syncListImagePreview(&tc.ctx);
+    try std.testing.expectEqual(@as(usize, 0), tc.ctx.pendingTerminalImageLoadSlice().len);
+
+    var frame_index: u64 = 1;
+    while (app.hasActiveScreenTransition()) : (frame_index += 1) {
+        try app.update(.{ .frame = .{ .now_ns = frame_index * 16, .delta_ns = 16, .index = frame_index } }, &tc.ctx);
+    }
+    defer {
+        for (tc.ctx.pendingTerminalImageLoadSlice()) |entry| {
+            std.testing.allocator.free(entry.path);
+            const load_ctx: *ListImageTerminalImageLoadContext = @ptrCast(@alignCast(entry.ctx));
+            std.testing.allocator.destroy(load_ctx);
+        }
+        tc.ctx.pending_terminal_image_loads_len = 0;
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), tc.ctx.pendingTerminalImageLoadSlice().len);
 }
 
 test "stale game detail image cache result is ignored" {
