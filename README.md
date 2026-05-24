@@ -26,13 +26,16 @@ rebuilt around Zig and Chasen conventions.
 - ⚙️ Configurable list density, date format, list/thread/detail width
 - 🌐 Open any game in browser
 
+Current image support is intentionally limited. Local PNG covers can be sent to
+the terminal image runtime; JPEG/WebP covers are detected before download and
+shown as unsupported until the Chasen graphics image pipeline can decode them.
+
 ## Requirements
 
 - Zig 0.16.0+
 - BGG API bearer token. You must register for API access on BoardGameGeek and
   generate a token at <https://boardgamegeek.com/applications>.
-- Terminal with Kitty graphics protocol support for images, once image support
-  is restored.
+- Terminal with Kitty graphics protocol support for images.
 
 ## Installation
 
@@ -44,10 +47,16 @@ cd bgg-tui
 zig build
 ```
 
-Run the current development scaffold:
+Run the app:
 
 ```bash
 zig build run
+```
+
+Run tests:
+
+```bash
+zig build test
 ```
 
 Run the manual live API check with the configured token:
@@ -67,25 +76,26 @@ bgg-tui requires a BGG API bearer token. You need to register for API access on 
 
 You can change the token later from the Settings screen.
 
-During the Zig port development, the scaffold can also read the token from
-`BGG_TUI_API_TOKEN`. `BGG_API_TOKEN` is accepted as a fallback for local manual
-checks.
+For local development and manual checks, the app can also read the token from
+`BGG_TUI_API_TOKEN`. `BGG_API_TOKEN` is accepted as a fallback.
 
 ## Configuration
 
-Configuration file is created on first launch in your OS's default config directory (`bgg-tui/config.toml`). You can check the exact path in the Settings screen. Settings can also be changed from the Settings screen within the app.
+Configuration file is created on first launch in your OS's default config
+directory (`bgg-tui/config.toml`). You can check the exact path in the Settings
+screen. Settings can also be changed from the Settings screen within the app.
 
-During development, `BGG_TUI_CONFIG_PATH` can be used to point the scaffold at a
+During development, `BGG_TUI_CONFIG_PATH` can be used to point the app at a
 specific config file path.
 
 | Section | Key | Description |
 |---------|-----|-------------|
-| `interface` | `color_theme` | Color theme |
-| `interface` | `transition` | Screen transition effect |
-| `interface` | `selection` | List selection animation |
-| `interface` | `border_style` | Border style for panels |
-| `interface` | `list_density` | List item spacing |
-| `interface` | `date_format` | Date display format |
+| `interface` | `color_theme` | Color theme: `default`, `blue`, `orange`, `mono`, `matcha` |
+| `interface` | `transition` | Screen transition effect such as `none`, `fade`, `sweep`, `glitch`, `random` |
+| `interface` | `selection` | List selection animation: `none`, `invert`, `wave`, `blink`, `glitch`, `scan` |
+| `interface` | `border_style` | Border style for panels: `none`, `rounded`, `thick`, `double`, `block`, `dots` |
+| `interface` | `list_density` | List item spacing: `compact`, `normal`, `comfortable`, `relaxed` |
+| `interface` | `date_format` | Date display format: `yyyy-mm-dd`, `yyyy/mm/dd`, `relative`, `YYYY-MM-DD` |
 | `display` | `show_images` | Show board game thumbnail images |
 | `display` | `image_protocol` | Image protocol: `auto` detects terminal support, `kitty` forces Kitty protocol, `off` disables |
 | `display` | `list_width` | List screen content width |
@@ -94,6 +104,9 @@ specific config file path.
 | `collection` | `default_username` | Default BGG username for collection lookup |
 | `collection` | `status_filter` | Filter by collection status: owned, prev_owned, for_trade, want, want_to_play, want_to_buy, wishlist, preordered |
 | `api` | `token` | BGG API bearer token |
+
+If the config file is broken, bgg-tui backs it up to `{path}.broken`, recovers
+defaults, and keeps the API token when it can be safely extracted.
 
 ## Special Thanks
 
