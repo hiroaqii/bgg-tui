@@ -15,7 +15,7 @@ const specs = [_]Spec{
     .{ .value = "none", .kind = .none, .frames = 0, .random_candidate = false },
     .{ .value = "fade", .kind = .fade, .frames = default_frames },
     .{ .value = "glitch", .kind = .glitch, .frames = 192 },
-    .{ .value = "code-rain", .kind = .code_rain, .frames = 110 },
+    .{ .value = "code-rain", .kind = .code_rain, .frames = 96 },
     .{ .value = "dissolve", .kind = .dissolve, .frames = 60 },
     .{ .value = "sweep", .kind = .sweep, .frames = default_frames },
     .{ .value = "spiral", .kind = .spiral, .frames = 104 },

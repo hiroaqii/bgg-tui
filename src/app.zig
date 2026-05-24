@@ -4713,7 +4713,7 @@ test "random screen transition resolves to implemented effects" {
 test "screen transition frame counts can differ by effect" {
     try std.testing.expectEqual(@as(u64, 84), screenTransitionFrames(.sweep));
     try std.testing.expectEqual(@as(u64, 84), screenTransitionFrames(.fade));
-    try std.testing.expectEqual(@as(u64, 110), screenTransitionFrames(.code_rain));
+    try std.testing.expectEqual(@as(u64, 96), screenTransitionFrames(.code_rain));
     try std.testing.expectEqual(@as(u64, 60), screenTransitionFrames(.dissolve));
     try std.testing.expectEqual(@as(u64, 192), screenTransitionFrames(.glitch));
     try std.testing.expectEqual(@as(u64, 90), screenTransitionFrames(.iris));
