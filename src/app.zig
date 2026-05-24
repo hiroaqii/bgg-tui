@@ -857,16 +857,21 @@ pub const App = struct {
                     if (self.collection.filter_active) try self.drawCollectionFilterInput(&area);
                     const list = self.collection.activeList();
                     const picker_height = if (self.collection.status_picker) collection_status_picker_lines + collection_status_picker_gap else 0;
+                    const image_panel_rect = self.collectionListImagePanelRect(&area);
+                    const list_width = if (image_panel_rect) |rect| rect.col -| list_image_panel_gap else area.size().width;
                     var list_area = area.child(.{
                         .col = 0,
                         .row = body_row,
-                        .width = area.size().width,
+                        .width = list_width,
                         .height = area.size().height -| (body_row + 1 + list_footer_gap + picker_height),
                     });
                     list_view.viewListWithDensitySelection(list, &list_area, .{
                         .focused_style = self.focusedStyle(),
                         .show_cursor = false,
                     }, self.listDensity(), self.config.interface.selection, self.animation_frame);
+                    if (image_panel_rect) |rect| {
+                        try self.drawListImagePanel(&area, rect);
+                    }
                     try self.drawListPositionWithLegend(&area, list, "games  ♥ User Rating  ★ Rating  #Rank");
                 }
                 if (self.collection.status_picker) {
@@ -1062,7 +1067,15 @@ pub const App = struct {
     }
 
     fn hotListImagePanelRect(self: *const App, area: *const chasen.Surface) ?chasen.Rect {
-        return listImagePanelRectForSize(self.config, area.size());
+        return listImagePanelRectForSize(self.config, area.size(), list_body_row, null);
+    }
+
+    fn collectionListImagePanelRect(self: *const App, area: *const chasen.Surface) ?chasen.Rect {
+        const picker_row: ?u16 = if (self.collection.status_picker)
+            @max(collection_body_row, area.size().height -| (collection_status_picker_lines + 1))
+        else
+            null;
+        return listImagePanelRectForSize(self.config, area.size(), collection_body_row, picker_row);
     }
 
     fn effectiveDetailContentWidth(self: *const App) usize {
@@ -1481,22 +1494,36 @@ pub const App = struct {
                     try insertPastedCodepoints(input, text);
                 }
             },
-            .filter_start => try self.startCollectionFilter(),
+            .filter_start => {
+                try self.startCollectionFilter();
+                try self.syncListImagePreview(ctx);
+            },
             .filter_input => |input_msg| {
                 if (input_msg != .submit) {
                     if (self.collection.filter_input) |*input| try input.update(input_msg);
                     try self.applyCollectionFilter();
+                    try self.syncListImagePreview(ctx);
                 }
             },
             .filter_paste => |text| {
                 if (self.collection.filter_input) |*input| {
                     try insertPastedCodepoints(input, text);
                     try self.applyCollectionFilter();
+                    try self.syncListImagePreview(ctx);
                 }
             },
-            .filter_clear => try self.clearCollectionFilter(),
-            .change_user => try self.changeCollectionUser(),
-            .refresh => try self.refreshCollection(ctx),
+            .filter_clear => {
+                try self.clearCollectionFilter();
+                try self.syncListImagePreview(ctx);
+            },
+            .change_user => {
+                try self.changeCollectionUser();
+                try self.syncListImagePreview(ctx);
+            },
+            .refresh => {
+                try self.refreshCollection(ctx);
+                try self.syncListImagePreview(ctx);
+            },
             .status_open => self.openCollectionStatusPicker(),
             .status_move_prev => self.moveCollectionStatusCursor(.prev),
             .status_move_next => self.moveCollectionStatusCursor(.next),
@@ -1504,7 +1531,10 @@ pub const App = struct {
             .status_close => self.collection.status_picker = false,
             .items_loaded => |result| try self.finishCollectionLoad(ctx, result),
             .list => |list_msg| switch (list_msg) {
-                .move_prev, .move_next => self.collection.update(list_msg),
+                .move_prev, .move_next => {
+                    self.collection.update(list_msg);
+                    try self.syncListImagePreview(ctx);
+                },
                 .activate => |index| {
                     if (self.collection.sourceIndex(index)) |source_index| try self.openCollectionItem(source_index, ctx);
                 },
@@ -1629,6 +1659,7 @@ pub const App = struct {
         self.config.collection.status_filter.mask = self.collection.status_mask;
         try self.saveConfigIfAvailable(ctx);
         try self.collection.applyStatusFilter(self.allocator.?, self.collection.status_mask);
+        try self.syncListImagePreview(ctx);
     }
 
     fn showScreen(self: *App, screen: Screen, ctx: *chasen.Ctx(Msg)) !void {
@@ -1853,6 +1884,7 @@ pub const App = struct {
         switch (task_result.result) {
             .ok => |items| {
                 try self.collection.setLoaded(self.allocator.?, items, self.collection.status_mask);
+                try self.syncListImagePreview(ctx);
                 self.startContentTransitionIfVisible(ctx, .collection);
             },
             .failed => |message| self.collection.setFailed(self.allocator.?, message),
@@ -2187,6 +2219,7 @@ pub const App = struct {
     fn currentListImageSource(self: *const App) ?ListImageSource {
         return switch (self.screen) {
             .hot_games => self.hotListImageSource(),
+            .collection => self.collectionListImageSource(),
             else => null,
         };
     }
@@ -2198,6 +2231,15 @@ pub const App = struct {
         const game = self.hot_games.games[source_index];
         const url = game.thumbnail_url orelse return null;
         return .{ .screen = .hot_games, .id = game.id, .url = url };
+    }
+
+    fn collectionListImageSource(self: *const App) ?ListImageSource {
+        if (self.collection.load_state != .loaded) return null;
+        const focused_index = self.collection.activeList().focusedIndex();
+        const source_index = self.collection.sourceIndex(focused_index) orelse return null;
+        const item = self.collection.items[source_index];
+        const url = item.thumbnail_url orelse return null;
+        return .{ .screen = .collection, .id = item.id, .url = url };
     }
 
     fn gameDetailImageUrl(self: *const App) ?[]const u8 {
@@ -4309,16 +4351,18 @@ fn detailImagePanelRectForSize(config: config_mod.Config, size: chasen.Size, det
     };
 }
 
-fn listImagePanelRectForSize(config: config_mod.Config, size: chasen.Size) ?chasen.Rect {
+fn listImagePanelRectForSize(config: config_mod.Config, size: chasen.Size, body_row: u16, bottom_limit: ?u16) ?chasen.Rect {
     if (!detailWantsImagePanel(config)) return null;
     if (size.width < list_image_min_text_width + list_image_panel_gap + list_image_panel_width)
         return null;
-    if (size.height <= list_body_row + 6) return null;
+    if (size.height <= body_row + 6) return null;
 
-    const available_height = size.height - list_body_row - 2;
+    const panel_bottom = bottom_limit orelse size.height -| 1;
+    if (panel_bottom <= body_row + 5) return null;
+    const available_height = panel_bottom - body_row - 1;
     return .{
         .col = size.width - list_image_panel_width,
-        .row = list_body_row,
+        .row = body_row,
         .width = list_image_panel_width,
         .height = @min(list_image_panel_height, available_height),
     };
@@ -4332,7 +4376,7 @@ fn sameOptionalListImageSource(a: ?ListImageSource, b: ?ListImageSource) bool {
 
 fn isListImageScreen(screen: Screen) bool {
     return switch (screen) {
-        .hot_games => true,
+        .hot_games, .collection => true,
         else => false,
     };
 }
@@ -6014,6 +6058,80 @@ test "hot list image preview retries cached terminal load after transition" {
     }
 
     try std.testing.expectEqual(@as(usize, 1), tc.ctx.pendingTerminalImageLoadSlice().len);
+}
+
+test "collection list image preview reports unsupported JPEG thumbnail without cache task" {
+    var app = App.create(.{}, .{ .image_cache_dir = "/tmp/bgg-tui-images" });
+    app.allocator = std.testing.allocator;
+    app.screen = .collection;
+    defer app.deinitOwnedState();
+
+    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 1);
+    items[0] = .{
+        .id = 13,
+        .name = try std.testing.allocator.dupe(u8, "Catan"),
+        .thumbnail_url = try std.testing.allocator.dupe(u8, "https://example.test/thumb.jpg"),
+        .owned = true,
+    };
+    try app.collection.setLoaded(std.testing.allocator, items, 0);
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{
+        .ctx = .{ ._allocator = std.testing.allocator, ._io = std.testing.io },
+    };
+    try app.syncListImagePreview(&tc.ctx);
+
+    try std.testing.expectEqual(@as(usize, 0), tc.ctx.pendingTaskWithSlice().len);
+    switch (app.list_image.image_state) {
+        .failed => |message| try std.testing.expectEqualStrings("JPEG covers not supported yet", message),
+        else => return error.TestExpectedEqual,
+    }
+}
+
+test "collection list image preview waits before uncached PNG download" {
+    var app = App.create(.{}, .{ .image_cache_dir = ".zig-cache/test-bgg-tui-collection-list-image" });
+    app.allocator = std.testing.allocator;
+    app.screen = .collection;
+    defer app.deinitOwnedState();
+
+    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 1);
+    items[0] = .{
+        .id = 13,
+        .name = try std.testing.allocator.dupe(u8, "Catan"),
+        .thumbnail_url = try std.testing.allocator.dupe(u8, "https://example.test/thumb.png"),
+        .owned = true,
+    };
+    try app.collection.setLoaded(std.testing.allocator, items, 0);
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{
+        .ctx = .{ ._allocator = std.testing.allocator, ._io = std.testing.io },
+    };
+    try app.syncListImagePreview(&tc.ctx);
+    try std.testing.expectEqual(@as(usize, 0), tc.ctx.pendingTaskWithSlice().len);
+
+    try app.update(.{ .frame = .{ .now_ns = 16, .delta_ns = 16, .index = list_image_focus_settle_frames } }, &tc.ctx);
+    defer {
+        for (tc.ctx.pendingTaskWithSlice()) |entry| {
+            const task: *ListImageTask = @ptrCast(@alignCast(entry.ctx));
+            std.testing.allocator.free(task.cache_dir);
+            std.testing.allocator.free(task.url);
+            std.testing.allocator.destroy(task);
+        }
+        tc.ctx.pending_tasks_with_len = 0;
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), tc.ctx.pendingTaskWithSlice().len);
+}
+
+test "collection list image panel avoids status picker area" {
+    const config: config_mod.Config = .{};
+    const compact_size = chasen.Size{ .width = list_image_min_text_width + list_image_panel_gap + list_image_panel_width, .height = 20 };
+    const compact_picker_row = @max(collection_body_row, compact_size.height -| (collection_status_picker_lines + 1));
+    try std.testing.expectEqual(@as(?chasen.Rect, null), listImagePanelRectForSize(config, compact_size, collection_body_row, compact_picker_row));
+
+    const roomy_size = chasen.Size{ .width = list_image_min_text_width + list_image_panel_gap + list_image_panel_width, .height = 34 };
+    const roomy_picker_row = @max(collection_body_row, roomy_size.height -| (collection_status_picker_lines + 1));
+    const rect = listImagePanelRectForSize(config, roomy_size, collection_body_row, roomy_picker_row).?;
+    try std.testing.expect(rect.row + rect.height < roomy_picker_row);
 }
 
 test "stale game detail image cache result is ignored" {
