@@ -22,6 +22,13 @@ pub const CachedImage = struct {
     path: []u8,
 };
 
+pub const SourceFormat = enum {
+    png,
+    jpeg,
+    webp,
+    unknown,
+};
+
 /// Resolves the app image cache directory without creating it.
 ///
 /// The directory follows host cache conventions instead of the config
@@ -46,6 +53,23 @@ pub fn cachePathForUrl(allocator: std.mem.Allocator, cache_dir: []const u8, url:
     defer allocator.free(file_name);
 
     return try std.fs.path.join(allocator, &.{ cache_dir, file_name });
+}
+
+pub fn sourceFormatFromUrl(url: []const u8) SourceFormat {
+    const ext = imageExtensionFromUrl(url);
+    if (std.mem.eql(u8, ext, ".png")) return .png;
+    if (std.mem.eql(u8, ext, ".jpg")) return .jpeg;
+    if (std.mem.eql(u8, ext, ".webp")) return .webp;
+    return .unknown;
+}
+
+/// The current Chasen terminal image path can load local PNG files only.
+///
+/// JPEG/WebP decode is being developed in chasen-graphics. Until that path is
+/// connected, bgg-tui should avoid downloading unsupported covers only to fail
+/// later in the terminal image loader.
+pub fn canLoadTerminalImageFromUrl(url: []const u8) bool {
+    return sourceFormatFromUrl(url) == .png;
 }
 
 pub fn cacheHit(io: std.Io, path: []const u8) bool {
@@ -216,4 +240,17 @@ test "cache path uses url extension before query string" {
 
     try std.testing.expect(std.mem.endsWith(u8, path, ".jpg"));
     try std.testing.expect(std.mem.startsWith(u8, path, "/tmp/cache/"));
+}
+
+test "source format is detected from url extension" {
+    try std.testing.expectEqual(SourceFormat.png, sourceFormatFromUrl("https://example.com/cover.PNG"));
+    try std.testing.expectEqual(SourceFormat.jpeg, sourceFormatFromUrl("https://example.com/cover.jpeg?size=large"));
+    try std.testing.expectEqual(SourceFormat.webp, sourceFormatFromUrl("https://example.com/cover.webp"));
+    try std.testing.expectEqual(SourceFormat.unknown, sourceFormatFromUrl("https://example.com/cover"));
+}
+
+test "terminal image load is limited to PNG until decode pipeline expands" {
+    try std.testing.expect(canLoadTerminalImageFromUrl("https://example.com/cover.png"));
+    try std.testing.expect(!canLoadTerminalImageFromUrl("https://example.com/cover.jpg"));
+    try std.testing.expect(!canLoadTerminalImageFromUrl("https://example.com/cover.webp"));
 }

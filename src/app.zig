@@ -1736,6 +1736,10 @@ pub const App = struct {
             self.game_detail.setImageUnavailable(self.allocator.?);
             return;
         };
+        if (!image_mod.canLoadTerminalImageFromUrl(url)) {
+            self.game_detail.setImageFailed(self.allocator.?, detailUnsupportedImageFormatText(image_mod.sourceFormatFromUrl(url)));
+            return;
+        }
 
         const task = try ctx.allocator().create(GameDetailImageTask);
         errdefer ctx.allocator().destroy(task);
@@ -3864,6 +3868,15 @@ fn detailImageLoadErrorText(reason: chasen.TerminalImageLoadError) []const u8 {
     };
 }
 
+fn detailUnsupportedImageFormatText(format_kind: image_mod.SourceFormat) []const u8 {
+    return switch (format_kind) {
+        .jpeg => "JPEG covers not supported yet",
+        .webp => "WebP covers not supported yet",
+        .unknown => "Cover format not supported",
+        .png => "Could not load image",
+    };
+}
+
 fn listSurface(surface: *chasen.Surface, configured_width: u16) chasen.Surface {
     // Hot Games and Collection have stat legends/columns. Keep a practical
     // minimum width so those columns are visible, while still allowing users to
@@ -5387,6 +5400,30 @@ test "game detail image url falls back to thumbnail" {
     try app.game_detail.setLoaded(std.testing.allocator, games, app.config.display.detail_width);
 
     try std.testing.expectEqualStrings("https://example.test/thumb.jpg", app.gameDetailImageUrl().?);
+}
+
+test "game detail skips unsupported cover formats before cache task" {
+    var app = App.create(.{}, .{ .image_cache_dir = "/tmp/bgg-tui-images" });
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    const games = try std.testing.allocator.alloc(bgg_model.Game, 1);
+    games[0] = .{
+        .id = 13,
+        .name = try std.testing.allocator.dupe(u8, "Catan"),
+        .image_url = try std.testing.allocator.dupe(u8, "https://example.test/full.jpg"),
+    };
+
+    try app.game_detail.setLoaded(std.testing.allocator, games, app.config.display.detail_width);
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.startGameDetailImageCache(&tc.ctx);
+
+    try std.testing.expectEqual(@as(usize, 0), tc.ctx.pendingTaskWithSlice().len);
+    switch (app.game_detail.image_state) {
+        .failed => |message| try std.testing.expectEqualStrings("JPEG covers not supported yet", message),
+        else => return error.TestExpectedEqual,
+    }
 }
 
 test "stale game detail image cache result is ignored" {
