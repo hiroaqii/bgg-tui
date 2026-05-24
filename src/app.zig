@@ -1254,7 +1254,9 @@ pub const App = struct {
     fn updateGameDetail(self: *App, msg: GameDetailMsg, ctx: *chasen.Ctx(Msg)) !void {
         switch (msg) {
             .loaded => |result| try self.finishGameDetail(ctx, result),
-            .image_cached => |result| self.finishGameDetailImageCache(result),
+            .image_cached => |result| try self.finishGameDetailImageCache(ctx, result),
+            .terminal_image_loaded => |result| self.finishGameDetailTerminalImageLoad(ctx, result),
+            .terminal_image_failed => |result| self.finishGameDetailTerminalImageFailure(result),
             .move_prev => self.game_detail.moveUp(),
             .move_next => self.game_detail.moveDown(self.game_detail.visible_height),
             .open_browser => try self.openGameInBrowser(ctx),
@@ -1589,6 +1591,7 @@ pub const App = struct {
         self.browser.request_id +%= 1;
         const request_id = self.game_detail.request_id;
         self.navigation.detail_back_screen = back_screen;
+        self.releaseGameDetailTerminalImage(ctx);
         self.game_detail.deinit(self.allocator.?);
         self.game_detail.setVisibleHeight(detailLayoutForTerminal(self).content_height);
 
@@ -1672,7 +1675,7 @@ pub const App = struct {
         };
     }
 
-    fn finishGameDetailImageCache(self: *App, task_result: GameDetailImageTaskResult) void {
+    fn finishGameDetailImageCache(self: *App, ctx: *chasen.Ctx(Msg), task_result: GameDetailImageTaskResult) !void {
         if (task_result.request_id != self.game_detail.image_request_id) {
             switch (task_result.result) {
                 .ok => |path| self.allocator.?.free(path),
@@ -1682,9 +1685,54 @@ pub const App = struct {
         }
 
         switch (task_result.result) {
-            .ok => |path| self.game_detail.setImageCached(self.allocator.?, path),
+            .ok => |path| {
+                self.game_detail.setImageCached(self.allocator.?, path);
+                try self.startGameDetailTerminalImageLoad(ctx, path);
+            },
             .failed => |message| self.game_detail.setImageFailed(self.allocator.?, message),
         }
+    }
+
+    fn startGameDetailTerminalImageLoad(self: *App, ctx: *chasen.Ctx(Msg), path: []const u8) !void {
+        self.releaseGameDetailTerminalImage(ctx);
+
+        const load_ctx = try self.allocator.?.create(GameDetailTerminalImageLoadContext);
+        errdefer self.allocator.?.destroy(load_ctx);
+        load_ctx.* = .{ .request_id = self.game_detail.image_request_id };
+
+        self.game_detail.setTerminalImageLoading();
+        ctx.loadTerminalImagePath(path, load_ctx, &gameDetailTerminalImageLoaded, &gameDetailTerminalImageFailed) catch |err| {
+            self.game_detail.setTerminalImageFailed(.load_failed);
+            return err;
+        };
+    }
+
+    fn finishGameDetailTerminalImageLoad(self: *App, ctx: *chasen.Ctx(Msg), result: GameDetailTerminalImageLoaded) void {
+        const load_ctx = result.load_ctx;
+        defer self.allocator.?.destroy(load_ctx);
+
+        if (load_ctx.request_id != self.game_detail.image_request_id) {
+            ctx.unloadTerminalImage(result.handle) catch {};
+            return;
+        }
+
+        self.game_detail.setTerminalImageLoaded(result.handle);
+    }
+
+    fn finishGameDetailTerminalImageFailure(self: *App, result: GameDetailTerminalImageFailed) void {
+        const load_ctx = result.load_ctx;
+        defer self.allocator.?.destroy(load_ctx);
+
+        if (load_ctx.request_id != self.game_detail.image_request_id) return;
+        self.game_detail.setTerminalImageFailed(result.reason);
+    }
+
+    fn releaseGameDetailTerminalImage(self: *App, ctx: *chasen.Ctx(Msg)) void {
+        if (self.game_detail.terminal_image_handle) |handle| {
+            ctx.unloadTerminalImage(handle) catch {};
+            self.game_detail.terminal_image_handle = null;
+        }
+        self.game_detail.terminal_image_load_error = null;
     }
 
     fn gameDetailImageUrl(self: *const App) ?[]const u8 {
@@ -2985,9 +3033,25 @@ const GameDetailImageTaskResult = struct {
     result: GameDetailImageResult,
 };
 
+const GameDetailTerminalImageLoadContext = struct {
+    request_id: u64,
+};
+
+const GameDetailTerminalImageLoaded = struct {
+    load_ctx: *GameDetailTerminalImageLoadContext,
+    handle: chasen.TerminalImageHandle,
+};
+
+const GameDetailTerminalImageFailed = struct {
+    load_ctx: *GameDetailTerminalImageLoadContext,
+    reason: chasen.TerminalImageLoadError,
+};
+
 const GameDetailMsg = union(enum) {
     loaded: GameDetailTaskResult,
     image_cached: GameDetailImageTaskResult,
+    terminal_image_loaded: GameDetailTerminalImageLoaded,
+    terminal_image_failed: GameDetailTerminalImageFailed,
     move_prev,
     move_next,
     open_browser,
@@ -3208,6 +3272,22 @@ const GameDetailImageTask = struct {
         } } };
     }
 };
+
+fn gameDetailTerminalImageLoaded(ctx_ptr: *anyopaque, handle: chasen.TerminalImageHandle) App.Msg {
+    const load_ctx: *GameDetailTerminalImageLoadContext = @ptrCast(@alignCast(ctx_ptr));
+    return .{ .game_detail = .{ .terminal_image_loaded = .{
+        .load_ctx = load_ctx,
+        .handle = handle,
+    } } };
+}
+
+fn gameDetailTerminalImageFailed(ctx_ptr: *anyopaque, reason: chasen.TerminalImageLoadError) App.Msg {
+    const load_ctx: *GameDetailTerminalImageLoadContext = @ptrCast(@alignCast(ctx_ptr));
+    return .{ .game_detail = .{ .terminal_image_failed = .{
+        .load_ctx = load_ctx,
+        .reason = reason,
+    } } };
+}
 
 const ForumListTask = struct {
     token: []const u8,
@@ -5183,13 +5263,15 @@ test "stale game detail image cache result is ignored" {
 
     app.game_detail.image_request_id = 2;
     const stale_path = try std.testing.allocator.dupe(u8, "/tmp/stale-cover.png");
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
 
-    app.finishGameDetailImageCache(.{
+    try app.finishGameDetailImageCache(&tc.ctx, .{
         .request_id = 1,
         .result = .{ .ok = stale_path },
     });
 
     try std.testing.expect(app.game_detail.image_state == .idle);
+    try std.testing.expectEqual(@as(usize, 0), tc.ctx.pendingTerminalImageLoadSlice().len);
 }
 
 test "starting a new game detail invalidates in-flight image cache results" {
@@ -5208,12 +5290,62 @@ test "starting a new game detail invalidates in-flight image cache results" {
     }
 
     const stale_path = try std.testing.allocator.dupe(u8, "/tmp/stale-cover.png");
-    app.finishGameDetailImageCache(.{
+    try app.finishGameDetailImageCache(&tc.ctx, .{
         .request_id = 4,
         .result = .{ .ok = stale_path },
     });
 
     try std.testing.expect(app.game_detail.image_state == .idle);
+}
+
+test "game detail cached image queues terminal image load" {
+    var app = App.create(.{}, .{});
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    app.game_detail.image_request_id = 3;
+    const cached_path = try std.testing.allocator.dupe(u8, "/tmp/cover.png");
+
+    try app.finishGameDetailImageCache(&tc.ctx, .{
+        .request_id = 3,
+        .result = .{ .ok = cached_path },
+    });
+    defer {
+        for (tc.ctx.pendingTerminalImageLoadSlice()) |entry| {
+            std.testing.allocator.free(entry.path);
+            const load_ctx: *GameDetailTerminalImageLoadContext = @ptrCast(@alignCast(entry.ctx));
+            std.testing.allocator.destroy(load_ctx);
+        }
+        tc.ctx.pending_terminal_image_loads_len = 0;
+    }
+
+    const pending = tc.ctx.pendingTerminalImageLoadSlice();
+    try std.testing.expectEqual(@as(usize, 1), pending.len);
+    try std.testing.expectEqualStrings("/tmp/cover.png", pending[0].path);
+    try std.testing.expect(app.game_detail.image_state == .cached);
+}
+
+test "stale terminal image load is unloaded" {
+    var app = App.create(.{}, .{});
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    app.game_detail.image_request_id = 5;
+
+    const load_ctx = try std.testing.allocator.create(GameDetailTerminalImageLoadContext);
+    load_ctx.* = .{ .request_id = 4 };
+
+    app.finishGameDetailTerminalImageLoad(&tc.ctx, .{
+        .load_ctx = load_ctx,
+        .handle = .{ .id = 9, .generation = 1 },
+    });
+
+    const pending = tc.ctx.pendingTerminalImageUnloadSlice();
+    try std.testing.expectEqual(@as(usize, 1), pending.len);
+    try std.testing.expectEqual(@as(u32, 9), pending[0].id);
+    try std.testing.expect(app.game_detail.terminal_image_handle == null);
 }
 
 test "search loading enters results without screen transition" {

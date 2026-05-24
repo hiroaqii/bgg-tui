@@ -28,6 +28,8 @@ pub const State = struct {
     image_request_id: u64 = 0,
     load_state: LoadState = .idle,
     image_state: ImageState = .idle,
+    terminal_image_handle: ?chasen.TerminalImageHandle = null,
+    terminal_image_load_error: ?chasen.TerminalImageLoadError = null,
     games: []bgg_model.Game = &.{},
     rendered_text: []u8 = "",
     lines: []const []const u8 = &.{},
@@ -70,6 +72,21 @@ pub const State = struct {
     pub fn setImageCached(self: *State, allocator: std.mem.Allocator, path: []u8) void {
         self.clearImage(allocator);
         self.image_state = .{ .cached = path };
+    }
+
+    pub fn setTerminalImageLoading(self: *State) void {
+        self.terminal_image_handle = null;
+        self.terminal_image_load_error = null;
+    }
+
+    pub fn setTerminalImageLoaded(self: *State, handle: chasen.TerminalImageHandle) void {
+        self.terminal_image_handle = handle;
+        self.terminal_image_load_error = null;
+    }
+
+    pub fn setTerminalImageFailed(self: *State, reason: chasen.TerminalImageLoadError) void {
+        self.terminal_image_handle = null;
+        self.terminal_image_load_error = reason;
     }
 
     pub fn setImageFailed(self: *State, allocator: std.mem.Allocator, message: []const u8) void {
@@ -144,6 +161,8 @@ pub const State = struct {
             else => {},
         }
         self.image_state = .idle;
+        self.terminal_image_handle = null;
+        self.terminal_image_load_error = null;
     }
 
     fn rebuildLines(self: *State, allocator: std.mem.Allocator, detail_width: usize) !void {
