@@ -1,5 +1,6 @@
 const std = @import("std");
 const chasen = @import("chasen");
+const chasen_graphics_chasen = @import("chasen_graphics_chasen");
 const bgg_tui = @import("bgg_tui");
 
 pub fn main(init: std.process.Init) !void {
@@ -14,5 +15,17 @@ pub fn main(init: std.process.Init) !void {
         bgg_tui.config.LoadedConfig{ .config = bgg_tui.config.Config.fromEnvironment(init.environ_map) };
     const config = loaded_config.config;
 
-    try chasen.run(init, bgg_tui.app.App.create(config, .{ .config_path = config_path }));
+    // Terminal image support stays optional: app code decides when to load an
+    // image, while Chasen owns local path -> terminal image handle conversion.
+    const image_loader: ?chasen.TerminalImagePathLoaderFn = if (config.display.show_images and config.display.image_protocol != .off)
+        chasen_graphics_chasen.pngPathLoader
+    else
+        null;
+
+    try chasen.runWith(.{
+        .allocator = init.gpa,
+        .io = init.io,
+        .env_map = init.environ_map,
+        .terminal_image_path_loader = image_loader,
+    }, bgg_tui.app.App.create(config, .{ .config_path = config_path }));
 }

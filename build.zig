@@ -20,6 +20,10 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const chasen_graphics_dep = b.dependency("chasen_graphics", .{
+        .target = target,
+        .optimize = optimize,
+    });
 
     const mod = b.addModule("bgg_tui", .{
         .root_source_file = b.path("src/root.zig"),
@@ -41,6 +45,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "bgg_tui", .module = mod },
                 .{ .name = "chasen", .module = chasen_dep.module("chasen") },
+                .{ .name = "chasen_graphics_chasen", .module = chasen_graphics_dep.module("chasen_graphics_chasen") },
             },
         }),
     });
