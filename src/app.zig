@@ -173,7 +173,11 @@ pub const App = struct {
             .terminal_resized => |size| try self.handleResize(size),
             .frame => |frame| {
                 self.animation_frame = frame.index;
+                const transition_was_active = self.hasActiveScreenTransition();
                 self.stepScreenTransition();
+                if (transition_was_active and !self.hasActiveScreenTransition()) {
+                    try self.startDeferredGameDetailTerminalImageLoad(ctx);
+                }
                 self.requestMotionFrameIfNeeded(ctx);
             },
             .menu => |menu_msg| switch (menu_msg) {
@@ -1445,6 +1449,9 @@ pub const App = struct {
         if (screen == .search and previous_screen != .search_results) {
             try self.resetSearchScreen();
         }
+        if (screen == .game_detail) {
+            try self.startDeferredGameDetailTerminalImageLoad(ctx);
+        }
     }
 
     fn resetSearchScreen(self: *App) !void {
@@ -1760,10 +1767,19 @@ pub const App = struct {
         switch (task_result.result) {
             .ok => |path| {
                 self.game_detail.setImageCached(self.allocator.?, path);
-                try self.startGameDetailTerminalImageLoad(ctx, path);
+                try self.startDeferredGameDetailTerminalImageLoad(ctx);
             },
             .failed => |message| self.game_detail.setImageFailed(self.allocator.?, message),
         }
+    }
+
+    fn startDeferredGameDetailTerminalImageLoad(self: *App, ctx: *chasen.Ctx(Msg)) !void {
+        if (self.screen != .game_detail) return;
+        if (self.hasActiveScreenTransition()) return;
+        if (self.game_detail.terminal_image_handle != null or self.game_detail.terminal_image_load_error != null) return;
+
+        const path = self.game_detail.imagePath() orelse return;
+        try self.startGameDetailTerminalImageLoad(ctx, path);
     }
 
     fn startGameDetailTerminalImageLoad(self: *App, ctx: *chasen.Ctx(Msg), path: []const u8) !void {
@@ -5421,6 +5437,7 @@ test "game detail cached image queues terminal image load" {
     defer app.deinitOwnedState();
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    app.screen = .game_detail;
     app.game_detail.image_request_id = 3;
     const cached_path = try std.testing.allocator.dupe(u8, "/tmp/cover.png");
 
@@ -5441,6 +5458,73 @@ test "game detail cached image queues terminal image load" {
     try std.testing.expectEqual(@as(usize, 1), pending.len);
     try std.testing.expectEqualStrings("/tmp/cover.png", pending[0].path);
     try std.testing.expect(app.game_detail.image_state == .cached);
+}
+
+test "game detail terminal image load waits for transition completion" {
+    var app = App.create(.{ .interface = .{ .transition = "sweep" } }, .{});
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    app.screen = .game_detail;
+    app.game_detail.image_request_id = 3;
+    app.startContentTransition(&tc.ctx);
+
+    const cached_path = try std.testing.allocator.dupe(u8, "/tmp/cover.png");
+    try app.finishGameDetailImageCache(&tc.ctx, .{
+        .request_id = 3,
+        .result = .{ .ok = cached_path },
+    });
+
+    try std.testing.expectEqual(@as(usize, 0), tc.ctx.pendingTerminalImageLoadSlice().len);
+
+    var frame_index: u64 = 1;
+    while (app.hasActiveScreenTransition()) : (frame_index += 1) {
+        try app.update(.{ .frame = .{ .now_ns = frame_index * 16, .delta_ns = 16, .index = frame_index } }, &tc.ctx);
+    }
+    defer {
+        for (tc.ctx.pendingTerminalImageLoadSlice()) |entry| {
+            std.testing.allocator.free(entry.path);
+            const load_ctx: *GameDetailTerminalImageLoadContext = @ptrCast(@alignCast(entry.ctx));
+            std.testing.allocator.destroy(load_ctx);
+        }
+        tc.ctx.pending_terminal_image_loads_len = 0;
+    }
+
+    const pending = tc.ctx.pendingTerminalImageLoadSlice();
+    try std.testing.expectEqual(@as(usize, 1), pending.len);
+    try std.testing.expectEqualStrings("/tmp/cover.png", pending[0].path);
+}
+
+test "returning to detail retries deferred terminal image load without transition" {
+    var app = App.create(.{ .interface = .{ .transition = "none" } }, .{});
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    app.screen = .forums;
+    app.game_detail.image_request_id = 3;
+    const cached_path = try std.testing.allocator.dupe(u8, "/tmp/cover.png");
+
+    try app.finishGameDetailImageCache(&tc.ctx, .{
+        .request_id = 3,
+        .result = .{ .ok = cached_path },
+    });
+    try std.testing.expectEqual(@as(usize, 0), tc.ctx.pendingTerminalImageLoadSlice().len);
+
+    try app.showScreen(.game_detail, &tc.ctx);
+    defer {
+        for (tc.ctx.pendingTerminalImageLoadSlice()) |entry| {
+            std.testing.allocator.free(entry.path);
+            const load_ctx: *GameDetailTerminalImageLoadContext = @ptrCast(@alignCast(entry.ctx));
+            std.testing.allocator.destroy(load_ctx);
+        }
+        tc.ctx.pending_terminal_image_loads_len = 0;
+    }
+
+    const pending = tc.ctx.pendingTerminalImageLoadSlice();
+    try std.testing.expectEqual(@as(usize, 1), pending.len);
+    try std.testing.expectEqualStrings("/tmp/cover.png", pending[0].path);
 }
 
 test "stale terminal image load is unloaded" {
