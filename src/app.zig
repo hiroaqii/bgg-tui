@@ -30,6 +30,10 @@ const list_screen_min_stats_width: u16 = 96;
 const list_screen_max_height: u16 = 34;
 const forum_screen_max_size = chasen.Size{ .width = 88, .height = 34 };
 const detail_outer_reserved_rows: u16 = 3;
+const detail_image_panel_width: u16 = 28;
+const detail_image_panel_height: u16 = 14;
+const detail_image_panel_gap: u16 = 2;
+const detail_image_min_text_width: u16 = 56;
 const thread_outer_reserved_rows: u16 = 3;
 
 // List screens follow the Go version's vertical rhythm:
@@ -166,7 +170,7 @@ pub const App = struct {
             .thread => |thread_msg| try self.updateThread(thread_msg, ctx),
             .browser => |browser_msg| try self.updateBrowser(browser_msg),
             .settings => |settings_msg| try self.updateSettings(settings_msg, ctx),
-            .terminal_resized => |size| self.handleResize(size),
+            .terminal_resized => |size| try self.handleResize(size),
             .frame => |frame| {
                 self.animation_frame = frame.index;
                 self.stepScreenTransition();
@@ -758,24 +762,37 @@ pub const App = struct {
             },
             .loaded => {
                 const detail_layout = detailLayout(area.size().height, self.config.interface.list_density);
+                const image_panel_rect = self.detailImagePanelRect(&area, detail_layout);
+                const text_width = if (image_panel_rect) |rect| rect.col -| detail_image_panel_gap else area.size().width;
+                var text_area = area.child(.{
+                    .col = 0,
+                    .row = 0,
+                    .width = text_width,
+                    .height = area.size().height,
+                });
+
                 if (self.game_detail.games.len == 0) {
-                    self.drawEmptyState(&area, detail_layout.content_row, "No detail", "BGG did not return game detail.");
+                    self.drawEmptyState(&text_area, detail_layout.content_row, "No detail", "BGG did not return game detail.");
                 } else {
                     const range = self.game_detail.visibleRange(detail_layout.content_height);
                     for (self.game_detail.lines[range.start..range.end], 0..) |line, index| {
                         const row = detail_layout.content_row + @as(u16, @intCast(index));
-                        if (index >= detail_layout.content_height or row >= area.size().height) break;
-                        _ = area.borrowTextAt(0, row, line, screens.detail.lineStyle(line));
+                        if (index >= detail_layout.content_height or row >= text_area.size().height) break;
+                        _ = text_area.borrowTextAt(0, row, line, screens.detail.lineStyle(line));
                     }
 
                     if (self.game_detail.browser_error_url.len > 0) {
-                        try self.drawManualOpenHint(&area, detail_layout.scroll_row, self.game_detail.browser_error_url);
-                    } else if (self.game_detail.maxScroll(detail_layout.content_height) > 0 and area.size().height >= 3) {
-                        _ = try area.printAt(0, detail_layout.scroll_row, .{ .dim = true }, "({d}/{d})", .{
+                        try self.drawManualOpenHint(&text_area, detail_layout.scroll_row, self.game_detail.browser_error_url);
+                    } else if (self.game_detail.maxScroll(detail_layout.content_height) > 0 and text_area.size().height >= 3) {
+                        _ = try text_area.printAt(0, detail_layout.scroll_row, .{ .dim = true }, "({d}/{d})", .{
                             self.game_detail.scroll + 1,
                             self.game_detail.maxScroll(detail_layout.content_height) + 1,
                         });
                     }
+                }
+
+                if (image_panel_rect) |rect| {
+                    try self.drawDetailImagePanel(&area, rect);
                 }
             },
         }
@@ -830,6 +847,62 @@ pub const App = struct {
         if (self.forums.load_state != .forums_loaded or self.forums.forum_list.items.len == 0) {
             _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), self.subtleStyle());
         }
+    }
+
+    fn drawDetailImagePanel(self: *const App, area: *chasen.Surface, rect: chasen.Rect) !void {
+        var panel_area = area.child(rect);
+        panel_area.clearAll();
+
+        const frame = ui.Panel.frame(&panel_area, .{
+            .title = "Cover",
+            .border = self.panelBorder(),
+            .border_style = self.theme().border,
+            .title_style = self.theme().title,
+        });
+        frame.view();
+
+        var content = frame.contentSurface();
+        content.clearAll();
+
+        if (self.game_detail.terminal_image_handle) |handle| {
+            content.drawTerminalImage(handle, .{ .fit = .fit, .z_index = 1 }) catch {
+                self.drawCenteredLabel(&content, "Could not draw image", self.subtleStyle());
+            };
+            return;
+        }
+
+        const label = switch (self.game_detail.image_state) {
+            .idle, .loading, .cached => if (self.game_detail.terminal_image_load_error) |reason|
+                detailImageLoadErrorText(reason)
+            else
+                "Loading cover...",
+            .disabled => "Images disabled",
+            .unavailable => "No cover image",
+            .failed => |message| message,
+        };
+        self.drawCenteredLabel(&content, label, self.subtleStyle());
+    }
+
+    fn drawCenteredLabel(self: *const App, surface: *chasen.Surface, text: []const u8, style: chasen.TextStyle) void {
+        _ = self;
+        const size = surface.size();
+        if (size.width == 0 or size.height == 0) return;
+        const width = @min(chasen.text.displayWidth(text), size.width);
+        const col: u16 = @intCast((size.width - width) / 2);
+        const row: u16 = size.height / 2;
+        _ = surface.borrowTextAt(col, row, text, style);
+    }
+
+    fn detailImagePanelRect(self: *const App, area: *const chasen.Surface, detail_layout: screens.detail.Layout) ?chasen.Rect {
+        return detailImagePanelRectForSize(self.config, area.size(), detail_layout);
+    }
+
+    fn effectiveDetailContentWidth(self: *const App) usize {
+        return detailContentWidthForSize(
+            self.config,
+            detailSurfaceSizeForTerminal(self.config, self.terminal_size),
+            self.config.interface.list_density,
+        );
     }
 
     fn viewThread(self: *const App, sfc: *chasen.Surface) !void {
@@ -1629,7 +1702,7 @@ pub const App = struct {
 
         switch (task_result.result) {
             .ok => |games| {
-                try self.game_detail.setLoaded(self.allocator.?, games, self.config.display.detail_width);
+                try self.game_detail.setLoaded(self.allocator.?, games, self.effectiveDetailContentWidth());
                 self.game_detail.setVisibleHeight(detailLayoutForTerminal(self).content_height);
                 try self.startGameDetailImageCache(ctx);
                 self.startContentTransitionIfVisible(ctx, .game_detail);
@@ -1981,10 +2054,11 @@ pub const App = struct {
         }
     }
 
-    fn handleResize(self: *App, size: chasen.Size) void {
+    fn handleResize(self: *App, size: chasen.Size) !void {
         self.terminal_size = size;
         if (self.screen == .game_detail) {
             self.game_detail.setVisibleHeight(detailLayoutForTerminal(self).content_height);
+            try self.game_detail.rewrap(self.allocator.?, self.effectiveDetailContentWidth());
         }
         if (self.screen == .thread) {
             self.thread.setVisibleHeight(threadLayoutForTerminal(self).content_height);
@@ -3731,6 +3805,49 @@ fn detailSurface(surface: *chasen.Surface, configured_width: u16) chasen.Surface
     }));
 }
 
+fn detailWantsImagePanel(config: config_mod.Config) bool {
+    return config.display.show_images and config.display.image_protocol != .off;
+}
+
+fn detailSurfaceSizeForTerminal(config: config_mod.Config, terminal_size: chasen.Size) chasen.Size {
+    const body_size = screenBodySizeForTerminal(terminal_size);
+    return .{
+        .width = @min(config.display.detail_width, body_size.width),
+        .height = body_size.height,
+    };
+}
+
+fn detailContentWidthForSize(config: config_mod.Config, size: chasen.Size, density: []const u8) usize {
+    const layout_value = detailLayout(size.height, density);
+    if (detailImagePanelRectForSize(config, size, layout_value)) |rect|
+        return rect.col -| detail_image_panel_gap;
+    return size.width;
+}
+
+fn detailImagePanelRectForSize(config: config_mod.Config, size: chasen.Size, detail_layout: screens.detail.Layout) ?chasen.Rect {
+    if (!detailWantsImagePanel(config)) return null;
+
+    if (size.width < detail_image_min_text_width + detail_image_panel_gap + detail_image_panel_width)
+        return null;
+    if (size.height <= detail_layout.content_row + 6) return null;
+
+    const available_height = size.height - detail_layout.content_row - 2;
+    return .{
+        .col = size.width - detail_image_panel_width,
+        .row = detail_layout.content_row,
+        .width = detail_image_panel_width,
+        .height = @min(detail_image_panel_height, available_height),
+    };
+}
+
+fn detailImageLoadErrorText(reason: chasen.TerminalImageLoadError) []const u8 {
+    return switch (reason) {
+        .unsupported => "Images unsupported",
+        .load_failed => "Could not load image",
+        .registry_full => "Image registry full",
+    };
+}
+
 fn listSurface(surface: *chasen.Surface, configured_width: u16) chasen.Surface {
     // Hot Games and Collection have stat legends/columns. Keep a practical
     // minimum width so those columns are visible, while still allowing users to
@@ -4589,7 +4706,7 @@ test "thread scroll uses resized body height" {
     defer app.deinitOwnedState();
 
     app.screen = .thread;
-    app.handleResize(.{ .width = 80, .height = 10 });
+    try app.handleResize(.{ .width = 80, .height = 10 });
     try std.testing.expectEqual(threadLayoutForTerminal(&app).content_height, app.thread.visible_height);
 
     const text = try std.testing.allocator.dupe(u8, "0\n1\n2\n3\n4\n5\n6\n7\n8\n9");
@@ -4611,7 +4728,7 @@ test "detail scroll uses resized body height" {
     defer app.deinitOwnedState();
 
     app.screen = .game_detail;
-    app.handleResize(.{ .width = 80, .height = 10 });
+    try app.handleResize(.{ .width = 80, .height = 10 });
     try std.testing.expectEqual(detailLayoutForTerminal(&app).content_height, app.game_detail.visible_height);
 
     const text = try std.testing.allocator.dupe(u8, "0\n1\n2\n3\n4\n5\n6\n7\n8\n9");
@@ -6317,4 +6434,52 @@ test "detail surface clamps configured width to available width" {
 
     try std.testing.expectEqual(@as(u16, 50), area.size().width);
     try std.testing.expectEqual(@as(u16, 16), area.size().height);
+}
+
+test "detail content width reserves room for image panel when enabled" {
+    const full_size = chasen.Size{ .width = 120, .height = 24 };
+    const narrow_size = chasen.Size{ .width = 80, .height = 24 };
+
+    try std.testing.expectEqual(@as(usize, 120), detailContentWidthForSize(.{
+        .display = .{ .detail_width = 120, .show_images = false },
+    }, full_size, "normal"));
+    try std.testing.expectEqual(@as(usize, 120), detailContentWidthForSize(.{
+        .display = .{ .detail_width = 120, .image_protocol = .off },
+    }, full_size, "normal"));
+    try std.testing.expectEqual(@as(usize, 90), detailContentWidthForSize(.{
+        .display = .{ .detail_width = 120, .show_images = true, .image_protocol = .auto },
+    }, full_size, "normal"));
+    try std.testing.expectEqual(@as(usize, 80), detailContentWidthForSize(.{
+        .display = .{ .detail_width = 80, .show_images = true, .image_protocol = .auto },
+    }, narrow_size, "normal"));
+}
+
+test "detail image panel requires enough width and enabled images" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(120, 24);
+    defer ts.deinit();
+
+    var app = App.create(.{
+        .api = .{ .token = "token" },
+        .display = .{ .show_images = true, .image_protocol = .auto },
+    }, .{});
+    const layout_value = detailLayout(24, "normal");
+
+    const rect = app.detailImagePanelRect(&ts.surface, layout_value).?;
+    try std.testing.expectEqual(@as(u16, 92), rect.col);
+    try std.testing.expectEqual(@as(u16, detail_image_panel_width), rect.width);
+
+    app.config.display.image_protocol = .off;
+    try std.testing.expect(app.detailImagePanelRect(&ts.surface, layout_value) == null);
+}
+
+test "effective detail content width uses clamped terminal width" {
+    var app = App.create(.{
+        .api = .{ .token = "token" },
+        .display = .{ .detail_width = 120, .show_images = true, .image_protocol = .auto },
+    }, .{});
+
+    app.terminal_size = .{ .width = 92, .height = 24 };
+
+    try std.testing.expectEqual(@as(usize, 58), app.effectiveDetailContentWidth());
 }

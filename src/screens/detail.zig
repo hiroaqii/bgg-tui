@@ -115,6 +115,12 @@ pub const State = struct {
         self.scroll = @min(self.scroll, self.maxScroll(self.visible_height));
     }
 
+    pub fn rewrap(self: *State, allocator: std.mem.Allocator, detail_width: usize) !void {
+        if (self.load_state != .loaded or self.games.len == 0) return;
+        try self.rebuildLines(allocator, detail_width);
+        self.scroll = @min(self.scroll, self.maxScroll(self.visible_height));
+    }
+
     pub fn visibleRange(self: *const State, visible_height: usize) ui.Viewport.Range {
         return ui.Viewport.init(.{
             .total = self.lines.len,
