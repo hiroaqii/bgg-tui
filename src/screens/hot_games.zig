@@ -9,6 +9,8 @@ const list_filter = @import("../list_filter.zig");
 const list_sort = @import("../list_sort.zig");
 const task_bgg = @import("../tasks/bgg.zig");
 
+const filter_row: u16 = 4;
+
 pub const Result = task_bgg.HotGamesResult;
 pub const StatsResult = task_bgg.HotGameStatsResult;
 
@@ -118,6 +120,38 @@ pub const State = struct {
         return self.list.handleEvent(event);
     }
 
+    pub fn handleScreenEvent(self: *const State, event: chasen.Event) ?Msg {
+        if (self.filter_active) {
+            switch (event) {
+                .key_press => |key| {
+                    if (key.matches(chasen.Key.escape, .{})) return .filter_clear;
+                    if (key.matches(chasen.Key.enter, .{})) {
+                        if (self.handleEvent(event)) |msg| return .{ .list = msg };
+                        return null;
+                    }
+                },
+                .paste => |text| return .{ .filter_paste = text },
+                else => {},
+            }
+            if (self.filter_input) |*input| {
+                if (input.handleEvent(event)) |msg| return .{ .filter_input = msg };
+            }
+            if (self.handleEvent(event)) |msg| return .{ .list = msg };
+            return null;
+        }
+
+        switch (event) {
+            .key_press => |key| {
+                if (key.codepoint == '/') return .filter_start;
+                if (key.codepoint == 's') return .sort_toggle;
+            },
+            else => {},
+        }
+
+        if (self.handleEvent(event)) |msg| return .{ .list = msg };
+        return null;
+    }
+
     pub fn activeList(self: *const State) *const ui.List {
         if (self.filter_active) return &self.filter.list;
         if (self.sort_mode != .source) return &self.sorted_list;
@@ -183,6 +217,19 @@ pub const State = struct {
         self.sort_mode = next_mode;
         self.filter.deinit(allocator);
         self.filter_active = false;
+    }
+
+    pub fn drawFilterInput(self: *const State, surface: *chasen.Surface, style: chasen.TextStyle) void {
+        _ = surface.borrowTextAt(0, filter_row, "Filter:", style);
+        if (self.filter_input) |*input| {
+            var input_area = surface.child(.{
+                .col = 8,
+                .row = filter_row,
+                .width = surface.size().width -| 8,
+                .height = 1,
+            });
+            input.view(&input_area, .{});
+        }
     }
 
     pub fn deinit(self: *State, allocator: std.mem.Allocator) void {
@@ -398,4 +445,30 @@ test "hot games stats refresh preserves filtered focus" {
     const focused_index = state.activeList().focusedIndex();
     try std.testing.expectEqual(@as(usize, 2), state.sourceIndex(focused_index).?);
     try std.testing.expectEqualStrings("#3   CATAN     ★  7.20  ⚖     -      -", state.activeList().items[focused_index]);
+}
+
+test "hot games screen event starts filter and sort" {
+    var state: State = .{};
+
+    const filter_msg = state.handleScreenEvent(.{ .key_press = .{ .codepoint = '/' } }).?;
+    try std.testing.expect(filter_msg == .filter_start);
+
+    const sort_msg = state.handleScreenEvent(.{ .key_press = .{ .codepoint = 's' } }).?;
+    try std.testing.expect(sort_msg == .sort_toggle);
+}
+
+test "hot games screen event routes active filter input" {
+    var state: State = .{};
+    state.filter_input = try ui.TextInput.init(std.testing.allocator, .{});
+    defer state.deinitInputs();
+
+    try state.applyFilter(std.testing.allocator, "");
+    defer state.clearFilter(std.testing.allocator);
+
+    const paste_msg = state.handleScreenEvent(.{ .paste = "root" }).?;
+    try std.testing.expect(paste_msg == .filter_paste);
+    try std.testing.expectEqualStrings("root", paste_msg.filter_paste);
+
+    const clear_msg = state.handleScreenEvent(.{ .key_press = .{ .codepoint = chasen.Key.escape } }).?;
+    try std.testing.expect(clear_msg == .filter_clear);
 }

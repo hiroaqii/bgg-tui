@@ -475,28 +475,7 @@ pub const App = struct {
         }
 
         if (self.screen == .hot_games) {
-            if (self.hot_games.filter_active) {
-                switch (event) {
-                    .key_press => |key| {
-                        if (key.matches(chasen.Key.escape, .{})) return .{ .hot_games = .filter_clear };
-                        if (key.matches(chasen.Key.enter, .{})) {
-                            if (self.hot_games.handleEvent(event)) |msg| return .{ .hot_games = .{ .list = msg } };
-                            return null;
-                        }
-                    },
-                    .paste => |text| return .{ .hot_games = .{ .filter_paste = text } },
-                    else => {},
-                }
-                if (self.hot_games.filter_input) |*input| {
-                    if (input.handleEvent(event)) |msg| return .{ .hot_games = .{ .filter_input = msg } };
-                }
-                if (self.hot_games.handleEvent(event)) |msg| return .{ .hot_games = .{ .list = msg } };
-                return null;
-            } else if (event == .key_press and event.key_press.codepoint == '/') {
-                return .{ .hot_games = .filter_start };
-            } else if (event == .key_press and event.key_press.codepoint == 's') {
-                return .{ .hot_games = .sort_toggle };
-            }
+            if (self.hot_games.handleScreenEvent(event)) |msg| return .{ .hot_games = msg };
         }
 
         switch (event) {
@@ -515,9 +494,6 @@ pub const App = struct {
         if (self.screen == .main_menu) {
             // Menu owns only cursor movement and activation; App maps activation to screens.
             if (self.menu.handleEvent(event)) |msg| return .{ .menu = msg };
-        }
-        if (self.screen == .hot_games) {
-            if (self.hot_games.handleEvent(event)) |msg| return .{ .hot_games = .{ .list = msg } };
         }
         return null;
     }
@@ -606,11 +582,11 @@ pub const App = struct {
                 if (self.hot_games.list.items.len == 0) {
                     self.drawCenteredGuidance(&area, "No hot games", "BGG did not return any hot games.");
                 } else if (self.hot_games.filter_active and self.hot_games.filter.labels.len == 0) {
-                    try self.drawHotFilterInput(&area);
+                    self.hot_games.drawFilterInput(&area, self.subtleStyle());
                     self.drawCenteredGuidanceKeepingCursor(&area, "No matches", "No hot games match the filter.");
                 } else {
                     const body_row = if (self.hot_games.filter_active) list_filtered_body_row else list_body_row;
-                    if (self.hot_games.filter_active) try self.drawHotFilterInput(&area);
+                    if (self.hot_games.filter_active) self.hot_games.drawFilterInput(&area, self.subtleStyle());
                     const list = self.hot_games.activeList();
                     const image_panel_rect = self.hotListImagePanelRect(&area);
                     const list_width = if (image_panel_rect) |rect| rect.col -| list_image_panel_gap else area.size().width;
@@ -2537,19 +2513,6 @@ pub const App = struct {
         _ = self;
         const block = ui.MessageBlock.init(.{ .title = title, .message = message });
         block.view(surface, .{ .hide_cursor = false });
-    }
-
-    fn drawHotFilterInput(self: *const App, surface: *chasen.Surface) !void {
-        _ = surface.borrowTextAt(0, list_filter_row, "Filter:", self.subtleStyle());
-        if (self.hot_games.filter_input) |*input| {
-            var input_area = surface.child(.{
-                .col = 8,
-                .row = list_filter_row,
-                .width = surface.size().width -| 8,
-                .height = 1,
-            });
-            input.view(&input_area, .{});
-        }
     }
 
     fn drawSearchFilterInput(self: *const App, surface: *chasen.Surface) !void {
