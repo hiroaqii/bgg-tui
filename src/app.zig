@@ -569,47 +569,22 @@ pub const App = struct {
 
     fn viewHotGames(self: *const App, sfc: *chasen.Surface) !void {
         var area = layout_mod.listSurface(sfc, self.config.display.list_width);
-        _ = try area.printAt(0, 0, self.titleStyle(), "Hot Games ({s})", .{self.hot_games.sort_mode.label(.hot_games)});
-
-        switch (self.hot_games.load_state) {
-            .idle, .loading => {
-                self.drawCenteredLoadingGuidance(&area, "Hot Games", "Loading BoardGameGeek hot games...");
-            },
-            .failed => |message| {
-                self.drawCenteredGuidance(&area, "Could not load hot games.", message);
-            },
-            .loaded => {
-                if (self.hot_games.list.items.len == 0) {
-                    self.drawCenteredGuidance(&area, "No hot games", "BGG did not return any hot games.");
-                } else if (self.hot_games.filter_active and self.hot_games.filter.labels.len == 0) {
-                    self.hot_games.drawFilterInput(&area, self.subtleStyle());
-                    self.drawCenteredGuidanceKeepingCursor(&area, "No matches", "No hot games match the filter.");
-                } else {
-                    const body_row = if (self.hot_games.filter_active) list_filtered_body_row else list_body_row;
-                    if (self.hot_games.filter_active) self.hot_games.drawFilterInput(&area, self.subtleStyle());
-                    const list = self.hot_games.activeList();
-                    const image_panel_rect = self.hotListImagePanelRect(&area);
-                    const list_width = if (image_panel_rect) |rect| rect.col -| list_image_panel_gap else area.size().width;
-                    var list_area = area.child(.{
-                        .col = 0,
-                        .row = body_row,
-                        .width = list_width,
-                        .height = area.size().height -| (body_row + 1 + list_footer_gap),
-                    });
-                    list_view.viewListWithDensitySelection(list, &list_area, .{
-                        .focused_style = self.focusedStyle(),
-                        .show_cursor = false,
-                    }, self.listDensity(), self.config.interface.selection, self.animation_frame);
-                    if (image_panel_rect) |rect| {
-                        try self.drawListImagePanel(&area, rect);
-                    }
-                    try self.drawListPositionWithLegend(&area, list, "trending games  ★ Rating  ⚖ Weight  #Rank");
-                    self.drawSortMode(&area, self.hot_games.sort_mode.label(.hot_games));
-                }
-            },
+        const image_panel_rect = try self.hot_games.view(&area, .{
+            .title_style = self.titleStyle(),
+            .focused_style = self.focusedStyle(),
+            .muted_style = self.mutedStyle(),
+            .subtle_style = self.subtleStyle(),
+            .footer_hint = self.footerHint(),
+            .list_density = self.listDensity(),
+            .selection = self.config.interface.selection,
+            .animation_frame = self.animation_frame,
+            .loading_scan_frame = self.loadingScanFrame(),
+            .image_panel_rect = self.hotListImagePanelRect(&area),
+            .image_panel_gap = list_image_panel_gap,
+        });
+        if (image_panel_rect) |rect| {
+            try self.drawListImagePanel(&area, rect);
         }
-
-        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), self.subtleStyle());
     }
 
     fn viewSearch(self: *const App, sfc: *chasen.Surface) !void {

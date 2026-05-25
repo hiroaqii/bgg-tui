@@ -6,13 +6,34 @@ const bgg_model = @import("../bgg/model.zig");
 const bgg_xml = @import("../bgg/xml.zig");
 const labels_mod = @import("../labels.zig");
 const list_filter = @import("../list_filter.zig");
+const list_view = @import("../list_view.zig");
+const motion = @import("../motion.zig");
 const list_sort = @import("../list_sort.zig");
 const task_bgg = @import("../tasks/bgg.zig");
 
 const filter_row: u16 = 4;
+const position_row: u16 = 2;
+const body_row: u16 = 4;
+const filtered_body_row: u16 = 6;
+const footer_gap: u16 = 1;
+const stats_legend = "trending games  ★ Rating  ⚖ Weight  #Rank";
 
 pub const Result = task_bgg.HotGamesResult;
 pub const StatsResult = task_bgg.HotGameStatsResult;
+
+pub const ViewOptions = struct {
+    title_style: chasen.TextStyle,
+    focused_style: chasen.TextStyle,
+    muted_style: chasen.TextStyle,
+    subtle_style: chasen.TextStyle,
+    footer_hint: []const u8,
+    list_density: list_view.Density,
+    selection: []const u8,
+    animation_frame: u64,
+    loading_scan_frame: u64,
+    image_panel_rect: ?chasen.Rect = null,
+    image_panel_gap: u16 = 0,
+};
 
 pub const Msg = union(enum) {
     filter_start,
@@ -232,6 +253,55 @@ pub const State = struct {
         }
     }
 
+    pub fn view(self: *const State, area: *chasen.Surface, opts: ViewOptions) !?chasen.Rect {
+        _ = try area.printAt(0, 0, opts.title_style, "Hot Games ({s})", .{self.sort_mode.label(.hot_games)});
+
+        const image_rect = switch (self.load_state) {
+            .idle, .loading => image_rect: {
+                drawCenteredLoadingGuidance(area, "Hot Games", "Loading BoardGameGeek hot games...", opts.muted_style, opts.loading_scan_frame);
+                break :image_rect null;
+            },
+            .failed => |message| image_rect: {
+                drawCenteredGuidance(area, "Could not load hot games.", message);
+                break :image_rect null;
+            },
+            .loaded => image_rect: {
+                if (self.list.items.len == 0) {
+                    drawCenteredGuidance(area, "No hot games", "BGG did not return any hot games.");
+                    break :image_rect null;
+                }
+                if (self.filter_active and self.filter.labels.len == 0) {
+                    self.drawFilterInput(area, opts.subtle_style);
+                    drawCenteredGuidanceKeepingCursor(area, "No matches", "No hot games match the filter.");
+                    break :image_rect null;
+                }
+
+                const current_body_row = if (self.filter_active) filtered_body_row else body_row;
+                if (self.filter_active) self.drawFilterInput(area, opts.subtle_style);
+
+                const list = self.activeList();
+                const list_width = if (opts.image_panel_rect) |rect| rect.col -| opts.image_panel_gap else area.size().width;
+                var list_area = area.child(.{
+                    .col = 0,
+                    .row = current_body_row,
+                    .width = list_width,
+                    .height = area.size().height -| (current_body_row + 1 + footer_gap),
+                });
+                list_view.viewListWithDensitySelection(list, &list_area, .{
+                    .focused_style = opts.focused_style,
+                    .show_cursor = false,
+                }, opts.list_density, opts.selection, opts.animation_frame);
+
+                try drawListPositionWithLegend(area, list, stats_legend, opts.subtle_style);
+                drawSortMode(area, self.sort_mode.label(.hot_games), opts.subtle_style);
+                break :image_rect opts.image_panel_rect;
+            },
+        };
+
+        _ = area.borrowTextAt(0, area.size().height -| 1, opts.footer_hint, opts.subtle_style);
+        return image_rect;
+    }
+
     pub fn deinit(self: *State, allocator: std.mem.Allocator) void {
         self.filter.deinit(allocator);
         self.freeSortedList(allocator);
@@ -277,6 +347,37 @@ pub const State = struct {
         self.sorted_list = ui.List.init(.{});
     }
 };
+
+fn drawListPositionWithLegend(surface: *chasen.Surface, list: *const ui.List, legend: []const u8, style: chasen.TextStyle) !void {
+    const item_count = list.items.len;
+    if (item_count == 0 or surface.size().height < 2) return;
+
+    const text = try list_view.focusedPositionText(surface.frameAllocator(), list.focusedIndex(), item_count);
+    _ = try surface.printAt(0, position_row, style, "{s} {s}", .{ text, legend });
+}
+
+fn drawSortMode(surface: *chasen.Surface, label: []const u8, style: chasen.TextStyle) void {
+    if (surface.size().width <= 12 or surface.size().height <= position_row) return;
+    _ = surface.borrowTextAt(10, position_row, label, style);
+}
+
+fn drawCenteredGuidance(surface: *chasen.Surface, title: []const u8, message: []const u8) void {
+    const block = ui.MessageBlock.init(.{ .title = title, .message = message });
+    block.view(surface, .{});
+}
+
+fn drawCenteredLoadingGuidance(surface: *chasen.Surface, title: []const u8, message: []const u8, style: chasen.TextStyle, frame: u64) void {
+    const block = ui.MessageBlock.init(.{ .title = title, .message = message });
+    block.view(surface, .{});
+    if (block.layout(surface.size()).message) |point| {
+        motion.drawStatusScanText(surface, point.col, point.row, message, style, frame);
+    }
+}
+
+fn drawCenteredGuidanceKeepingCursor(surface: *chasen.Surface, title: []const u8, message: []const u8) void {
+    const block = ui.MessageBlock.init(.{ .title = title, .message = message });
+    block.view(surface, .{ .hide_cursor = false });
+}
 
 fn hotGameNameLessThan(games: []const bgg_model.HotGame, lhs: usize, rhs: usize) bool {
     const order = compareAsciiIgnoreCase(games[lhs].name, games[rhs].name);
