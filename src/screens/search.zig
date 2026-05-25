@@ -24,6 +24,13 @@ pub const Msg = union(enum) {
     list: ui.List.Msg,
 };
 
+pub const EventAction = union(enum) {
+    msg: Msg,
+    main_menu,
+    search_input,
+    quit,
+};
+
 pub const State = struct {
     input: ?ui.TextInput = null,
     filter_input: ?ui.TextInput = null,
@@ -105,6 +112,50 @@ pub const State = struct {
         return self.list.handleEvent(event);
     }
 
+    pub fn handleInputScreenEvent(self: *const State, event: chasen.Event) ?EventAction {
+        switch (event) {
+            .key_press => |key| if (key.matches(chasen.Key.escape, .{})) return .main_menu,
+            .paste => |text| return .{ .msg = .{ .paste = text } },
+            else => {},
+        }
+        if (self.input) |*input| {
+            if (input.handleEvent(event)) |msg| return .{ .msg = .{ .input = msg } };
+        }
+        return null;
+    }
+
+    pub fn handleResultsScreenEvent(self: *const State, event: chasen.Event) ?EventAction {
+        switch (event) {
+            .key_press => |key| {
+                if (self.filter_active) {
+                    if (key.matches(chasen.Key.escape, .{})) return .{ .msg = .filter_clear };
+                    if (key.codepoint == 'b') return .search_input;
+                    if (key.matches(chasen.Key.enter, .{})) {
+                        if (self.handleEvent(event)) |msg| return .{ .msg = .{ .list = msg } };
+                        return null;
+                    }
+                } else if (key.codepoint == '/') {
+                    return .{ .msg = .filter_start };
+                } else {
+                    if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'b') return .search_input;
+                    if (key.codepoint == 'm') return .main_menu;
+                    if (key.codepoint == 's') return .{ .msg = .sort_toggle };
+                    if (key.codepoint == 'q') return .quit;
+                }
+            },
+            .paste => |text| if (self.filter_active) return .{ .msg = .{ .filter_paste = text } },
+            else => {},
+        }
+
+        if (self.filter_active) {
+            if (self.filter_input) |*input| {
+                if (input.handleEvent(event)) |msg| return .{ .msg = .{ .filter_input = msg } };
+            }
+        }
+        if (self.handleEvent(event)) |msg| return .{ .msg = .{ .list = msg } };
+        return null;
+    }
+
     pub fn activeList(self: *const State) *const ui.List {
         if (self.filter_active) return &self.filter.list;
         if (self.sort_mode != .source) return &self.sorted_list;
@@ -148,6 +199,19 @@ pub const State = struct {
         self.sort_mode = next_mode;
         self.filter.deinit(allocator);
         self.filter_active = false;
+    }
+
+    pub fn drawFilterInput(self: *const State, surface: *chasen.Surface, row: u16, style: chasen.TextStyle) void {
+        _ = surface.borrowTextAt(0, row, "Filter:", style);
+        if (self.filter_input) |*input| {
+            var input_area = surface.child(.{
+                .col = 8,
+                .row = row,
+                .width = surface.size().width -| 8,
+                .height = 1,
+            });
+            input.view(&input_area, .{});
+        }
     }
 
     pub fn deinit(self: *State, allocator: std.mem.Allocator) void {
@@ -337,4 +401,48 @@ test "search loading clears previous loaded results" {
     try std.testing.expectEqual(@as(usize, 0), state.results.len);
     try std.testing.expectEqual(@as(usize, 0), state.labels.len);
     try std.testing.expectEqual(@as(usize, 0), state.list.items.len);
+}
+
+test "search input screen event maps input and exit actions" {
+    var state: State = .{};
+    state.input = try ui.TextInput.init(std.testing.allocator, .{});
+    defer state.deinitInputs();
+
+    const paste = state.handleInputScreenEvent(.{ .paste = "root" }).?;
+    try std.testing.expect(paste == .msg);
+    try std.testing.expect(paste.msg == .paste);
+    try std.testing.expectEqualStrings("root", paste.msg.paste);
+
+    const exit = state.handleInputScreenEvent(.{ .key_press = .{ .codepoint = chasen.Key.escape } }).?;
+    try std.testing.expect(exit == .main_menu);
+}
+
+test "search results screen event maps filter and navigation actions" {
+    const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
+    results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+
+    var state: State = .{};
+    state.filter_input = try ui.TextInput.init(std.testing.allocator, .{});
+    try state.setLoaded(std.testing.allocator, results);
+    defer {
+        state.deinitInputs();
+        state.deinit(std.testing.allocator);
+    }
+
+    const filter = state.handleResultsScreenEvent(.{ .key_press = .{ .codepoint = '/' } }).?;
+    try std.testing.expect(filter == .msg);
+    try std.testing.expect(filter.msg == .filter_start);
+
+    const back = state.handleResultsScreenEvent(.{ .key_press = .{ .codepoint = 'b' } }).?;
+    try std.testing.expect(back == .search_input);
+
+    try state.applyFilter(std.testing.allocator, "");
+    const paste = state.handleResultsScreenEvent(.{ .paste = "ca" }).?;
+    try std.testing.expect(paste == .msg);
+    try std.testing.expect(paste.msg == .filter_paste);
+    try std.testing.expectEqualStrings("ca", paste.msg.filter_paste);
+
+    const clear = state.handleResultsScreenEvent(.{ .key_press = .{ .codepoint = chasen.Key.escape } }).?;
+    try std.testing.expect(clear == .msg);
+    try std.testing.expect(clear.msg == .filter_clear);
 }

@@ -258,45 +258,12 @@ pub const App = struct {
         }
 
         if (self.screen == .search) {
-            switch (event) {
-                .key_press => |key| if (key.matches(chasen.Key.escape, .{})) return .{ .show_screen = .main_menu },
-                .paste => |text| return .{ .search = .{ .paste = text } },
-                else => {},
-            }
-            if (self.search.input) |*input| {
-                if (input.handleEvent(event)) |msg| return .{ .search = .{ .input = msg } };
-            }
+            if (self.search.handleInputScreenEvent(event)) |action| return searchEventActionToMsg(action);
             return null;
         }
 
         if (self.screen == .search_results) {
-            switch (event) {
-                .key_press => |key| {
-                    if (self.search.filter_active) {
-                        if (key.matches(chasen.Key.escape, .{})) return .{ .search = .filter_clear };
-                        if (key.codepoint == 'b') return .{ .show_screen = .search };
-                        if (key.matches(chasen.Key.enter, .{})) {
-                            if (self.search.handleEvent(event)) |msg| return .{ .search = .{ .list = msg } };
-                            return null;
-                        }
-                    } else if (key.codepoint == '/') {
-                        return .{ .search = .filter_start };
-                    } else {
-                        if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'b') return .{ .show_screen = .search };
-                        if (key.codepoint == 'm') return .{ .show_screen = .main_menu };
-                        if (key.codepoint == 's') return .{ .search = .sort_toggle };
-                        if (key.codepoint == 'q') return .quit;
-                    }
-                },
-                .paste => |text| if (self.search.filter_active) return .{ .search = .{ .filter_paste = text } },
-                else => {},
-            }
-            if (self.search.filter_active) {
-                if (self.search.filter_input) |*input| {
-                    if (input.handleEvent(event)) |msg| return .{ .search = .{ .filter_input = msg } };
-                }
-            }
-            if (self.search.handleEvent(event)) |msg| return .{ .search = .{ .list = msg } };
+            if (self.search.handleResultsScreenEvent(event)) |action| return searchEventActionToMsg(action);
             return null;
         }
 
@@ -631,11 +598,11 @@ pub const App = struct {
                 if (self.search.list.items.len == 0) {
                     self.drawCenteredGuidance(&area, "No results", "No games matched the current query.");
                 } else if (self.search.filter_active and self.search.filter.labels.len == 0) {
-                    try self.drawSearchFilterInput(&area);
+                    self.search.drawFilterInput(&area, list_filter_row, self.subtleStyle());
                     self.drawCenteredGuidanceKeepingCursor(&area, "No matches", "No search results match the filter.");
                 } else {
                     const body_row = if (self.search.filter_active) list_filtered_body_row else list_body_row;
-                    if (self.search.filter_active) try self.drawSearchFilterInput(&area);
+                    if (self.search.filter_active) self.search.drawFilterInput(&area, list_filter_row, self.subtleStyle());
                     const list = self.search.activeList();
                     var list_area = area.child(.{
                         .col = 0,
@@ -2439,19 +2406,6 @@ pub const App = struct {
         block.view(surface, .{ .hide_cursor = false });
     }
 
-    fn drawSearchFilterInput(self: *const App, surface: *chasen.Surface) !void {
-        _ = surface.borrowTextAt(0, list_filter_row, "Filter:", self.subtleStyle());
-        if (self.search.filter_input) |*input| {
-            var input_area = surface.child(.{
-                .col = 8,
-                .row = list_filter_row,
-                .width = surface.size().width -| 8,
-                .height = 1,
-            });
-            input.view(&input_area, .{});
-        }
-    }
-
     fn drawCollectionUsernameInput(self: *const App, surface: *chasen.Surface) !void {
         _ = surface.borrowTextAt(0, 2, "User:", self.subtleStyle());
         if (self.collection.username_input) |*input| {
@@ -3449,6 +3403,15 @@ fn screenTitle(screen: Screen) []const u8 {
         .thread => "thread",
         .collection => "collection",
         .settings => "settings",
+    };
+}
+
+fn searchEventActionToMsg(action: screens.search.EventAction) App.Msg {
+    return switch (action) {
+        .msg => |msg| .{ .search = msg },
+        .main_menu => .{ .show_screen = .main_menu },
+        .search_input => .{ .show_screen = .search },
+        .quit => .quit,
     };
 }
 
