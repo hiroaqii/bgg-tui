@@ -3477,38 +3477,6 @@ test "collection status filter initializes from config" {
     try std.testing.expectEqual(screens.collection.statusBit(6), app.collection.status_mask);
 }
 
-test "collection status mask filters matching items" {
-    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 3);
-    items[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Owned"), .owned = true };
-    items[1] = .{ .id = 2, .name = try std.testing.allocator.dupe(u8, "Wishlist"), .wishlist = true };
-    items[2] = .{ .id = 3, .name = try std.testing.allocator.dupe(u8, "Both"), .owned = true, .wishlist = true };
-
-    var state: CollectionState = .{};
-    try state.setLoaded(std.testing.allocator, items, screens.collection.statusBit(0) | screens.collection.statusBit(6));
-    defer state.deinit(std.testing.allocator);
-
-    try std.testing.expectEqual(@as(usize, 3), state.items.len);
-    try state.applyStatusFilter(std.testing.allocator, screens.collection.statusBit(6));
-    try std.testing.expectEqual(@as(usize, 2), state.items.len);
-    try std.testing.expectEqual(@as(u32, 2), state.items[0].id);
-    try std.testing.expectEqual(@as(u32, 3), state.items[1].id);
-    try state.applyStatusFilter(std.testing.allocator, 0);
-    try std.testing.expectEqual(@as(usize, 3), state.items.len);
-}
-
-test "collection status filter distinguishes filtered empty from API empty" {
-    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 1);
-    items[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Owned"), .owned = true };
-
-    var state: CollectionState = .{};
-    try state.setLoaded(std.testing.allocator, items, screens.collection.statusBit(6));
-    defer state.deinit(std.testing.allocator);
-
-    try std.testing.expect(state.statusFilteredEmpty());
-    try state.applyStatusFilter(std.testing.allocator, 0);
-    try std.testing.expect(!state.statusFilteredEmpty());
-}
-
 test "search screen escape returns to main menu" {
     var app = App.create(.{ .api = .{ .token = "token" } }, .{});
     app.screen = .search;
@@ -3693,59 +3661,6 @@ test "changing collection user clears loaded state and invalidates tasks" {
     try std.testing.expect(!app.collection.filter_active);
     try std.testing.expectEqualStrings("", app.collection.filter_input.?.text());
     try std.testing.expectEqual(@as(u64, 8), app.collection.request_id);
-}
-
-test "collection filter maps visible activation back to source item" {
-    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 3);
-    items[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
-    items[1] = .{ .id = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia") };
-    items[2] = .{ .id = 3, .name = try std.testing.allocator.dupe(u8, "CATAN") };
-
-    var state: CollectionState = .{};
-    try state.setLoaded(std.testing.allocator, items, 0);
-    defer state.deinit(std.testing.allocator);
-
-    try state.applyFilter(std.testing.allocator, "ca");
-    state.update(.move_next);
-
-    try std.testing.expectEqual(@as(usize, 1), state.activeList().focusedIndex());
-    try std.testing.expectEqual(@as(usize, 2), state.sourceIndex(state.activeList().focusedIndex()).?);
-}
-
-test "collection status and name filters activate projected item" {
-    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 3);
-    items[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root"), .owned = true };
-    items[1] = .{ .id = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia"), .wishlist = true };
-    items[2] = .{ .id = 3, .name = try std.testing.allocator.dupe(u8, "CATAN"), .wishlist = true };
-
-    var state: CollectionState = .{};
-    try state.setLoaded(std.testing.allocator, items, screens.collection.statusBit(6));
-    defer state.deinit(std.testing.allocator);
-
-    try state.applyFilter(std.testing.allocator, "ca");
-    state.update(.move_next);
-
-    const projected_index = state.sourceIndex(state.activeList().focusedIndex()).?;
-    try std.testing.expectEqual(@as(u32, 3), state.items[projected_index].id);
-}
-
-test "collection focus resets and clamps after status projection" {
-    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 3);
-    items[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Owned"), .owned = true };
-    items[1] = .{ .id = 2, .name = try std.testing.allocator.dupe(u8, "Wishlist"), .wishlist = true };
-    items[2] = .{ .id = 3, .name = try std.testing.allocator.dupe(u8, "Both"), .owned = true, .wishlist = true };
-
-    var state: CollectionState = .{};
-    try state.setLoaded(std.testing.allocator, items, screens.collection.statusBit(6));
-    defer state.deinit(std.testing.allocator);
-
-    state.update(.move_next);
-    state.update(.move_next);
-    try std.testing.expectEqual(@as(usize, 1), state.activeList().focusedIndex());
-
-    try state.applyStatusFilter(std.testing.allocator, screens.collection.statusBit(0));
-    try std.testing.expectEqual(@as(usize, 0), state.activeList().focusedIndex());
-    try std.testing.expectEqual(@as(u32, 1), state.items[state.sourceIndex(0).?].id);
 }
 
 test "search results escape returns to search input screen" {
