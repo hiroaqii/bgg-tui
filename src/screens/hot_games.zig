@@ -8,6 +8,7 @@ const labels_mod = @import("../labels.zig");
 const list_filter = @import("../list_filter.zig");
 const list_view = @import("../list_view.zig");
 const motion = @import("../motion.zig");
+const paste = @import("../paste.zig");
 const list_sort = @import("../list_sort.zig");
 const task_bgg = @import("../tasks/bgg.zig");
 
@@ -42,6 +43,14 @@ pub const Msg = union(enum) {
     filter_clear,
     list: ui.List.Msg,
     sort_toggle,
+    loaded: Result,
+    stats_loaded: StatsResult,
+};
+
+pub const Action = union(enum) {
+    none,
+    preview_changed,
+    open_game: usize,
     loaded: Result,
     stats_loaded: StatsResult,
 };
@@ -238,6 +247,64 @@ pub const State = struct {
         self.sort_mode = next_mode;
         self.filter.deinit(allocator);
         self.filter_active = false;
+    }
+
+    pub fn updateScreen(self: *State, allocator: std.mem.Allocator, msg: Msg) !Action {
+        switch (msg) {
+            .filter_start => {
+                try self.startFilter(allocator);
+                return .preview_changed;
+            },
+            .filter_input => |input_msg| {
+                if (input_msg == .submit) return .none;
+                if (self.filter_input) |*input| try input.update(input_msg);
+                try self.applyFilterFromInput(allocator);
+                return .preview_changed;
+            },
+            .filter_paste => |text| {
+                if (self.filter_input) |*input| {
+                    try paste.insertCodepoints(input, text);
+                    try self.applyFilterFromInput(allocator);
+                    return .preview_changed;
+                }
+                return .none;
+            },
+            .filter_clear => {
+                try self.clearFilterInput(allocator);
+                return .preview_changed;
+            },
+            .list => |list_msg| switch (list_msg) {
+                .move_prev, .move_next => {
+                    self.update(list_msg);
+                    return .preview_changed;
+                },
+                .activate => |index| {
+                    if (self.sourceIndex(index)) |source_index| return .{ .open_game = source_index };
+                    return .none;
+                },
+            },
+            .sort_toggle => {
+                try self.toggleSort(allocator);
+                return .preview_changed;
+            },
+            .loaded => |result| return .{ .loaded = result },
+            .stats_loaded => |result| return .{ .stats_loaded = result },
+        }
+    }
+
+    fn startFilter(self: *State, allocator: std.mem.Allocator) !void {
+        if (self.filter_input) |*input| try input.update(.clear);
+        try self.applyFilter(allocator, "");
+    }
+
+    fn applyFilterFromInput(self: *State, allocator: std.mem.Allocator) !void {
+        const input = if (self.filter_input) |*input| input else return;
+        try self.applyFilter(allocator, input.text());
+    }
+
+    fn clearFilterInput(self: *State, allocator: std.mem.Allocator) !void {
+        if (self.filter_input) |*input| try input.update(.clear);
+        self.clearFilter(allocator);
     }
 
     pub fn drawFilterInput(self: *const State, surface: *chasen.Surface, style: chasen.TextStyle) void {
@@ -572,4 +639,53 @@ test "hot games screen event routes active filter input" {
 
     const clear_msg = state.handleScreenEvent(.{ .key_press = .{ .codepoint = chasen.Key.escape } }).?;
     try std.testing.expect(clear_msg == .filter_clear);
+}
+
+test "hot games update screen reports preview changes for filter and movement" {
+    const games = try std.testing.allocator.alloc(bgg_model.HotGame, 2);
+    games[0] = .{ .id = 1, .rank = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+    games[1] = .{ .id = 2, .rank = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia") };
+
+    var state: State = .{};
+    state.filter_input = try ui.TextInput.init(std.testing.allocator, .{});
+    try state.setLoaded(std.testing.allocator, games);
+    defer {
+        state.deinitInputs();
+        state.deinit(std.testing.allocator);
+    }
+
+    try std.testing.expectEqual(Action.preview_changed, try state.updateScreen(std.testing.allocator, .filter_start));
+    try std.testing.expectEqual(Action.preview_changed, try state.updateScreen(std.testing.allocator, .{ .filter_paste = "ca" }));
+    try std.testing.expectEqualStrings("ca", state.filter_input.?.text());
+    try std.testing.expect(state.filter_active);
+
+    try std.testing.expectEqual(Action.preview_changed, try state.updateScreen(std.testing.allocator, .{ .list = .move_next }));
+    const action = try state.updateScreen(std.testing.allocator, .{ .list = .{ .activate = state.activeList().focusedIndex() } });
+    try std.testing.expect(action == .open_game);
+    try std.testing.expectEqual(@as(usize, 1), action.open_game);
+}
+
+test "hot games update screen strips control characters from paste" {
+    var state: State = .{};
+    state.filter_input = try ui.TextInput.init(std.testing.allocator, .{});
+    defer state.deinitInputs();
+
+    try state.applyFilter(std.testing.allocator, "");
+    defer state.clearFilter(std.testing.allocator);
+
+    try std.testing.expectEqual(Action.preview_changed, try state.updateScreen(std.testing.allocator, .{ .filter_paste = "Catan\n\tDuel" }));
+    try std.testing.expectEqualStrings("CatanDuel", state.filter_input.?.text());
+}
+
+test "hot games update screen keeps async results as app actions" {
+    var state: State = .{};
+
+    const loaded = try state.updateScreen(std.testing.allocator, .{ .loaded = .{ .failed = "no token" } });
+    try std.testing.expect(loaded == .loaded);
+
+    const stats_loaded = try state.updateScreen(std.testing.allocator, .{ .stats_loaded = .{
+        .request_id = 1,
+        .result = .{ .failed = "missing" },
+    } });
+    try std.testing.expect(stats_loaded == .stats_loaded);
 }

@@ -16,6 +16,7 @@ const list_filter = @import("list_filter.zig");
 const list_sort = @import("list_sort.zig");
 const list_view = @import("list_view.zig");
 const motion = @import("motion.zig");
+const paste = @import("paste.zig");
 const screens = @import("screens/root.zig");
 const style_mod = @import("style.zig");
 const task_bgg = @import("tasks/bgg.zig");
@@ -995,7 +996,7 @@ pub const App = struct {
             },
             .paste => |text| {
                 if (self.setup_token_input) |*input| {
-                    try insertPastedCodepoints(input, text);
+                    try paste.insertCodepoints(input, text);
                 }
             },
         }
@@ -1013,7 +1014,7 @@ pub const App = struct {
             },
             .token_paste => |text| {
                 if (self.settings.token_input) |*input| {
-                    try insertPastedCodepoints(input, text);
+                    try paste.insertCodepoints(input, text);
                 }
             },
             .token_submit => try self.submitSettingsToken(ctx),
@@ -1028,7 +1029,7 @@ pub const App = struct {
             },
             .username_paste => |text| {
                 if (self.settings.username_input) |*input| {
-                    try insertPastedCodepoints(input, text);
+                    try paste.insertCodepoints(input, text);
                 }
             },
             .username_submit => try self.submitSettingsUsername(ctx),
@@ -1043,7 +1044,7 @@ pub const App = struct {
             },
             .width_paste => |text| {
                 if (self.settings.width_input) |*input| {
-                    try insertPastedCodepoints(input, text);
+                    try paste.insertCodepoints(input, text);
                 }
             },
             .width_submit => try self.submitSettingsWidth(ctx),
@@ -1085,7 +1086,7 @@ pub const App = struct {
         if (self.settings.username_input) |*input| {
             try input.update(.clear);
             if (self.config.collection.default_username) |username| {
-                try insertPastedCodepoints(input, username);
+                try paste.insertCodepoints(input, username);
             }
         }
         self.settings.startEdit(.username);
@@ -1206,62 +1207,12 @@ pub const App = struct {
         self.thread.deinit(self.allocator.?);
     }
 
-    fn startHotFilter(self: *App) !void {
-        if (self.hot_games.filter_input) |*input| try input.update(.clear);
-        try self.hot_games.applyFilter(self.allocator.?, "");
-    }
-
-    fn applyHotFilter(self: *App) !void {
-        const input = if (self.hot_games.filter_input) |*input| input else return;
-        try self.hot_games.applyFilter(self.allocator.?, input.text());
-    }
-
-    fn clearHotFilter(self: *App) !void {
-        if (self.hot_games.filter_input) |*input| try input.update(.clear);
-        self.hot_games.clearFilter(self.allocator.?);
-    }
-
-    fn toggleHotSort(self: *App) !void {
-        try self.hot_games.toggleSort(self.allocator.?);
-    }
-
     fn updateHotGames(self: *App, msg: HotGamesMsg, ctx: *chasen.Ctx(Msg)) !void {
-        switch (msg) {
-            .filter_start => {
-                try self.startHotFilter();
-                try self.syncListImagePreview(ctx);
-            },
-            .filter_input => |input_msg| {
-                if (input_msg != .submit) {
-                    if (self.hot_games.filter_input) |*input| try input.update(input_msg);
-                    try self.applyHotFilter();
-                    try self.syncListImagePreview(ctx);
-                }
-            },
-            .filter_paste => |text| {
-                if (self.hot_games.filter_input) |*input| {
-                    try insertPastedCodepoints(input, text);
-                    try self.applyHotFilter();
-                    try self.syncListImagePreview(ctx);
-                }
-            },
-            .filter_clear => {
-                try self.clearHotFilter();
-                try self.syncListImagePreview(ctx);
-            },
-            .list => |list_msg| switch (list_msg) {
-                .move_prev, .move_next => {
-                    self.hot_games.update(list_msg);
-                    try self.syncListImagePreview(ctx);
-                },
-                .activate => |index| {
-                    if (self.hot_games.sourceIndex(index)) |source_index| try self.openHotGame(source_index, ctx);
-                },
-            },
-            .sort_toggle => {
-                try self.toggleHotSort();
-                try self.syncListImagePreview(ctx);
-            },
+        const action = try self.hot_games.updateScreen(self.allocator.?, msg);
+        switch (action) {
+            .none => {},
+            .preview_changed => try self.syncListImagePreview(ctx),
+            .open_game => |source_index| try self.openHotGame(source_index, ctx),
             .loaded => |result| try self.finishHotGamesLoad(ctx, result),
             .stats_loaded => |result| try self.finishHotGameStatsLoad(result),
         }
@@ -1278,7 +1229,7 @@ pub const App = struct {
             },
             .paste => |text| {
                 if (self.search.input) |*input| {
-                    try insertPastedCodepoints(input, text);
+                    try paste.insertCodepoints(input, text);
                 }
             },
             .filter_start => try self.startSearchFilter(),
@@ -1290,7 +1241,7 @@ pub const App = struct {
             },
             .filter_paste => |text| {
                 if (self.search.filter_input) |*input| {
-                    try insertPastedCodepoints(input, text);
+                    try paste.insertCodepoints(input, text);
                     try self.applySearchFilter();
                 }
             },
@@ -1336,7 +1287,7 @@ pub const App = struct {
             },
             .username_paste => |text| {
                 if (self.collection.username_input) |*input| {
-                    try insertPastedCodepoints(input, text);
+                    try paste.insertCodepoints(input, text);
                 }
             },
             .filter_start => {
@@ -1352,7 +1303,7 @@ pub const App = struct {
             },
             .filter_paste => |text| {
                 if (self.collection.filter_input) |*input| {
-                    try insertPastedCodepoints(input, text);
+                    try paste.insertCodepoints(input, text);
                     try self.applyCollectionFilter();
                     try self.syncListImagePreview(ctx);
                 }
@@ -3726,30 +3677,6 @@ fn screenTransitionFrames(kind: anim.TransitionKind) u64 {
     return transitions.framesForKind(kind);
 }
 
-fn insertPastedCodepoints(input: anytype, text: []const u8) !void {
-    var index: usize = 0;
-    while (index < text.len) {
-        const len = std.unicode.utf8ByteSequenceLength(text[index]) catch {
-            index += 1;
-            continue;
-        };
-        if (index + len > text.len) break;
-
-        const codepoint = std.unicode.utf8Decode(text[index .. index + len]) catch {
-            index += len;
-            continue;
-        };
-        if (isPasteCodepoint(codepoint)) {
-            try input.update(.{ .insert = codepoint });
-        }
-        index += len;
-    }
-}
-
-fn isPasteCodepoint(codepoint: u21) bool {
-    return codepoint >= 0x20 and codepoint != 0x7f and !(codepoint >= 0x80 and codepoint <= 0x9f);
-}
-
 fn setupTokenSubmitHint(config_path: ?[]const u8) []const u8 {
     return if (config_path == null)
         "Enter: use token for this session  Esc: quit"
@@ -3766,7 +3693,7 @@ fn inputWidthValue(input: anytype, config: config_mod.Config, field: screens.set
     };
     var buf: [8]u8 = undefined;
     const text = try std.fmt.bufPrint(&buf, "{d}", .{value});
-    try insertPastedCodepoints(input, text);
+    try paste.insertCodepoints(input, text);
 }
 
 fn parseSettingsWidth(text: []const u8) !u16 {
@@ -4000,7 +3927,7 @@ test "setup token paste inserts printable token text" {
     var input = try ui.PasswordInput.init(std.testing.allocator, .{});
     defer input.deinit();
 
-    try insertPastedCodepoints(&input, " tok-123\n\tあ ");
+    try paste.insertCodepoints(&input, " tok-123\n\tあ ");
 
     try std.testing.expectEqualStrings(" tok-123あ ", input.text());
 }
@@ -4020,7 +3947,7 @@ test "search paste inserts printable query text" {
     var input = try ui.TextInput.init(std.testing.allocator, .{});
     defer input.deinit();
 
-    try insertPastedCodepoints(&input, "Catan\n\tDuel");
+    try paste.insertCodepoints(&input, "Catan\n\tDuel");
 
     try std.testing.expectEqualStrings("CatanDuel", input.text());
 }

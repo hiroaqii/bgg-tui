@@ -14,6 +14,7 @@ pub const list_filter = @import("list_filter.zig");
 pub const list_sort = @import("list_sort.zig");
 pub const list_view = @import("list_view.zig");
 pub const motion = @import("motion.zig");
+pub const paste = @import("paste.zig");
 pub const screens = @import("screens/root.zig");
 pub const style = @import("style.zig");
 pub const tasks = @import("tasks/root.zig");
@@ -32,6 +33,7 @@ test {
     _ = list_sort;
     _ = list_view;
     _ = motion;
+    _ = paste;
     _ = screens;
     _ = style;
     _ = tasks;
