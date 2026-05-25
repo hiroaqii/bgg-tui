@@ -214,3 +214,127 @@ fn compareAsciiIgnoreCase(lhs: []const u8, rhs: []const u8) std.math.Order {
     }
     return std.math.order(lhs.len, rhs.len);
 }
+
+test "search state owns labels for loaded results" {
+    const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 2);
+    results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "First") };
+    results[1] = .{ .id = 2, .name = try std.testing.allocator.dupe(u8, "Second"), .year_published = 2024 };
+
+    var state: State = .{};
+    try state.setLoaded(std.testing.allocator, results);
+    defer state.deinit(std.testing.allocator);
+
+    try std.testing.expect(state.load_state == .loaded);
+    try std.testing.expectEqual(@as(usize, 2), state.list.items.len);
+    try std.testing.expectEqualStrings("First", state.list.items[0]);
+    try std.testing.expectEqualStrings("Second (2024)", state.list.items[1]);
+}
+
+test "search results filter maps visible focus back to source index" {
+    const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 3);
+    results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+    results[1] = .{ .id = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia") };
+    results[2] = .{ .id = 3, .name = try std.testing.allocator.dupe(u8, "CATAN") };
+
+    var state: State = .{};
+    try state.setLoaded(std.testing.allocator, results);
+    defer state.deinit(std.testing.allocator);
+
+    try state.applyFilter(std.testing.allocator, "ca");
+    state.update(.move_next);
+
+    try std.testing.expect(state.filter_active);
+    try std.testing.expectEqual(@as(usize, 2), state.filter.labels.len);
+    try std.testing.expectEqual(@as(usize, 2), state.sourceIndex(state.activeList().focusedIndex()).?);
+}
+
+test "search results name sort preserves source index activation" {
+    const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 3);
+    results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+    results[1] = .{ .id = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia") };
+    results[2] = .{ .id = 3, .name = try std.testing.allocator.dupe(u8, "CATAN") };
+
+    var state: State = .{};
+    try state.setLoaded(std.testing.allocator, results);
+    defer state.deinit(std.testing.allocator);
+
+    try state.toggleSort(std.testing.allocator);
+    try std.testing.expectEqual(list_sort.Mode.name_asc, state.sort_mode);
+    try std.testing.expectEqualStrings("Cascadia", state.activeList().items[0]);
+    try std.testing.expectEqual(@as(usize, 1), state.sourceIndex(0).?);
+}
+
+test "search results sorted projection owns movement and activation" {
+    const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 3);
+    results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+    results[1] = .{ .id = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia") };
+    results[2] = .{ .id = 3, .name = try std.testing.allocator.dupe(u8, "CATAN") };
+
+    var state: State = .{};
+    try state.setLoaded(std.testing.allocator, results);
+    defer state.deinit(std.testing.allocator);
+
+    try state.toggleSort(std.testing.allocator);
+    state.update(.move_next);
+
+    try std.testing.expectEqual(@as(usize, 0), state.list.focusedIndex());
+    try std.testing.expectEqual(@as(usize, 1), state.activeList().focusedIndex());
+    try std.testing.expectEqual(@as(usize, 2), state.sourceIndex(state.activeList().focusedIndex()).?);
+    try std.testing.expectEqual(ui.List.Msg{ .activate = 1 }, state.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?);
+}
+
+test "search results focus clamps in source and sorted projections" {
+    const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 2);
+    results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+    results[1] = .{ .id = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia") };
+
+    var state: State = .{};
+    try state.setLoaded(std.testing.allocator, results);
+    defer state.deinit(std.testing.allocator);
+
+    state.update(.move_prev);
+    try std.testing.expectEqual(@as(usize, 0), state.activeList().focusedIndex());
+    state.update(.move_next);
+    state.update(.move_next);
+    try std.testing.expectEqual(@as(usize, 1), state.activeList().focusedIndex());
+
+    try state.toggleSort(std.testing.allocator);
+    state.update(.move_prev);
+    try std.testing.expectEqual(@as(usize, 0), state.activeList().focusedIndex());
+    state.update(.move_next);
+    state.update(.move_next);
+    try std.testing.expectEqual(@as(usize, 1), state.activeList().focusedIndex());
+}
+
+test "search results sort failure keeps existing projection state" {
+    const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
+    results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+
+    var state: State = .{};
+    try state.setLoaded(std.testing.allocator, results);
+    defer state.deinit(std.testing.allocator);
+
+    var failing_allocator = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    try std.testing.expectError(error.OutOfMemory, state.toggleSort(failing_allocator.allocator()));
+
+    try std.testing.expectEqual(list_sort.Mode.source, state.sort_mode);
+    try std.testing.expectEqual(@as(usize, 0), state.sorted_source_indexes.len);
+    try std.testing.expectEqual(@as(usize, 1), state.activeList().items.len);
+    try std.testing.expectEqualStrings("Root", state.activeList().items[0]);
+}
+
+test "search loading clears previous loaded results" {
+    const results = try std.testing.allocator.alloc(bgg_model.GameSearchResult, 1);
+    results[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Old Result") };
+
+    var state: State = .{};
+    try state.setLoaded(std.testing.allocator, results);
+    defer state.deinit(std.testing.allocator);
+
+    state.setLoading(std.testing.allocator);
+
+    try std.testing.expect(state.load_state == .loading);
+    try std.testing.expectEqual(@as(usize, 0), state.results.len);
+    try std.testing.expectEqual(@as(usize, 0), state.labels.len);
+    try std.testing.expectEqual(@as(usize, 0), state.list.items.len);
+}
