@@ -1141,61 +1141,13 @@ pub const App = struct {
     }
 
     fn updateSearch(self: *App, msg: SearchMsg, ctx: *chasen.Ctx(Msg)) !void {
-        switch (msg) {
-            .input => |input_msg| {
-                if (input_msg == .submit) {
-                    try self.startSearch(ctx);
-                } else if (self.search.input) |*input| {
-                    try input.update(input_msg);
-                }
-            },
-            .paste => |text| {
-                if (self.search.input) |*input| {
-                    try paste.insertCodepoints(input, text);
-                }
-            },
-            .filter_start => try self.startSearchFilter(),
-            .filter_input => |input_msg| {
-                if (input_msg != .submit) {
-                    if (self.search.filter_input) |*input| try input.update(input_msg);
-                    try self.applySearchFilter();
-                }
-            },
-            .filter_paste => |text| {
-                if (self.search.filter_input) |*input| {
-                    try paste.insertCodepoints(input, text);
-                    try self.applySearchFilter();
-                }
-            },
-            .filter_clear => try self.clearSearchFilter(),
-            .sort_toggle => try self.toggleSearchSort(),
-            .results_loaded => |result| try self.finishSearch(ctx, result),
-            .list => |list_msg| switch (list_msg) {
-                .move_prev, .move_next => self.search.update(list_msg),
-                .activate => |index| {
-                    if (self.search.sourceIndex(index)) |source_index| try self.openSearchResult(source_index, ctx);
-                },
-            },
+        const action = try self.search.updateScreen(self.allocator.?, msg);
+        switch (action) {
+            .none => {},
+            .start_search => try self.startSearch(ctx),
+            .open_result => |source_index| try self.openSearchResult(source_index, ctx),
+            .loaded => |result| try self.finishSearch(ctx, result),
         }
-    }
-
-    fn startSearchFilter(self: *App) !void {
-        if (self.search.filter_input) |*input| try input.update(.clear);
-        try self.search.applyFilter(self.allocator.?, "");
-    }
-
-    fn applySearchFilter(self: *App) !void {
-        const input = if (self.search.filter_input) |*input| input else return;
-        try self.search.applyFilter(self.allocator.?, input.text());
-    }
-
-    fn clearSearchFilter(self: *App) !void {
-        if (self.search.filter_input) |*input| try input.update(.clear);
-        self.search.clearFilter(self.allocator.?);
-    }
-
-    fn toggleSearchSort(self: *App) !void {
-        try self.search.toggleSort(self.allocator.?);
     }
 
     fn updateCollection(self: *App, msg: CollectionMsg, ctx: *chasen.Ctx(Msg)) !void {

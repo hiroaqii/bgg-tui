@@ -9,6 +9,7 @@ const list_filter = @import("../list_filter.zig");
 const list_view = @import("../list_view.zig");
 const list_sort = @import("../list_sort.zig");
 const motion = @import("../motion.zig");
+const paste = @import("../paste.zig");
 const task_bgg = @import("../tasks/bgg.zig");
 
 const filter_row: u16 = 4;
@@ -58,6 +59,13 @@ pub const EventAction = union(enum) {
     main_menu,
     search_input,
     quit,
+};
+
+pub const Action = union(enum) {
+    none,
+    start_search,
+    open_result: usize,
+    loaded: TaskResult,
 };
 
 pub const State = struct {
@@ -228,6 +236,71 @@ pub const State = struct {
         self.sort_mode = next_mode;
         self.filter.deinit(allocator);
         self.filter_active = false;
+    }
+
+    pub fn updateScreen(self: *State, allocator: std.mem.Allocator, msg: Msg) !Action {
+        switch (msg) {
+            .input => |input_msg| {
+                if (input_msg == .submit) return .start_search;
+                if (self.input) |*input| try input.update(input_msg);
+                return .none;
+            },
+            .paste => |text| {
+                if (self.input) |*input| try paste.insertCodepoints(input, text);
+                return .none;
+            },
+            .filter_start => {
+                try self.startFilter(allocator);
+                return .none;
+            },
+            .filter_input => |input_msg| {
+                if (input_msg == .submit) return .none;
+                if (self.filter_input) |*input| try input.update(input_msg);
+                try self.applyFilterFromInput(allocator);
+                return .none;
+            },
+            .filter_paste => |text| {
+                if (self.filter_input) |*input| {
+                    try paste.insertCodepoints(input, text);
+                    try self.applyFilterFromInput(allocator);
+                }
+                return .none;
+            },
+            .filter_clear => {
+                try self.clearFilterInput(allocator);
+                return .none;
+            },
+            .sort_toggle => {
+                try self.toggleSort(allocator);
+                return .none;
+            },
+            .results_loaded => |result| return .{ .loaded = result },
+            .list => |list_msg| switch (list_msg) {
+                .move_prev, .move_next => {
+                    self.update(list_msg);
+                    return .none;
+                },
+                .activate => |index| {
+                    if (self.sourceIndex(index)) |source_index| return .{ .open_result = source_index };
+                    return .none;
+                },
+            },
+        }
+    }
+
+    fn startFilter(self: *State, allocator: std.mem.Allocator) !void {
+        if (self.filter_input) |*input| try input.update(.clear);
+        try self.applyFilter(allocator, "");
+    }
+
+    fn applyFilterFromInput(self: *State, allocator: std.mem.Allocator) !void {
+        const input = if (self.filter_input) |*input| input else return;
+        try self.applyFilter(allocator, input.text());
+    }
+
+    fn clearFilterInput(self: *State, allocator: std.mem.Allocator) !void {
+        if (self.filter_input) |*input| try input.update(.clear);
+        self.clearFilter(allocator);
     }
 
     pub fn drawFilterInput(self: *const State, surface: *chasen.Surface, row: u16, style: chasen.TextStyle) void {
@@ -532,10 +605,10 @@ test "search input screen event maps input and exit actions" {
     state.input = try ui.TextInput.init(std.testing.allocator, .{});
     defer state.deinitInputs();
 
-    const paste = state.handleInputScreenEvent(.{ .paste = "root" }).?;
-    try std.testing.expect(paste == .msg);
-    try std.testing.expect(paste.msg == .paste);
-    try std.testing.expectEqualStrings("root", paste.msg.paste);
+    const paste_action = state.handleInputScreenEvent(.{ .paste = "root" }).?;
+    try std.testing.expect(paste_action == .msg);
+    try std.testing.expect(paste_action.msg == .paste);
+    try std.testing.expectEqualStrings("root", paste_action.msg.paste);
 
     const exit = state.handleInputScreenEvent(.{ .key_press = .{ .codepoint = chasen.Key.escape } }).?;
     try std.testing.expect(exit == .main_menu);
@@ -561,10 +634,10 @@ test "search results screen event maps filter and navigation actions" {
     try std.testing.expect(back == .search_input);
 
     try state.applyFilter(std.testing.allocator, "");
-    const paste = state.handleResultsScreenEvent(.{ .paste = "ca" }).?;
-    try std.testing.expect(paste == .msg);
-    try std.testing.expect(paste.msg == .filter_paste);
-    try std.testing.expectEqualStrings("ca", paste.msg.filter_paste);
+    const paste_action = state.handleResultsScreenEvent(.{ .paste = "ca" }).?;
+    try std.testing.expect(paste_action == .msg);
+    try std.testing.expect(paste_action.msg == .filter_paste);
+    try std.testing.expectEqualStrings("ca", paste_action.msg.filter_paste);
 
     const clear = state.handleResultsScreenEvent(.{ .key_press = .{ .codepoint = chasen.Key.escape } }).?;
     try std.testing.expect(clear == .msg);
