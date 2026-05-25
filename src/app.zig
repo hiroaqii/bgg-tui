@@ -34,12 +34,6 @@ const list_image_focus_settle_frames = features.list_image.focus_settle_frames;
 // row 0 title, row 1 blank, row 2 position, row 3 blank, row 4 list body.
 const list_position_row: u16 = 2;
 const list_body_row: u16 = 4;
-const list_footer_gap: u16 = 1;
-const list_filtered_body_row: u16 = 6;
-const collection_status_bar_row: u16 = 3;
-const collection_body_row: u16 = 5;
-const collection_status_picker_gap: u16 = 1;
-const collection_status_picker_lines: u16 = 10;
 const main_menu_shortcut_col: u16 = 24;
 
 const menu_items = [_]ui.Menu.Item{
@@ -520,61 +514,24 @@ pub const App = struct {
             .idle, .failed => layout_mod.centeredSurface(sfc, collection_input_size),
             else => layout_mod.listSurface(sfc, self.config.display.list_width),
         };
-        _ = area.borrowTextAt(0, 0, "Collection", self.titleStyle());
-
-        switch (self.collection.load_state) {
-            .idle => {
-                self.collection.drawUsernameInput(&area, self.subtleStyle());
-                self.drawGuidance(&area, 4, "Load collection", "Enter a BGG username and press Enter.");
-            },
-            .loading => {
-                self.drawCenteredLoadingGuidance(&area, "Collection", "Loading BoardGameGeek collection...");
-            },
-            .failed => |message| {
-                self.collection.drawUsernameInput(&area, self.subtleStyle());
-                self.drawGuidance(&area, 4, "Could not load collection.", message);
-            },
-            .loaded => {
-                self.drawCollectionStatusBar(&area);
-                if (self.collection.list.items.len == 0) {
-                    if (self.collection.statusFilteredEmpty()) {
-                        self.drawCenteredGuidance(&area, "No status matches", "No collection items match the selected statuses.");
-                    } else {
-                        self.drawCenteredGuidance(&area, "No collection items", "BGG did not return any games for this collection.");
-                    }
-                } else if (self.collection.filter_active and self.collection.filter.labels.len == 0) {
-                    self.collection.drawFilterInput(&area, self.subtleStyle());
-                    self.drawCenteredGuidanceKeepingCursor(&area, "No matches", "No collection items match the filter.");
-                } else {
-                    const body_row = if (self.collection.filter_active) list_filtered_body_row else collection_body_row;
-                    if (self.collection.filter_active) self.collection.drawFilterInput(&area, self.subtleStyle());
-                    const list = self.collection.activeList();
-                    const picker_height = if (self.collection.status_picker) collection_status_picker_lines + collection_status_picker_gap else 0;
-                    const image_panel_rect = self.collectionListImagePanelRect(&area);
-                    const list_width = if (image_panel_rect) |rect| rect.col -| list_image_panel_gap else area.size().width;
-                    var list_area = area.child(.{
-                        .col = 0,
-                        .row = body_row,
-                        .width = list_width,
-                        .height = area.size().height -| (body_row + 1 + list_footer_gap + picker_height),
-                    });
-                    list_view.viewListWithDensitySelection(list, &list_area, .{
-                        .focused_style = self.focusedStyle(),
-                        .show_cursor = false,
-                    }, self.listDensity(), self.config.interface.selection, self.animation_frame);
-                    if (image_panel_rect) |rect| {
-                        try self.drawListImagePanel(&area, rect);
-                    }
-                    try self.drawListPositionWithLegend(&area, list, "games  ♥ User Rating  ★ Rating  #Rank");
-                }
-                if (self.collection.status_picker) {
-                    const picker_row = area.size().height -| (collection_status_picker_lines + 1);
-                    self.drawCollectionStatusPicker(&area, @max(collection_body_row, picker_row));
-                }
-            },
+        const image_panel_rect = try self.collection.view(&area, .{
+            .title_style = self.titleStyle(),
+            .focused_style = self.focusedStyle(),
+            .muted_title_style = self.mutedTitleStyle(),
+            .muted_style = self.mutedStyle(),
+            .subtle_style = self.subtleStyle(),
+            .accent = self.theme().accent,
+            .footer_hint = self.footerHint(),
+            .list_density = self.listDensity(),
+            .selection = self.config.interface.selection,
+            .animation_frame = self.animation_frame,
+            .loading_scan_frame = self.loadingScanFrame(),
+            .image_panel_rect = self.collectionListImagePanelRect(&area),
+            .image_panel_gap = list_image_panel_gap,
+        });
+        if (image_panel_rect) |rect| {
+            try self.drawListImagePanel(&area, rect);
         }
-
-        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), self.subtleStyle());
     }
 
     fn viewGameDetail(self: *const App, sfc: *chasen.Surface) !void {
@@ -775,10 +732,10 @@ pub const App = struct {
 
     fn collectionListImagePanelRect(self: *const App, area: *const chasen.Surface) ?chasen.Rect {
         const picker_row: ?u16 = if (self.collection.status_picker)
-            @max(collection_body_row, area.size().height -| (collection_status_picker_lines + 1))
+            @max(screens.collection.body_row, area.size().height -| (screens.collection.status_picker_lines + 1))
         else
             null;
-        return layout_mod.listImagePanelRectForSize(self.config, area.size(), collection_body_row, picker_row);
+        return layout_mod.listImagePanelRectForSize(self.config, area.size(), screens.collection.body_row, picker_row);
     }
 
     fn effectiveDetailContentWidth(self: *const App) usize {
@@ -2248,34 +2205,6 @@ pub const App = struct {
         _ = self;
         const block = ui.MessageBlock.init(.{ .title = title, .message = message });
         block.view(surface, .{ .hide_cursor = false });
-    }
-
-    fn drawCollectionStatusBar(self: *const App, surface: *chasen.Surface) void {
-        if (surface.size().height <= collection_status_bar_row) return;
-        const text = screens.collection.statusSummary(surface.frameAllocator(), self.collection.status_mask) catch "Status: -";
-        _ = surface.borrowTextAt(0, collection_status_bar_row, text, self.subtleStyle());
-    }
-
-    fn drawCollectionStatusPicker(self: *const App, surface: *chasen.Surface, start_row: u16) void {
-        if (surface.size().height <= start_row) return;
-
-        _ = surface.borrowTextAt(0, start_row, "Status Filter", self.mutedTitleStyle());
-        for (screens.collection.status_labels, 0..) |label, index| {
-            const row: u16 = @intCast(start_row + 1 + index);
-            if (row >= surface.size().height) return;
-            const cursor = if (self.collection.status_cursor == index) "> " else "  ";
-            const checked = if ((self.collection.status_mask & screens.collection.statusBit(index)) != 0) "[x]" else "[ ]";
-            _ = surface.borrowTextAt(0, row, cursor, .{ .bold = self.collection.status_cursor == index });
-            _ = surface.borrowTextAt(2, row, checked, .{ .fg = if ((self.collection.status_mask & screens.collection.statusBit(index)) != 0) self.theme().accent else .gray });
-            _ = surface.borrowTextAt(6, row, label, .{});
-        }
-
-        const clear_row: u16 = @intCast(start_row + 1 + screens.collection.status_clear_index);
-        if (clear_row < surface.size().height) {
-            const cursor = if (self.collection.status_cursor == screens.collection.status_clear_index) "> " else "  ";
-            _ = surface.borrowTextAt(0, clear_row, cursor, .{ .bold = self.collection.status_cursor == screens.collection.status_clear_index });
-            _ = surface.borrowTextAt(6, clear_row, "Show All (clear)", self.mutedStyle());
-        }
     }
 
     fn listDensity(self: *const App) list_view.Density {
@@ -4488,12 +4417,12 @@ test "collection list image preview waits before uncached PNG download" {
 test "collection list image panel avoids status picker area" {
     const config: config_mod.Config = .{};
     const compact_size = chasen.Size{ .width = layout_mod.list_image_min_text_width + list_image_panel_gap + layout_mod.list_image_panel_width, .height = 20 };
-    const compact_picker_row = @max(collection_body_row, compact_size.height -| (collection_status_picker_lines + 1));
-    try std.testing.expectEqual(@as(?chasen.Rect, null), layout_mod.listImagePanelRectForSize(config, compact_size, collection_body_row, compact_picker_row));
+    const compact_picker_row = @max(screens.collection.body_row, compact_size.height -| (screens.collection.status_picker_lines + 1));
+    try std.testing.expectEqual(@as(?chasen.Rect, null), layout_mod.listImagePanelRectForSize(config, compact_size, screens.collection.body_row, compact_picker_row));
 
     const roomy_size = chasen.Size{ .width = layout_mod.list_image_min_text_width + list_image_panel_gap + layout_mod.list_image_panel_width, .height = 34 };
-    const roomy_picker_row = @max(collection_body_row, roomy_size.height -| (collection_status_picker_lines + 1));
-    const rect = layout_mod.listImagePanelRectForSize(config, roomy_size, collection_body_row, roomy_picker_row).?;
+    const roomy_picker_row = @max(screens.collection.body_row, roomy_size.height -| (screens.collection.status_picker_lines + 1));
+    const rect = layout_mod.listImagePanelRectForSize(config, roomy_size, screens.collection.body_row, roomy_picker_row).?;
     try std.testing.expect(rect.row + rect.height < roomy_picker_row);
 }
 

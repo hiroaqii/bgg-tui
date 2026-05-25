@@ -6,10 +6,20 @@ const bgg_model = @import("../bgg/model.zig");
 const bgg_xml = @import("../bgg/xml.zig");
 const labels_mod = @import("../labels.zig");
 const list_filter = @import("../list_filter.zig");
+const list_view = @import("../list_view.zig");
+const motion = @import("../motion.zig");
 const task_bgg = @import("../tasks/bgg.zig");
 
 const filter_row: u16 = 4;
 const username_row: u16 = 2;
+const position_row: u16 = 2;
+pub const status_bar_row: u16 = 3;
+pub const body_row: u16 = 5;
+pub const status_picker_gap: u16 = 1;
+pub const status_picker_lines: u16 = 10;
+const filtered_body_row: u16 = 6;
+const footer_gap: u16 = 1;
+const stats_legend = "games  ♥ User Rating  ★ Rating  #Rank";
 
 pub const Result = task_bgg.CollectionResult;
 pub const TaskResult = task_bgg.CollectionTaskResult;
@@ -81,6 +91,22 @@ pub const EventAction = union(enum) {
     msg: Msg,
     main_menu,
     quit,
+};
+
+pub const ViewOptions = struct {
+    title_style: chasen.TextStyle,
+    focused_style: chasen.TextStyle,
+    muted_title_style: chasen.TextStyle,
+    muted_style: chasen.TextStyle,
+    subtle_style: chasen.TextStyle,
+    accent: chasen.Color,
+    footer_hint: []const u8,
+    list_density: list_view.Density,
+    selection: []const u8,
+    animation_frame: u64,
+    loading_scan_frame: u64,
+    image_panel_rect: ?chasen.Rect = null,
+    image_panel_gap: u16 = 0,
 };
 
 pub const State = struct {
@@ -295,6 +321,94 @@ pub const State = struct {
         }
     }
 
+    pub fn view(self: *const State, area: *chasen.Surface, opts: ViewOptions) !?chasen.Rect {
+        _ = area.borrowTextAt(0, 0, "Collection", opts.title_style);
+
+        switch (self.load_state) {
+            .idle => {
+                self.drawUsernameInput(area, opts.subtle_style);
+                drawGuidance(area, 4, "Load collection", "Enter a BGG username and press Enter.", opts.muted_title_style, opts.muted_style);
+            },
+            .loading => {
+                drawCenteredLoadingGuidance(area, "Collection", "Loading BoardGameGeek collection...", opts.muted_style, opts.loading_scan_frame);
+            },
+            .failed => |message| {
+                self.drawUsernameInput(area, opts.subtle_style);
+                drawGuidance(area, 4, "Could not load collection.", message, opts.muted_title_style, opts.muted_style);
+            },
+            .loaded => {
+                try self.viewLoaded(area, opts);
+            },
+        }
+
+        _ = area.borrowTextAt(0, area.size().height -| 1, opts.footer_hint, opts.subtle_style);
+        return if (self.shouldDrawImagePanel()) opts.image_panel_rect else null;
+    }
+
+    fn viewLoaded(self: *const State, area: *chasen.Surface, opts: ViewOptions) !void {
+        drawStatusBar(area, self.status_mask, opts.subtle_style);
+        if (self.list.items.len == 0) {
+            if (self.statusFilteredEmpty()) {
+                drawCenteredGuidance(area, "No status matches", "No collection items match the selected statuses.");
+            } else {
+                drawCenteredGuidance(area, "No collection items", "BGG did not return any games for this collection.");
+            }
+        } else if (self.filter_active and self.filter.labels.len == 0) {
+            self.drawFilterInput(area, opts.subtle_style);
+            drawCenteredGuidanceKeepingCursor(area, "No matches", "No collection items match the filter.");
+        } else {
+            const list_row = if (self.filter_active) filtered_body_row else body_row;
+            if (self.filter_active) self.drawFilterInput(area, opts.subtle_style);
+            const list = self.activeList();
+            const picker_height = if (self.status_picker) status_picker_lines + status_picker_gap else 0;
+            const list_width = if (opts.image_panel_rect) |rect| rect.col -| opts.image_panel_gap else area.size().width;
+            var list_area = area.child(.{
+                .col = 0,
+                .row = list_row,
+                .width = list_width,
+                .height = area.size().height -| (list_row + 1 + footer_gap + picker_height),
+            });
+            list_view.viewListWithDensitySelection(list, &list_area, .{
+                .focused_style = opts.focused_style,
+                .show_cursor = false,
+            }, opts.list_density, opts.selection, opts.animation_frame);
+            try drawListPositionWithLegend(area, list, stats_legend, opts.subtle_style);
+        }
+        if (self.status_picker) {
+            const picker_row = area.size().height -| (status_picker_lines + 1);
+            self.drawStatusPicker(area, @max(body_row, picker_row), opts.muted_title_style, opts.muted_style, opts.accent);
+        }
+    }
+
+    fn shouldDrawImagePanel(self: *const State) bool {
+        if (self.load_state != .loaded) return false;
+        if (self.list.items.len == 0) return false;
+        if (self.filter_active and self.filter.labels.len == 0) return false;
+        return true;
+    }
+
+    fn drawStatusPicker(self: *const State, surface: *chasen.Surface, start_row: u16, title_style: chasen.TextStyle, muted_style: chasen.TextStyle, accent: chasen.Color) void {
+        if (surface.size().height <= start_row) return;
+
+        _ = surface.borrowTextAt(0, start_row, "Status Filter", title_style);
+        for (status_labels, 0..) |label, index| {
+            const row: u16 = @intCast(start_row + 1 + index);
+            if (row >= surface.size().height) return;
+            const cursor = if (self.status_cursor == index) "> " else "  ";
+            const checked = if ((self.status_mask & statusBit(index)) != 0) "[x]" else "[ ]";
+            _ = surface.borrowTextAt(0, row, cursor, .{ .bold = self.status_cursor == index });
+            _ = surface.borrowTextAt(2, row, checked, .{ .fg = if ((self.status_mask & statusBit(index)) != 0) accent else .gray });
+            _ = surface.borrowTextAt(6, row, label, .{});
+        }
+
+        const clear_row: u16 = @intCast(start_row + 1 + status_clear_index);
+        if (clear_row < surface.size().height) {
+            const cursor = if (self.status_cursor == status_clear_index) "> " else "  ";
+            _ = surface.borrowTextAt(0, clear_row, cursor, .{ .bold = self.status_cursor == status_clear_index });
+            _ = surface.borrowTextAt(6, clear_row, "Show All (clear)", muted_style);
+        }
+    }
+
     pub fn deinit(self: *State, allocator: std.mem.Allocator) void {
         self.clearItems(allocator);
         self.load_state = .idle;
@@ -312,6 +426,44 @@ pub const State = struct {
         self.filter_active = false;
     }
 };
+
+fn drawStatusBar(surface: *chasen.Surface, status_mask: u8, style: chasen.TextStyle) void {
+    if (surface.size().height <= status_bar_row) return;
+    const text = statusSummary(surface.frameAllocator(), status_mask) catch "Status: -";
+    _ = surface.borrowTextAt(0, status_bar_row, text, style);
+}
+
+fn drawListPositionWithLegend(surface: *chasen.Surface, list: *const ui.List, legend: []const u8, style: chasen.TextStyle) !void {
+    const item_count = list.items.len;
+    if (item_count == 0 or surface.size().height < 2) return;
+
+    const text = try list_view.focusedPositionText(surface.frameAllocator(), list.focusedIndex(), item_count);
+    _ = try surface.printAt(0, position_row, style, "{s} {s}", .{ text, legend });
+}
+
+fn drawGuidance(surface: *chasen.Surface, row: u16, title: []const u8, message: []const u8, title_style: chasen.TextStyle, message_style: chasen.TextStyle) void {
+    if (surface.size().height <= row) return;
+    _ = surface.borrowTextAt(0, row, title, title_style);
+    if (row + 1 < surface.size().height) _ = surface.borrowTextAt(0, row + 1, message, message_style);
+}
+
+fn drawCenteredGuidance(surface: *chasen.Surface, title: []const u8, message: []const u8) void {
+    const block = ui.MessageBlock.init(.{ .title = title, .message = message });
+    block.view(surface, .{});
+}
+
+fn drawCenteredLoadingGuidance(surface: *chasen.Surface, title: []const u8, message: []const u8, style: chasen.TextStyle, frame: u64) void {
+    const block = ui.MessageBlock.init(.{ .title = title, .message = message });
+    block.view(surface, .{});
+    if (block.layout(surface.size()).message) |point| {
+        motion.drawStatusScanText(surface, point.col, point.row, message, style, frame);
+    }
+}
+
+fn drawCenteredGuidanceKeepingCursor(surface: *chasen.Surface, title: []const u8, message: []const u8) void {
+    const block = ui.MessageBlock.init(.{ .title = title, .message = message });
+    block.view(surface, .{ .hide_cursor = false });
+}
 
 test "collection status mask filters matching items" {
     const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 3);
