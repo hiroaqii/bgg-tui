@@ -8,6 +8,7 @@ const labels_mod = @import("../labels.zig");
 const list_filter = @import("../list_filter.zig");
 const list_view = @import("../list_view.zig");
 const motion = @import("../motion.zig");
+const paste = @import("../paste.zig");
 const task_bgg = @import("../tasks/bgg.zig");
 
 const filter_row: u16 = 4;
@@ -93,6 +94,16 @@ pub const EventAction = union(enum) {
     quit,
 };
 
+pub const Action = union(enum) {
+    none,
+    preview_changed,
+    start_load,
+    start_load_preview,
+    open_item: usize,
+    status_changed,
+    loaded: TaskResult,
+};
+
 pub const ViewOptions = struct {
     title_style: chasen.TextStyle,
     focused_style: chasen.TextStyle,
@@ -170,6 +181,7 @@ pub const State = struct {
     pub fn setLoaded(self: *State, allocator: std.mem.Allocator, items: []bgg_model.CollectionItem, status_mask: u8) !void {
         self.clearItems(allocator);
         self.all_items = items;
+        self.status_mask = status_mask;
         try self.applyStatusFilter(allocator, status_mask);
         self.load_state = .loaded;
     }
@@ -247,6 +259,84 @@ pub const State = struct {
         return null;
     }
 
+    pub fn updateScreen(self: *State, allocator: std.mem.Allocator, msg: Msg) !Action {
+        switch (msg) {
+            .username_input => |input_msg| {
+                if (input_msg == .submit) return .start_load;
+                if (self.username_input) |*input| try input.update(input_msg);
+                return .none;
+            },
+            .username_paste => |text| {
+                if (self.username_input) |*input| try paste.insertCodepoints(input, text);
+                return .none;
+            },
+            .filter_start => {
+                try self.startFilter(allocator);
+                return .preview_changed;
+            },
+            .filter_input => |input_msg| {
+                if (input_msg == .submit) return .none;
+                if (self.filter_input) |*input| try input.update(input_msg);
+                try self.applyFilterFromInput(allocator);
+                return .preview_changed;
+            },
+            .filter_paste => |text| {
+                if (self.filter_input) |*input| {
+                    try paste.insertCodepoints(input, text);
+                    try self.applyFilterFromInput(allocator);
+                    return .preview_changed;
+                }
+                return .none;
+            },
+            .filter_clear => {
+                try self.clearFilterInput();
+                self.clearFilter(allocator);
+                return .preview_changed;
+            },
+            .change_user => {
+                try self.changeUser(allocator);
+                return .preview_changed;
+            },
+            .refresh => {
+                try self.clearFilterInput();
+                self.clearFilter(allocator);
+                return .start_load_preview;
+            },
+            .status_open => {
+                self.status_picker = true;
+                self.status_cursor = 0;
+                return .none;
+            },
+            .status_move_prev => {
+                if (self.status_cursor > 0) self.status_cursor -= 1;
+                return .none;
+            },
+            .status_move_next => {
+                if (self.status_cursor < status_clear_index) self.status_cursor += 1;
+                return .none;
+            },
+            .status_toggle => {
+                try self.toggleStatus(allocator);
+                return .status_changed;
+            },
+            .status_close => {
+                self.status_picker = false;
+                return .none;
+            },
+            .items_loaded => |result| return .{ .loaded = result },
+            .list => |list_msg| switch (list_msg) {
+                .move_prev, .move_next => {
+                    self.update(list_msg);
+                    return .preview_changed;
+                },
+                .activate => |index| {
+                    if (self.sourceIndex(index)) |source_index| return .{ .open_item = source_index };
+                    return .none;
+                },
+            },
+        }
+    }
+
     pub fn activeList(self: *const State) *const ui.List {
         if (self.filter_active) return &self.filter.list;
         return &self.list;
@@ -293,6 +383,41 @@ pub const State = struct {
     pub fn clearFilter(self: *State, allocator: std.mem.Allocator) void {
         self.filter.deinit(allocator);
         self.filter_active = false;
+    }
+
+    fn startFilter(self: *State, allocator: std.mem.Allocator) !void {
+        try self.clearFilterInput();
+        try self.applyFilter(allocator, "");
+    }
+
+    fn applyFilterFromInput(self: *State, allocator: std.mem.Allocator) !void {
+        const input = if (self.filter_input) |*input| input else return;
+        try self.applyFilter(allocator, input.text());
+    }
+
+    fn clearFilterInput(self: *State) !void {
+        if (self.filter_input) |*input| try input.update(.clear);
+    }
+
+    fn changeUser(self: *State, allocator: std.mem.Allocator) !void {
+        self.request_id +%= 1;
+        self.status_picker = false;
+        try self.clearFilterInput();
+        self.deinit(allocator);
+    }
+
+    fn toggleStatus(self: *State, allocator: std.mem.Allocator) !void {
+        if (self.status_cursor == status_clear_index) {
+            self.status_mask = 0;
+        } else {
+            const bit = statusBit(self.status_cursor);
+            if ((self.status_mask & bit) != 0) {
+                self.status_mask &= ~bit;
+            } else {
+                self.status_mask |= bit;
+            }
+        }
+        try self.applyStatusFilter(allocator, self.status_mask);
     }
 
     pub fn drawUsernameInput(self: *const State, surface: *chasen.Surface, style: chasen.TextStyle) void {
@@ -634,4 +759,81 @@ test "collection screen event routes username input and navigation" {
 
     const exit = state.handleScreenEvent(.{ .key_press = .{ .codepoint = chasen.Key.escape } }).?;
     try std.testing.expect(exit == .main_menu);
+}
+
+test "collection update screen reports actions for filter movement and activation" {
+    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 2);
+    items[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+    items[1] = .{ .id = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia") };
+
+    var state: State = .{};
+    state.filter_input = try ui.TextInput.init(std.testing.allocator, .{});
+    try state.setLoaded(std.testing.allocator, items, 0);
+    defer {
+        state.deinitInputs();
+        state.deinit(std.testing.allocator);
+    }
+
+    try std.testing.expectEqual(Action.preview_changed, try state.updateScreen(std.testing.allocator, .filter_start));
+    try std.testing.expectEqual(Action.preview_changed, try state.updateScreen(std.testing.allocator, .{ .filter_paste = "ca" }));
+    try std.testing.expectEqual(Action.preview_changed, try state.updateScreen(std.testing.allocator, .{ .list = .move_next }));
+
+    const action = try state.updateScreen(std.testing.allocator, .{ .list = .{ .activate = state.activeList().focusedIndex() } });
+    try std.testing.expect(action == .open_item);
+    try std.testing.expectEqual(@as(usize, 1), action.open_item);
+}
+
+test "collection update screen toggles status and clears status filter" {
+    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 2);
+    items[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Owned"), .owned = true };
+    items[1] = .{ .id = 2, .name = try std.testing.allocator.dupe(u8, "Wishlist"), .wishlist = true };
+
+    var state: State = .{};
+    try state.setLoaded(std.testing.allocator, items, statusBit(0));
+    defer state.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(Action.none, try state.updateScreen(std.testing.allocator, .status_open));
+    state.status_cursor = 6;
+    try std.testing.expectEqual(Action.status_changed, try state.updateScreen(std.testing.allocator, .status_toggle));
+    try std.testing.expectEqual(statusBit(0) | statusBit(6), state.status_mask);
+    try std.testing.expectEqual(@as(usize, 2), state.items.len);
+
+    state.status_cursor = status_clear_index;
+    try std.testing.expectEqual(Action.status_changed, try state.updateScreen(std.testing.allocator, .status_toggle));
+    try std.testing.expectEqual(@as(u8, 0), state.status_mask);
+    try std.testing.expectEqual(@as(usize, 2), state.items.len);
+}
+
+test "collection update screen change user invalidates loaded state" {
+    var state: State = .{};
+    state.filter_input = try ui.TextInput.init(std.testing.allocator, .{ .value = "ca" });
+    defer state.deinitInputs();
+
+    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 1);
+    items[0] = .{ .id = 13, .name = try std.testing.allocator.dupe(u8, "CATAN") };
+    try state.setLoaded(std.testing.allocator, items, 0);
+    try state.applyFilter(std.testing.allocator, "cat");
+    state.request_id = 7;
+
+    try std.testing.expectEqual(Action.preview_changed, try state.updateScreen(std.testing.allocator, .change_user));
+
+    try std.testing.expect(state.load_state == .idle);
+    try std.testing.expectEqual(@as(usize, 0), state.items.len);
+    try std.testing.expect(!state.filter_active);
+    try std.testing.expectEqualStrings("", state.filter_input.?.text());
+    try std.testing.expectEqual(@as(u64, 8), state.request_id);
+}
+
+test "collection update screen maps submit refresh and loaded result to root actions" {
+    var state: State = .{};
+    state.username_input = try ui.TextInput.init(std.testing.allocator, .{});
+    state.filter_input = try ui.TextInput.init(std.testing.allocator, .{});
+    defer state.deinitInputs();
+
+    try std.testing.expectEqual(Action.start_load, try state.updateScreen(std.testing.allocator, .{ .username_input = .submit }));
+    try std.testing.expectEqual(Action.start_load_preview, try state.updateScreen(std.testing.allocator, .refresh));
+
+    const loaded = try state.updateScreen(std.testing.allocator, .{ .items_loaded = .{ .request_id = 1, .result = .{ .failed = "no token" } } });
+    try std.testing.expect(loaded == .loaded);
+    try std.testing.expectEqual(@as(u64, 1), loaded.loaded.request_id);
 }

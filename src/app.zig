@@ -1043,64 +1043,22 @@ pub const App = struct {
     }
 
     fn updateCollection(self: *App, msg: CollectionMsg, ctx: *chasen.Ctx(Msg)) !void {
-        switch (msg) {
-            .username_input => |input_msg| {
-                if (input_msg == .submit) {
-                    try self.startCollectionLoad(ctx);
-                } else if (self.collection.username_input) |*input| {
-                    try input.update(input_msg);
-                }
-            },
-            .username_paste => |text| {
-                if (self.collection.username_input) |*input| {
-                    try paste.insertCodepoints(input, text);
-                }
-            },
-            .filter_start => {
-                try self.startCollectionFilter();
+        const action = try self.collection.updateScreen(self.allocator.?, msg);
+        switch (action) {
+            .none => {},
+            .preview_changed => try self.syncListImagePreview(ctx),
+            .start_load => try self.startCollectionLoad(ctx),
+            .start_load_preview => {
+                try self.startCollectionLoad(ctx);
                 try self.syncListImagePreview(ctx);
             },
-            .filter_input => |input_msg| {
-                if (input_msg != .submit) {
-                    if (self.collection.filter_input) |*input| try input.update(input_msg);
-                    try self.applyCollectionFilter();
-                    try self.syncListImagePreview(ctx);
-                }
-            },
-            .filter_paste => |text| {
-                if (self.collection.filter_input) |*input| {
-                    try paste.insertCodepoints(input, text);
-                    try self.applyCollectionFilter();
-                    try self.syncListImagePreview(ctx);
-                }
-            },
-            .filter_clear => {
-                try self.clearCollectionFilter();
+            .open_item => |source_index| try self.openCollectionItem(source_index, ctx),
+            .status_changed => {
+                self.config.collection.status_filter.mask = self.collection.status_mask;
+                try self.saveConfigIfAvailable(ctx);
                 try self.syncListImagePreview(ctx);
             },
-            .change_user => {
-                try self.changeCollectionUser();
-                try self.syncListImagePreview(ctx);
-            },
-            .refresh => {
-                try self.refreshCollection(ctx);
-                try self.syncListImagePreview(ctx);
-            },
-            .status_open => self.openCollectionStatusPicker(),
-            .status_move_prev => self.moveCollectionStatusCursor(.prev),
-            .status_move_next => self.moveCollectionStatusCursor(.next),
-            .status_toggle => try self.toggleCollectionStatus(ctx),
-            .status_close => self.collection.status_picker = false,
-            .items_loaded => |result| try self.finishCollectionLoad(ctx, result),
-            .list => |list_msg| switch (list_msg) {
-                .move_prev, .move_next => {
-                    self.collection.update(list_msg);
-                    try self.syncListImagePreview(ctx);
-                },
-                .activate => |index| {
-                    if (self.collection.sourceIndex(index)) |source_index| try self.openCollectionItem(source_index, ctx);
-                },
-            },
+            .loaded => |result| try self.finishCollectionLoad(ctx, result),
         }
     }
 
@@ -1159,69 +1117,6 @@ pub const App = struct {
         switch (msg) {
             .opened => |result| try self.finishBrowserOpen(result),
         }
-    }
-
-    fn startCollectionFilter(self: *App) !void {
-        if (self.collection.filter_input) |*input| try input.update(.clear);
-        try self.collection.applyFilter(self.allocator.?, "");
-    }
-
-    fn applyCollectionFilter(self: *App) !void {
-        const input = if (self.collection.filter_input) |*input| input else return;
-        try self.collection.applyFilter(self.allocator.?, input.text());
-    }
-
-    fn clearCollectionFilter(self: *App) !void {
-        if (self.collection.filter_input) |*input| try input.update(.clear);
-        self.collection.clearFilter(self.allocator.?);
-    }
-
-    fn changeCollectionUser(self: *App) !void {
-        self.collection.request_id +%= 1;
-        self.collection.status_picker = false;
-        if (self.collection.filter_input) |*input| try input.update(.clear);
-        self.collection.deinit(self.allocator.?);
-    }
-
-    fn refreshCollection(self: *App, ctx: *chasen.Ctx(Msg)) !void {
-        if (self.collection.filter_input) |*input| try input.update(.clear);
-        self.collection.clearFilter(self.allocator.?);
-        try self.startCollectionLoad(ctx);
-    }
-
-    const StatusMove = enum { prev, next };
-
-    fn openCollectionStatusPicker(self: *App) void {
-        self.collection.status_picker = true;
-        self.collection.status_cursor = 0;
-    }
-
-    fn moveCollectionStatusCursor(self: *App, direction: StatusMove) void {
-        switch (direction) {
-            .prev => {
-                if (self.collection.status_cursor > 0) self.collection.status_cursor -= 1;
-            },
-            .next => {
-                if (self.collection.status_cursor < screens.collection.status_clear_index) self.collection.status_cursor += 1;
-            },
-        }
-    }
-
-    fn toggleCollectionStatus(self: *App, ctx: *chasen.Ctx(Msg)) !void {
-        if (self.collection.status_cursor == screens.collection.status_clear_index) {
-            self.collection.status_mask = 0;
-        } else {
-            const bit = screens.collection.statusBit(self.collection.status_cursor);
-            if ((self.collection.status_mask & bit) != 0) {
-                self.collection.status_mask &= ~bit;
-            } else {
-                self.collection.status_mask |= bit;
-            }
-        }
-        self.config.collection.status_filter.mask = self.collection.status_mask;
-        try self.saveConfigIfAvailable(ctx);
-        try self.collection.applyStatusFilter(self.allocator.?, self.collection.status_mask);
-        try self.syncListImagePreview(ctx);
     }
 
     fn showScreen(self: *App, screen: Screen, ctx: *chasen.Ctx(Msg)) !void {
@@ -3419,9 +3314,9 @@ test "collection status picker toggles multiple statuses without request" {
     try app.collection.setLoaded(std.testing.allocator, items, screens.collection.statusBit(0));
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
-    app.openCollectionStatusPicker();
+    try app.updateCollection(.status_open, &tc.ctx);
     app.collection.status_cursor = 6;
-    try app.toggleCollectionStatus(&tc.ctx);
+    try app.updateCollection(.status_toggle, &tc.ctx);
 
     try std.testing.expectEqual(screens.collection.statusBit(0) | screens.collection.statusBit(6), app.collection.status_mask);
     try std.testing.expectEqual(screens.collection.statusBit(0) | screens.collection.statusBit(6), app.config.collection.status_filter.mask);
@@ -3429,7 +3324,7 @@ test "collection status picker toggles multiple statuses without request" {
     try std.testing.expectEqual(@as(u8, 0), tc.ctx.pending_tasks_with_len);
 
     app.collection.status_cursor = screens.collection.status_clear_index;
-    try app.toggleCollectionStatus(&tc.ctx);
+    try app.updateCollection(.status_toggle, &tc.ctx);
 
     try std.testing.expectEqual(@as(u8, 0), app.collection.status_mask);
     try std.testing.expectEqual(@as(u8, 0), app.config.collection.status_filter.mask);
@@ -3449,7 +3344,8 @@ test "changing collection user clears loaded state and invalidates tasks" {
     try app.collection.applyFilter(std.testing.allocator, "cat");
     app.collection.request_id = 7;
 
-    try app.changeCollectionUser();
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.updateCollection(.change_user, &tc.ctx);
 
     try std.testing.expect(app.collection.load_state == .idle);
     try std.testing.expectEqual(@as(usize, 0), app.collection.items.len);
