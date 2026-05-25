@@ -13,6 +13,7 @@ const image_mod = @import("image.zig");
 const labels_mod = @import("labels.zig");
 const layout_mod = @import("layout.zig");
 const list_filter = @import("list_filter.zig");
+const list_sort = @import("list_sort.zig");
 const list_view = @import("list_view.zig");
 const motion = @import("motion.zig");
 const screens = @import("screens/root.zig");
@@ -86,6 +87,7 @@ const BrowserState = struct {
 
 const ListImageSource = features.list_image.Source;
 const ListImageState = features.list_image.State;
+const ListSortMode = list_sort.Mode;
 
 pub const App = struct {
     config: config_mod.Config,
@@ -2808,231 +2810,14 @@ pub const App = struct {
     }
 };
 
-const HotGamesState = struct {
-    filter_input: ?ui.TextInput = null,
-    load_state: LoadState = .idle,
-    games: []bgg_model.HotGame = &.{},
-    stats: []bgg_model.Game = &.{},
-    labels: []const []const u8 = &.{},
-    list: ui.List = ui.List.init(.{}),
-    sort_mode: ListSortMode = .source,
-    sorted_source_indexes: []usize = &.{},
-    sorted_labels: []const []const u8 = &.{},
-    sorted_list: ui.List = ui.List.init(.{}),
-    filter: list_filter.FilterState = .{},
-    filter_active: bool = false,
-    request_id: u64 = 0,
-
-    const LoadState = union(enum) {
-        idle,
-        loading,
-        loaded,
-        failed: []const u8,
-    };
-
-    fn initInputs(self: *HotGamesState, allocator: std.mem.Allocator) !void {
-        self.filter_input = try ui.TextInput.init(allocator, .{
-            .placeholder = "Filter hot games",
-        });
-    }
-
-    fn deinitInputs(self: *HotGamesState) void {
-        if (self.filter_input) |*input| {
-            input.deinit();
-            self.filter_input = null;
-        }
-    }
-
-    fn setLoading(self: *HotGamesState) void {
-        self.request_id +%= 1;
-        self.load_state = .loading;
-    }
-
-    fn setFailed(self: *HotGamesState, message: []const u8) void {
-        self.load_state = .{ .failed = message };
-    }
-
-    fn setLoaded(self: *HotGamesState, allocator: std.mem.Allocator, games: []bgg_model.HotGame) !void {
-        self.deinit(allocator);
-        self.games = games;
-        self.labels = try labels_mod.buildHotGameLabels(allocator, games);
-        self.list = ui.List.init(.{ .items = self.labels });
-        self.load_state = .loaded;
-    }
-
-    fn setStatsLoaded(self: *HotGamesState, allocator: std.mem.Allocator, stats: []bgg_model.Game) !void {
-        const focused_source_index = self.sourceIndex(self.activeList().focusedIndex());
-
-        bgg_xml.freeGames(allocator, self.stats);
-        self.stats = stats;
-
-        const filter_was_active = self.filter_active;
-        const filter_query = if (filter_was_active) try allocator.dupe(u8, self.filter.query) else &.{};
-        defer if (filter_was_active) allocator.free(filter_query);
-
-        labels_mod.freeHotGameLabels(allocator, self.labels);
-        self.freeSortedList(allocator);
-        self.filter.deinit(allocator);
-
-        self.labels = try labels_mod.buildHotGameLabelsWithStats(allocator, self.games, self.stats);
-        self.list = ui.List.init(.{ .items = self.labels });
-
-        if (self.sort_mode != .source) try self.rebuildSortedList(allocator, self.sort_mode);
-        if (filter_was_active) {
-            try self.applyFilter(allocator, filter_query);
-        } else {
-            self.filter_active = false;
-        }
-        if (focused_source_index) |source_index| self.focusSourceIndex(source_index);
-    }
-
-    fn update(self: *HotGamesState, msg: ui.List.Msg) void {
-        if (self.filter_active) {
-            self.filter.update(msg);
-        } else if (self.sort_mode != .source) {
-            self.sorted_list.update(msg);
-        } else {
-            self.list.update(msg);
-        }
-    }
-
-    fn handleEvent(self: *const HotGamesState, event: chasen.Event) ?ui.List.Msg {
-        if (self.load_state != .loaded) return null;
-        if (self.filter_active) return self.filter.handleEvent(event);
-        if (self.sort_mode != .source) return self.sorted_list.handleEvent(event);
-        return self.list.handleEvent(event);
-    }
-
-    fn activeList(self: *const HotGamesState) *const ui.List {
-        if (self.filter_active) return &self.filter.list;
-        if (self.sort_mode != .source) return &self.sorted_list;
-        return &self.list;
-    }
-
-    fn sourceIndex(self: *const HotGamesState, visible_index: usize) ?usize {
-        if (self.filter_active) return self.filter.sourceIndex(visible_index);
-        if (self.sort_mode != .source) {
-            if (visible_index >= self.sorted_source_indexes.len) return null;
-            return self.sorted_source_indexes[visible_index];
-        }
-        if (visible_index >= self.games.len) return null;
-        return visible_index;
-    }
-
-    fn focusSourceIndex(self: *HotGamesState, source_index: usize) void {
-        if (self.filter_active) {
-            for (self.filter.source_indexes, 0..) |filter_source_index, visible_index| {
-                if (filter_source_index == source_index) {
-                    self.filter.list.focus.index = visible_index;
-                    return;
-                }
-            }
-            return;
-        }
-        if (self.sort_mode != .source) {
-            for (self.sorted_source_indexes, 0..) |sorted_source_index, visible_index| {
-                if (sorted_source_index == source_index) {
-                    self.sorted_list.focus.index = visible_index;
-                    return;
-                }
-            }
-            return;
-        }
-        if (source_index < self.list.items.len) self.list.focus.index = source_index;
-    }
-
-    fn applyFilter(self: *HotGamesState, allocator: std.mem.Allocator, query: []const u8) !void {
-        if (self.sort_mode == .source) {
-            try self.filter.apply(allocator, self.labels, query);
-        } else {
-            try self.filter.applyWithSourceIndexes(allocator, self.sorted_labels, self.sorted_source_indexes, query);
-        }
-        self.filter_active = true;
-    }
-
-    fn clearFilter(self: *HotGamesState, allocator: std.mem.Allocator) void {
-        self.filter.deinit(allocator);
-        self.filter_active = false;
-    }
-
-    fn toggleSort(self: *HotGamesState, allocator: std.mem.Allocator) !void {
-        if (self.load_state != .loaded) return;
-
-        const next_mode = self.sort_mode.next();
-        if (next_mode != .source) {
-            try self.rebuildSortedList(allocator, next_mode);
-        } else {
-            self.freeSortedList(allocator);
-        }
-
-        self.sort_mode = next_mode;
-        self.filter.deinit(allocator);
-        self.filter_active = false;
-    }
-
-    fn rebuildSortedList(self: *HotGamesState, allocator: std.mem.Allocator, mode: ListSortMode) !void {
-        const indexes = try allocator.alloc(usize, self.games.len);
-        errdefer allocator.free(indexes);
-        for (indexes, 0..) |*index, value| index.* = value;
-
-        switch (mode) {
-            .source => {},
-            .name_asc => std.mem.sort(usize, indexes, self.games, hotGameNameLessThan),
-        }
-
-        const labels = try allocator.alloc([]const u8, indexes.len);
-        errdefer allocator.free(labels);
-        for (indexes, 0..) |source_index, display_index| {
-            labels[display_index] = self.labels[source_index];
-        }
-
-        self.freeSortedList(allocator);
-        self.sorted_source_indexes = indexes;
-        self.sorted_labels = labels;
-        self.sorted_list = ui.List.init(.{ .items = self.sorted_labels });
-    }
-
-    fn freeSortedList(self: *HotGamesState, allocator: std.mem.Allocator) void {
-        allocator.free(self.sorted_source_indexes);
-        allocator.free(self.sorted_labels);
-        self.sorted_source_indexes = &.{};
-        self.sorted_labels = &.{};
-        self.sorted_list = ui.List.init(.{});
-    }
-
-    fn deinit(self: *HotGamesState, allocator: std.mem.Allocator) void {
-        self.filter.deinit(allocator);
-        self.freeSortedList(allocator);
-        labels_mod.freeHotGameLabels(allocator, self.labels);
-        bgg_xml.freeGames(allocator, self.stats);
-        bgg_xml.freeHotGames(allocator, self.games);
-        self.labels = &.{};
-        self.stats = &.{};
-        self.games = &.{};
-        self.list = ui.List.init(.{});
-        self.sort_mode = .source;
-        self.filter_active = false;
-        self.load_state = .idle;
-    }
-};
-
-const HotGamesResult = task_bgg.HotGamesResult;
-const HotGameStatsResult = task_bgg.HotGameStatsResult;
+const HotGamesState = screens.hot_games.State;
+const HotGamesMsg = screens.hot_games.Msg;
+const HotGamesResult = screens.hot_games.Result;
+const HotGameStatsResult = screens.hot_games.StatsResult;
 
 const SetupTokenMsg = union(enum) {
     input: ui.PasswordInput.Msg,
     paste: []const u8,
-};
-
-const HotGamesMsg = union(enum) {
-    filter_start,
-    filter_input: ui.TextInput.Msg,
-    filter_paste: []const u8,
-    filter_clear,
-    list: ui.List.Msg,
-    sort_toggle,
-    loaded: HotGamesResult,
-    stats_loaded: HotGameStatsResult,
 };
 
 const SearchState = struct {
@@ -3508,29 +3293,6 @@ const BrowserMsg = union(enum) {
     opened: BrowserOpenTaskResult,
 };
 
-const ListSortMode = enum {
-    source,
-    name_asc,
-
-    fn next(self: ListSortMode) ListSortMode {
-        return switch (self) {
-            .source => .name_asc,
-            .name_asc => .source,
-        };
-    }
-
-    fn label(self: ListSortMode, screen: Screen) []const u8 {
-        return switch (self) {
-            .source => switch (screen) {
-                .hot_games => "rank",
-                .search_results => "relevance",
-                else => "default",
-            },
-            .name_asc => "name",
-        };
-    }
-};
-
 // The task owns only copied request inputs. API response data is transferred
 // back to App through the result message and released with the app state.
 const HotGamesTask = struct {
@@ -3900,12 +3662,6 @@ fn collectionStatusSummary(allocator: std.mem.Allocator, status_mask: u8) ![]con
         wrote = true;
     }
     return try out.toOwnedSlice();
-}
-
-fn hotGameNameLessThan(games: []const bgg_model.HotGame, lhs: usize, rhs: usize) bool {
-    const order = compareAsciiIgnoreCase(games[lhs].name, games[rhs].name);
-    if (order == .eq) return lhs < rhs;
-    return order == .lt;
 }
 
 fn searchResultNameLessThan(results: []const bgg_model.GameSearchResult, lhs: usize, rhs: usize) bool {
