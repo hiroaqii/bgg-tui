@@ -10,9 +10,7 @@ const config_mod = @import("config.zig");
 const features = @import("features/root.zig");
 const format = @import("format.zig");
 const image_mod = @import("image.zig");
-const labels_mod = @import("labels.zig");
 const layout_mod = @import("layout.zig");
-const list_filter = @import("list_filter.zig");
 const list_view = @import("list_view.zig");
 const motion = @import("motion.zig");
 const paste = @import("paste.zig");
@@ -44,18 +42,6 @@ const collection_body_row: u16 = 5;
 const collection_status_picker_gap: u16 = 1;
 const collection_status_picker_lines: u16 = 10;
 const main_menu_shortcut_col: u16 = 24;
-
-const collection_status_labels = [_][]const u8{
-    "Owned",
-    "Prev owned",
-    "For trade",
-    "Want",
-    "Want to play",
-    "Want to buy",
-    "Wishlist",
-    "Preordered",
-};
-const collection_picker_clear_index: usize = collection_status_labels.len;
 
 const menu_items = [_]ui.Menu.Item{
     .{ .label = "Hot Games", .shortcut = "h" },
@@ -1310,16 +1296,16 @@ pub const App = struct {
                 if (self.collection.status_cursor > 0) self.collection.status_cursor -= 1;
             },
             .next => {
-                if (self.collection.status_cursor < collection_picker_clear_index) self.collection.status_cursor += 1;
+                if (self.collection.status_cursor < screens.collection.status_clear_index) self.collection.status_cursor += 1;
             },
         }
     }
 
     fn toggleCollectionStatus(self: *App, ctx: *chasen.Ctx(Msg)) !void {
-        if (self.collection.status_cursor == collection_picker_clear_index) {
+        if (self.collection.status_cursor == screens.collection.status_clear_index) {
             self.collection.status_mask = 0;
         } else {
-            const bit = collectionStatusBit(self.collection.status_cursor);
+            const bit = screens.collection.statusBit(self.collection.status_cursor);
             if ((self.collection.status_mask & bit) != 0) {
                 self.collection.status_mask &= ~bit;
             } else {
@@ -2343,7 +2329,7 @@ pub const App = struct {
 
     fn drawCollectionStatusBar(self: *const App, surface: *chasen.Surface) void {
         if (surface.size().height <= collection_status_bar_row) return;
-        const text = collectionStatusSummary(surface.frameAllocator(), self.collection.status_mask) catch "Status: -";
+        const text = screens.collection.statusSummary(surface.frameAllocator(), self.collection.status_mask) catch "Status: -";
         _ = surface.borrowTextAt(0, collection_status_bar_row, text, self.subtleStyle());
     }
 
@@ -2351,20 +2337,20 @@ pub const App = struct {
         if (surface.size().height <= start_row) return;
 
         _ = surface.borrowTextAt(0, start_row, "Status Filter", self.mutedTitleStyle());
-        for (collection_status_labels, 0..) |label, index| {
+        for (screens.collection.status_labels, 0..) |label, index| {
             const row: u16 = @intCast(start_row + 1 + index);
             if (row >= surface.size().height) return;
             const cursor = if (self.collection.status_cursor == index) "> " else "  ";
-            const checked = if ((self.collection.status_mask & collectionStatusBit(index)) != 0) "[x]" else "[ ]";
+            const checked = if ((self.collection.status_mask & screens.collection.statusBit(index)) != 0) "[x]" else "[ ]";
             _ = surface.borrowTextAt(0, row, cursor, .{ .bold = self.collection.status_cursor == index });
-            _ = surface.borrowTextAt(2, row, checked, .{ .fg = if ((self.collection.status_mask & collectionStatusBit(index)) != 0) self.theme().accent else .gray });
+            _ = surface.borrowTextAt(2, row, checked, .{ .fg = if ((self.collection.status_mask & screens.collection.statusBit(index)) != 0) self.theme().accent else .gray });
             _ = surface.borrowTextAt(6, row, label, .{});
         }
 
-        const clear_row: u16 = @intCast(start_row + 1 + collection_picker_clear_index);
+        const clear_row: u16 = @intCast(start_row + 1 + screens.collection.status_clear_index);
         if (clear_row < surface.size().height) {
-            const cursor = if (self.collection.status_cursor == collection_picker_clear_index) "> " else "  ";
-            _ = surface.borrowTextAt(0, clear_row, cursor, .{ .bold = self.collection.status_cursor == collection_picker_clear_index });
+            const cursor = if (self.collection.status_cursor == screens.collection.status_clear_index) "> " else "  ";
+            _ = surface.borrowTextAt(0, clear_row, cursor, .{ .bold = self.collection.status_cursor == screens.collection.status_clear_index });
             _ = surface.borrowTextAt(6, clear_row, "Show All (clear)", self.mutedStyle());
         }
     }
@@ -2575,172 +2561,10 @@ const SearchMsg = screens.search.Msg;
 const SearchResult = screens.search.Result;
 const SearchTaskResult = screens.search.TaskResult;
 
-const CollectionState = struct {
-    username_input: ?ui.TextInput = null,
-    filter_input: ?ui.TextInput = null,
-    request_id: u64 = 0,
-    status_picker: bool = false,
-    status_cursor: usize = 0,
-    status_mask: u8 = 0,
-    load_state: LoadState = .idle,
-    // Keep the API result intact so status toggles can filter locally without another request.
-    all_items: []bgg_model.CollectionItem = &.{},
-    items: []bgg_model.CollectionItem = &.{},
-    labels: []const []const u8 = &.{},
-    list: ui.List = ui.List.init(.{}),
-    filter: list_filter.FilterState = .{},
-    filter_active: bool = false,
-
-    const LoadState = union(enum) {
-        idle,
-        loading,
-        loaded,
-        failed: []const u8,
-    };
-
-    fn initInputs(self: *CollectionState, allocator: std.mem.Allocator, default_username: ?[]const u8) !void {
-        self.username_input = try ui.TextInput.init(allocator, .{
-            .value = default_username orelse "",
-            .placeholder = "BGG username",
-        });
-        errdefer {
-            self.username_input.?.deinit();
-            self.username_input = null;
-        }
-        self.filter_input = try ui.TextInput.init(allocator, .{
-            .placeholder = "Filter collection",
-        });
-    }
-
-    fn deinitInputs(self: *CollectionState) void {
-        if (self.username_input) |*input| {
-            input.deinit();
-            self.username_input = null;
-        }
-        if (self.filter_input) |*input| {
-            input.deinit();
-            self.filter_input = null;
-        }
-    }
-
-    fn setLoading(self: *CollectionState, allocator: std.mem.Allocator) void {
-        self.clearItems(allocator);
-        self.load_state = .loading;
-    }
-
-    fn setFailed(self: *CollectionState, allocator: std.mem.Allocator, message: []const u8) void {
-        self.clearItems(allocator);
-        self.load_state = .{ .failed = message };
-    }
-
-    fn setLoaded(self: *CollectionState, allocator: std.mem.Allocator, items: []bgg_model.CollectionItem, status_mask: u8) !void {
-        self.clearItems(allocator);
-        self.all_items = items;
-        try self.applyStatusFilter(allocator, status_mask);
-        self.load_state = .loaded;
-    }
-
-    fn update(self: *CollectionState, msg: ui.List.Msg) void {
-        if (self.filter_active) {
-            self.filter.update(msg);
-        } else {
-            self.list.update(msg);
-        }
-    }
-
-    fn handleEvent(self: *const CollectionState, event: chasen.Event) ?ui.List.Msg {
-        if (self.load_state != .loaded) return null;
-        if (self.filter_active) return self.filter.handleEvent(event);
-        if (self.list.items.len == 0) return null;
-        return self.list.handleEvent(event);
-    }
-
-    fn activeList(self: *const CollectionState) *const ui.List {
-        if (self.filter_active) return &self.filter.list;
-        return &self.list;
-    }
-
-    fn statusFilteredEmpty(self: *const CollectionState) bool {
-        return self.all_items.len > 0 and self.items.len == 0;
-    }
-
-    fn sourceIndex(self: *const CollectionState, visible_index: usize) ?usize {
-        if (self.filter_active) return self.filter.sourceIndex(visible_index);
-        if (visible_index >= self.items.len) return null;
-        return visible_index;
-    }
-
-    fn applyFilter(self: *CollectionState, allocator: std.mem.Allocator, query: []const u8) !void {
-        try self.filter.apply(allocator, self.labels, query);
-        self.filter_active = true;
-    }
-
-    fn applyStatusFilter(self: *CollectionState, allocator: std.mem.Allocator, status_mask: u8) !void {
-        var projected: std.ArrayList(bgg_model.CollectionItem) = .empty;
-        errdefer projected.deinit(allocator);
-
-        for (self.all_items) |item| {
-            if (!collectionItemMatchesStatusMask(item, status_mask)) continue;
-            try projected.append(allocator, item);
-        }
-
-        const next_items = try projected.toOwnedSlice(allocator);
-        errdefer allocator.free(next_items);
-        const next_labels = try labels_mod.buildCollectionItemLabels(allocator, next_items);
-        errdefer labels_mod.freeCollectionItemLabels(allocator, next_labels);
-
-        self.filter.deinit(allocator);
-        labels_mod.freeCollectionItemLabels(allocator, self.labels);
-        allocator.free(self.items);
-        self.items = next_items;
-        self.labels = next_labels;
-        self.list = ui.List.init(.{ .items = self.labels });
-        self.filter_active = false;
-    }
-
-    fn clearFilter(self: *CollectionState, allocator: std.mem.Allocator) void {
-        self.filter.deinit(allocator);
-        self.filter_active = false;
-    }
-
-    fn deinit(self: *CollectionState, allocator: std.mem.Allocator) void {
-        self.clearItems(allocator);
-        self.load_state = .idle;
-    }
-
-    fn clearItems(self: *CollectionState, allocator: std.mem.Allocator) void {
-        self.filter.deinit(allocator);
-        labels_mod.freeCollectionItemLabels(allocator, self.labels);
-        allocator.free(self.items);
-        bgg_xml.freeCollectionItems(allocator, self.all_items);
-        self.labels = &.{};
-        self.all_items = &.{};
-        self.items = &.{};
-        self.list = ui.List.init(.{});
-        self.filter_active = false;
-    }
-};
-
-const CollectionResult = task_bgg.CollectionResult;
-const CollectionTaskResult = task_bgg.CollectionTaskResult;
-
-const CollectionMsg = union(enum) {
-    username_input: ui.TextInput.Msg,
-    username_paste: []const u8,
-    filter_start,
-    filter_input: ui.TextInput.Msg,
-    filter_paste: []const u8,
-    filter_clear,
-    change_user,
-    refresh,
-    status_open,
-    status_move_prev,
-    status_move_next,
-    status_toggle,
-    status_close,
-    items_loaded: CollectionTaskResult,
-    list: ui.List.Msg,
-};
+const CollectionState = screens.collection.State;
+const CollectionMsg = screens.collection.Msg;
+const CollectionResult = screens.collection.Result;
+const CollectionTaskResult = screens.collection.TaskResult;
 
 const GameDetailResult = task_bgg.GameDetailResult;
 
@@ -3198,38 +3022,6 @@ fn labeledFormattedText(allocator: std.mem.Allocator, label: []const u8, write_f
     return try out.toOwnedSlice();
 }
 
-fn collectionStatusBit(index: usize) u8 {
-    return @as(u8, 1) << @intCast(index);
-}
-
-fn collectionItemMatchesStatusMask(item: bgg_model.CollectionItem, status_mask: u8) bool {
-    if (status_mask == 0) return true;
-    return ((status_mask & collectionStatusBit(0)) != 0 and item.owned) or
-        ((status_mask & collectionStatusBit(1)) != 0 and item.prev_owned) or
-        ((status_mask & collectionStatusBit(2)) != 0 and item.for_trade) or
-        ((status_mask & collectionStatusBit(3)) != 0 and item.want) or
-        ((status_mask & collectionStatusBit(4)) != 0 and item.want_to_play) or
-        ((status_mask & collectionStatusBit(5)) != 0 and item.want_to_buy) or
-        ((status_mask & collectionStatusBit(6)) != 0 and item.wishlist) or
-        ((status_mask & collectionStatusBit(7)) != 0 and item.preordered);
-}
-
-fn collectionStatusSummary(allocator: std.mem.Allocator, status_mask: u8) ![]const u8 {
-    if (status_mask == 0) return try allocator.dupe(u8, "Status: All");
-
-    var out: std.Io.Writer.Allocating = .init(allocator);
-    errdefer out.deinit();
-    try out.writer.writeAll("Status: ");
-    var wrote = false;
-    for (collection_status_labels, 0..) |label, index| {
-        if ((status_mask & collectionStatusBit(index)) == 0) continue;
-        if (wrote) try out.writer.writeAll(", ");
-        try out.writer.writeAll(label);
-        wrote = true;
-    }
-    return try out.toOwnedSlice();
-}
-
 fn mainMenuContentWidth() u16 {
     var width: usize = 0;
     for (menu_items) |item| {
@@ -3679,10 +3471,10 @@ test "collection empty username fails before spawning task" {
 test "collection status filter initializes from config" {
     const app = App.create(.{
         .api = .{ .token = "token" },
-        .collection = .{ .status_filter = .{ .mask = collectionStatusBit(6) } },
+        .collection = .{ .status_filter = .{ .mask = screens.collection.statusBit(6) } },
     }, .{});
 
-    try std.testing.expectEqual(collectionStatusBit(6), app.collection.status_mask);
+    try std.testing.expectEqual(screens.collection.statusBit(6), app.collection.status_mask);
 }
 
 test "collection status mask filters matching items" {
@@ -3692,11 +3484,11 @@ test "collection status mask filters matching items" {
     items[2] = .{ .id = 3, .name = try std.testing.allocator.dupe(u8, "Both"), .owned = true, .wishlist = true };
 
     var state: CollectionState = .{};
-    try state.setLoaded(std.testing.allocator, items, collectionStatusBit(0) | collectionStatusBit(6));
+    try state.setLoaded(std.testing.allocator, items, screens.collection.statusBit(0) | screens.collection.statusBit(6));
     defer state.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(@as(usize, 3), state.items.len);
-    try state.applyStatusFilter(std.testing.allocator, collectionStatusBit(6));
+    try state.applyStatusFilter(std.testing.allocator, screens.collection.statusBit(6));
     try std.testing.expectEqual(@as(usize, 2), state.items.len);
     try std.testing.expectEqual(@as(u32, 2), state.items[0].id);
     try std.testing.expectEqual(@as(u32, 3), state.items[1].id);
@@ -3709,7 +3501,7 @@ test "collection status filter distinguishes filtered empty from API empty" {
     items[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Owned"), .owned = true };
 
     var state: CollectionState = .{};
-    try state.setLoaded(std.testing.allocator, items, collectionStatusBit(6));
+    try state.setLoaded(std.testing.allocator, items, screens.collection.statusBit(6));
     defer state.deinit(std.testing.allocator);
 
     try std.testing.expect(state.statusFilteredEmpty());
@@ -3860,20 +3652,20 @@ test "collection status picker toggles multiple statuses without request" {
     items[0] = .{ .id = 1, .name = try std.testing.allocator.dupe(u8, "Owned"), .owned = true };
     items[1] = .{ .id = 2, .name = try std.testing.allocator.dupe(u8, "Wishlist"), .wishlist = true };
     items[2] = .{ .id = 3, .name = try std.testing.allocator.dupe(u8, "Both"), .owned = true, .wishlist = true };
-    app.collection.status_mask = collectionStatusBit(0);
-    try app.collection.setLoaded(std.testing.allocator, items, collectionStatusBit(0));
+    app.collection.status_mask = screens.collection.statusBit(0);
+    try app.collection.setLoaded(std.testing.allocator, items, screens.collection.statusBit(0));
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
     app.openCollectionStatusPicker();
     app.collection.status_cursor = 6;
     try app.toggleCollectionStatus(&tc.ctx);
 
-    try std.testing.expectEqual(collectionStatusBit(0) | collectionStatusBit(6), app.collection.status_mask);
-    try std.testing.expectEqual(collectionStatusBit(0) | collectionStatusBit(6), app.config.collection.status_filter.mask);
+    try std.testing.expectEqual(screens.collection.statusBit(0) | screens.collection.statusBit(6), app.collection.status_mask);
+    try std.testing.expectEqual(screens.collection.statusBit(0) | screens.collection.statusBit(6), app.config.collection.status_filter.mask);
     try std.testing.expectEqual(@as(usize, 3), app.collection.items.len);
     try std.testing.expectEqual(@as(u8, 0), tc.ctx.pending_tasks_with_len);
 
-    app.collection.status_cursor = collection_picker_clear_index;
+    app.collection.status_cursor = screens.collection.status_clear_index;
     try app.toggleCollectionStatus(&tc.ctx);
 
     try std.testing.expectEqual(@as(u8, 0), app.collection.status_mask);
@@ -3927,7 +3719,7 @@ test "collection status and name filters activate projected item" {
     items[2] = .{ .id = 3, .name = try std.testing.allocator.dupe(u8, "CATAN"), .wishlist = true };
 
     var state: CollectionState = .{};
-    try state.setLoaded(std.testing.allocator, items, collectionStatusBit(6));
+    try state.setLoaded(std.testing.allocator, items, screens.collection.statusBit(6));
     defer state.deinit(std.testing.allocator);
 
     try state.applyFilter(std.testing.allocator, "ca");
@@ -3944,14 +3736,14 @@ test "collection focus resets and clamps after status projection" {
     items[2] = .{ .id = 3, .name = try std.testing.allocator.dupe(u8, "Both"), .owned = true, .wishlist = true };
 
     var state: CollectionState = .{};
-    try state.setLoaded(std.testing.allocator, items, collectionStatusBit(6));
+    try state.setLoaded(std.testing.allocator, items, screens.collection.statusBit(6));
     defer state.deinit(std.testing.allocator);
 
     state.update(.move_next);
     state.update(.move_next);
     try std.testing.expectEqual(@as(usize, 1), state.activeList().focusedIndex());
 
-    try state.applyStatusFilter(std.testing.allocator, collectionStatusBit(0));
+    try state.applyStatusFilter(std.testing.allocator, screens.collection.statusBit(0));
     try std.testing.expectEqual(@as(usize, 0), state.activeList().focusedIndex());
     try std.testing.expectEqual(@as(u32, 1), state.items[state.sourceIndex(0).?].id);
 }
