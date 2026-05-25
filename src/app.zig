@@ -7,6 +7,7 @@ const bgg_model = @import("bgg/model.zig");
 const bgg_xml = @import("bgg/xml.zig");
 const browser = @import("browser.zig");
 const config_mod = @import("config.zig");
+const features = @import("features/root.zig");
 const format = @import("format.zig");
 const image_mod = @import("image.zig");
 const labels_mod = @import("labels.zig");
@@ -28,7 +29,7 @@ const collection_input_size = chasen.Size{ .width = 56, .height = 9 };
 const forum_screen_max_size = layout_mod.forum_screen_max_size;
 const detail_image_panel_gap = layout_mod.detail_image_panel_gap;
 const list_image_panel_gap = layout_mod.list_image_panel_gap;
-const list_image_focus_settle_frames: u64 = 8;
+const list_image_focus_settle_frames = features.list_image.focus_settle_frames;
 
 // List screens follow the Go version's vertical rhythm:
 // row 0 title, row 1 blank, row 2 position, row 3 blank, row 4 list body.
@@ -83,116 +84,8 @@ const BrowserState = struct {
     request_id: u64 = 0,
 };
 
-const ListImageSource = struct {
-    screen: Screen,
-    id: u32,
-    url: []const u8,
-
-    fn eql(self: ListImageSource, other: ListImageSource) bool {
-        return self.screen == other.screen and
-            self.id == other.id and
-            std.mem.eql(u8, self.url, other.url);
-    }
-};
-
-const ListImageState = struct {
-    request_id: u64 = 0,
-    source: ?ListImageSource = null,
-    candidate: ?ListImageSource = null,
-    candidate_start_frame: u64 = 0,
-    image_state: screens.detail.ImageState = .idle,
-    terminal_image_handle: ?chasen.TerminalImageHandle = null,
-    terminal_image_load_error: ?chasen.TerminalImageLoadError = null,
-    cache_task_pending: bool = false,
-
-    fn reset(self: *ListImageState, allocator: std.mem.Allocator) void {
-        self.clearImage(allocator);
-        self.source = null;
-        self.candidate = null;
-        self.candidate_start_frame = 0;
-        self.cache_task_pending = false;
-    }
-
-    fn setSourceImmediate(self: *ListImageState, allocator: std.mem.Allocator, source: ?ListImageSource) bool {
-        if (sameOptionalListImageSource(self.source, source)) return false;
-        self.clearImage(allocator);
-        self.request_id +%= 1;
-        self.source = source;
-        self.candidate = null;
-        self.candidate_start_frame = 0;
-        self.cache_task_pending = false;
-        return true;
-    }
-
-    fn setCandidate(self: *ListImageState, source: ?ListImageSource, frame: u64) bool {
-        if (sameOptionalListImageSource(self.candidate, source)) return false;
-        self.candidate = source;
-        self.candidate_start_frame = frame;
-        return true;
-    }
-
-    fn candidateSettled(self: *const ListImageState, frame: u64) bool {
-        return self.candidate != null and frame -| self.candidate_start_frame >= list_image_focus_settle_frames;
-    }
-
-    fn setImageDisabled(self: *ListImageState, allocator: std.mem.Allocator) void {
-        self.clearImage(allocator);
-        self.image_state = .disabled;
-    }
-
-    fn setImageUnavailable(self: *ListImageState, allocator: std.mem.Allocator) void {
-        self.clearImage(allocator);
-        self.image_state = .unavailable;
-    }
-
-    fn setImageLoading(self: *ListImageState, allocator: std.mem.Allocator) void {
-        self.clearImage(allocator);
-        self.image_state = .loading;
-    }
-
-    fn setImageCached(self: *ListImageState, allocator: std.mem.Allocator, path: []u8) void {
-        self.clearImage(allocator);
-        self.image_state = .{ .cached = path };
-    }
-
-    fn setImageFailed(self: *ListImageState, allocator: std.mem.Allocator, message: []const u8) void {
-        self.clearImage(allocator);
-        self.image_state = .{ .failed = message };
-    }
-
-    fn setTerminalImageLoading(self: *ListImageState) void {
-        self.terminal_image_handle = null;
-        self.terminal_image_load_error = null;
-    }
-
-    fn setTerminalImageLoaded(self: *ListImageState, handle: chasen.TerminalImageHandle) void {
-        self.terminal_image_handle = handle;
-        self.terminal_image_load_error = null;
-    }
-
-    fn setTerminalImageFailed(self: *ListImageState, reason: chasen.TerminalImageLoadError) void {
-        self.terminal_image_handle = null;
-        self.terminal_image_load_error = reason;
-    }
-
-    fn imagePath(self: *const ListImageState) ?[]const u8 {
-        return switch (self.image_state) {
-            .cached => |path| path,
-            else => null,
-        };
-    }
-
-    fn clearImage(self: *ListImageState, allocator: std.mem.Allocator) void {
-        switch (self.image_state) {
-            .cached => |path| allocator.free(path),
-            else => {},
-        }
-        self.image_state = .idle;
-        self.terminal_image_handle = null;
-        self.terminal_image_load_error = null;
-        self.cache_task_pending = false;
-    }
-};
+const ListImageSource = features.list_image.Source;
+const ListImageState = features.list_image.State;
 
 pub const App = struct {
     config: config_mod.Config,
@@ -2078,7 +1971,7 @@ pub const App = struct {
             return;
         }
 
-        if (sameOptionalListImageSource(self.list_image.source, image_source)) {
+        if (features.list_image.sameOptionalSource(self.list_image.source, image_source)) {
             try self.startDeferredListImageTerminalImageLoad(ctx);
             try self.maybeStartSettledListImageDownload(ctx);
             return;
@@ -2114,7 +2007,7 @@ pub const App = struct {
             return;
         }
         const source = self.list_image.candidate orelse return;
-        if (!sameOptionalListImageSource(self.list_image.source, source)) return;
+        if (!features.list_image.sameOptionalSource(self.list_image.source, source)) return;
         if (self.list_image.imagePath() != null or self.list_image.terminal_image_handle != null) return;
 
         try self.startListImageCache(ctx, source);
@@ -2229,7 +2122,7 @@ pub const App = struct {
         const source_index = self.hot_games.sourceIndex(focused_index) orelse return null;
         const game = self.hot_games.games[source_index];
         const url = game.thumbnail_url orelse return null;
-        return .{ .screen = .hot_games, .id = game.id, .url = url };
+        return .{ .kind = .hot_games, .id = game.id, .url = url };
     }
 
     fn collectionListImageSource(self: *const App) ?ListImageSource {
@@ -2238,7 +2131,7 @@ pub const App = struct {
         const source_index = self.collection.sourceIndex(focused_index) orelse return null;
         const item = self.collection.items[source_index];
         const url = item.thumbnail_url orelse return null;
-        return .{ .screen = .collection, .id = item.id, .url = url };
+        return .{ .kind = .collection, .id = item.id, .url = url };
     }
 
     fn gameDetailImageUrl(self: *const App) ?[]const u8 {
@@ -4041,12 +3934,6 @@ fn mainMenuContentWidth() u16 {
         }
     }
     return @intCast(@min(width, std.math.maxInt(u16)));
-}
-
-fn sameOptionalListImageSource(a: ?ListImageSource, b: ?ListImageSource) bool {
-    if (a == null and b == null) return true;
-    if (a == null or b == null) return false;
-    return a.?.eql(b.?);
 }
 
 fn isListImageScreen(screen: Screen) bool {

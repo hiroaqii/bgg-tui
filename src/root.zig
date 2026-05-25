@@ -5,6 +5,7 @@ pub const app = @import("app.zig");
 pub const bgg = @import("bgg/root.zig");
 pub const browser = @import("browser.zig");
 pub const config = @import("config.zig");
+pub const features = @import("features/root.zig");
 pub const format = @import("format.zig");
 pub const image = @import("image.zig");
 pub const labels = @import("labels.zig");
@@ -21,6 +22,7 @@ test {
     _ = bgg;
     _ = browser;
     _ = config;
+    _ = features;
     _ = format;
     _ = image;
     _ = labels;
