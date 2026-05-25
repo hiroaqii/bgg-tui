@@ -8,6 +8,7 @@ pub const config = @import("config.zig");
 pub const format = @import("format.zig");
 pub const image = @import("image.zig");
 pub const labels = @import("labels.zig");
+pub const layout = @import("layout.zig");
 pub const list_filter = @import("list_filter.zig");
 pub const list_view = @import("list_view.zig");
 pub const motion = @import("motion.zig");
@@ -23,6 +24,7 @@ test {
     _ = format;
     _ = image;
     _ = labels;
+    _ = layout;
     _ = list_filter;
     _ = list_view;
     _ = motion;

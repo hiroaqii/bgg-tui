@@ -10,6 +10,7 @@ const config_mod = @import("config.zig");
 const format = @import("format.zig");
 const image_mod = @import("image.zig");
 const labels_mod = @import("labels.zig");
+const layout_mod = @import("layout.zig");
 const list_filter = @import("list_filter.zig");
 const list_view = @import("list_view.zig");
 const motion = @import("motion.zig");
@@ -24,20 +25,10 @@ const setup_token_size = chasen.Size{ .width = 56, .height = 9 };
 const placeholder_size = chasen.Size{ .width = 56, .height = 6 };
 const search_input_size = chasen.Size{ .width = 56, .height = 9 };
 const collection_input_size = chasen.Size{ .width = 56, .height = 9 };
-const list_screen_min_stats_width: u16 = 96;
-const list_screen_max_height: u16 = 34;
-const forum_screen_max_size = chasen.Size{ .width = 88, .height = 34 };
-const detail_outer_reserved_rows: u16 = 3;
-const detail_image_panel_width: u16 = 28;
-const detail_image_panel_height: u16 = 14;
-const detail_image_panel_gap: u16 = 2;
-const detail_image_min_text_width: u16 = 56;
-const list_image_panel_width: u16 = 20;
-const list_image_panel_height: u16 = 10;
-const list_image_panel_gap: u16 = 2;
-const list_image_min_text_width: u16 = 72;
+const forum_screen_max_size = layout_mod.forum_screen_max_size;
+const detail_image_panel_gap = layout_mod.detail_image_panel_gap;
+const list_image_panel_gap = layout_mod.list_image_panel_gap;
 const list_image_focus_settle_frames: u64 = 8;
-const thread_outer_reserved_rows: u16 = 3;
 
 // List screens follow the Go version's vertical rhythm:
 // row 0 title, row 1 blank, row 2 position, row 3 blank, row 4 list body.
@@ -652,7 +643,7 @@ pub const App = struct {
     }
 
     fn viewSetupToken(self: *const App, sfc: *chasen.Surface) void {
-        var area = centeredSurface(sfc, setup_token_size);
+        var area = layout_mod.centeredSurface(sfc, setup_token_size);
         _ = area.borrowTextAt(0, 0, "Setup BGG API token", self.titleStyle());
         _ = area.borrowTextAt(0, 2, "BGG API access requires a token.", self.mutedStyle());
         _ = area.borrowTextAt(0, 3, "Enter a token to continue to the main menu.", self.mutedStyle());
@@ -666,7 +657,7 @@ pub const App = struct {
     }
 
     fn viewMainMenu(self: *const App, sfc: *chasen.Surface) !void {
-        var area = centeredSurface(sfc, main_menu_size);
+        var area = layout_mod.centeredSurface(sfc, main_menu_size);
         const token_status = if (self.config.apiClientToken() == null) "missing" else "configured";
         ui.message_block.drawCenteredText(&area, 0, "Main menu", self.titleStyle());
         const token_text = try std.fmt.allocPrint(area.frameAllocator(), "BGG API token: {s}", .{token_status});
@@ -694,19 +685,19 @@ pub const App = struct {
     }
 
     fn viewPlaceholder(self: *const App, sfc: *chasen.Surface, title: []const u8, message: []const u8) void {
-        var area = centeredSurface(sfc, placeholder_size);
+        var area = layout_mod.centeredSurface(sfc, placeholder_size);
         _ = area.borrowTextAt(0, 0, title, self.titleStyle());
         _ = area.borrowTextAt(0, 2, message, self.mutedStyle());
         _ = area.borrowTextAt(0, 4, self.footerHint(), self.subtleStyle());
     }
 
     fn viewSettings(self: *const App, sfc: *chasen.Surface) !void {
-        var area = centeredSurface(sfc, screens.settings.required_size);
+        var area = layout_mod.centeredSurface(sfc, screens.settings.required_size);
         try self.settings.view(&area, self.config, self.config_path, self.theme(), self.config.interface.selection, self.animation_frame);
     }
 
     fn viewHotGames(self: *const App, sfc: *chasen.Surface) !void {
-        var area = listSurface(sfc, self.config.display.list_width);
+        var area = layout_mod.listSurface(sfc, self.config.display.list_width);
         _ = try area.printAt(0, 0, self.titleStyle(), "Hot Games ({s})", .{self.hot_games.sort_mode.label(.hot_games)});
 
         switch (self.hot_games.load_state) {
@@ -751,7 +742,7 @@ pub const App = struct {
     }
 
     fn viewSearch(self: *const App, sfc: *chasen.Surface) !void {
-        var area = centeredSurface(sfc, search_input_size);
+        var area = layout_mod.centeredSurface(sfc, search_input_size);
         _ = area.borrowTextAt(0, 0, "Search Games", self.titleStyle());
 
         if (self.search.input) |*input| {
@@ -778,7 +769,7 @@ pub const App = struct {
     }
 
     fn viewSearchResults(self: *const App, sfc: *chasen.Surface) !void {
-        var area = listSurface(sfc, self.config.display.list_width);
+        var area = layout_mod.listSurface(sfc, self.config.display.list_width);
         _ = try area.printAt(0, 0, self.titleStyle(), "Search Results ({s})", .{self.search.sort_mode.label(.search_results)});
 
         switch (self.search.load_state) {
@@ -822,8 +813,8 @@ pub const App = struct {
 
     fn viewCollection(self: *const App, sfc: *chasen.Surface) !void {
         var area = switch (self.collection.load_state) {
-            .idle, .failed => centeredSurface(sfc, collection_input_size),
-            else => listSurface(sfc, self.config.display.list_width),
+            .idle, .failed => layout_mod.centeredSurface(sfc, collection_input_size),
+            else => layout_mod.listSurface(sfc, self.config.display.list_width),
         };
         _ = area.borrowTextAt(0, 0, "Collection", self.titleStyle());
 
@@ -884,7 +875,7 @@ pub const App = struct {
 
     fn viewGameDetail(self: *const App, sfc: *chasen.Surface) !void {
         sfc.hideCursor();
-        var area = detailSurface(sfc, self.config.display.detail_width);
+        var area = layout_mod.detailSurface(sfc, self.config.display.detail_width);
 
         switch (self.game_detail.load_state) {
             .idle, .loading => {
@@ -894,7 +885,7 @@ pub const App = struct {
                 self.drawCenteredGuidance(&area, "Could not load game detail.", message);
             },
             .loaded => {
-                const detail_layout = detailLayout(area.size().height, self.config.interface.list_density);
+                const detail_layout = layout_mod.detailLayout(area.size().height, self.config.interface.list_density);
                 const image_panel_rect = self.detailImagePanelRect(&area, detail_layout);
                 const text_width = if (image_panel_rect) |rect| rect.col -| detail_image_panel_gap else area.size().width;
                 var text_area = area.child(.{
@@ -930,12 +921,12 @@ pub const App = struct {
             },
         }
 
-        const detail_layout = detailLayout(area.size().height, self.config.interface.list_density);
+        const detail_layout = layout_mod.detailLayout(area.size().height, self.config.interface.list_density);
         _ = area.borrowTextAt(0, detail_layout.footer_row, self.footerHint(), self.subtleStyle());
     }
 
     fn viewForums(self: *const App, sfc: *chasen.Surface) !void {
-        var area = forumSurface(sfc);
+        var area = layout_mod.forumSurface(sfc);
 
         switch (self.forums.load_state) {
             .idle, .loading_forums => {
@@ -946,7 +937,7 @@ pub const App = struct {
                 if (self.forums.forum_list.items.len == 0) {
                     self.drawCenteredGuidance(&area, "No forums", "BGG did not return forums for this game.");
                 } else {
-                    var forum_area = forumListSurface(&area, self.forums.forum_list.items.len);
+                    var forum_area = layout_mod.forumListSurface(&area, self.forums.forum_list.items.len, list_body_row);
                     const title = try std.fmt.allocPrint(forum_area.frameAllocator(), "{s} - Forums", .{self.forums.game_name});
                     ui.message_block.drawCenteredText(&forum_area, 0, title, self.titleStyle());
                     try self.drawCenteredListPosition(&forum_area, &self.forums.forum_list);
@@ -1071,11 +1062,11 @@ pub const App = struct {
     }
 
     fn detailImagePanelRect(self: *const App, area: *const chasen.Surface, detail_layout: screens.detail.Layout) ?chasen.Rect {
-        return detailImagePanelRectForSize(self.config, area.size(), detail_layout);
+        return layout_mod.detailImagePanelRectForSize(self.config, area.size(), detail_layout);
     }
 
     fn hotListImagePanelRect(self: *const App, area: *const chasen.Surface) ?chasen.Rect {
-        return listImagePanelRectForSize(self.config, area.size(), list_body_row, null);
+        return layout_mod.listImagePanelRectForSize(self.config, area.size(), list_body_row, null);
     }
 
     fn collectionListImagePanelRect(self: *const App, area: *const chasen.Surface) ?chasen.Rect {
@@ -1083,19 +1074,19 @@ pub const App = struct {
             @max(collection_body_row, area.size().height -| (collection_status_picker_lines + 1))
         else
             null;
-        return listImagePanelRectForSize(self.config, area.size(), collection_body_row, picker_row);
+        return layout_mod.listImagePanelRectForSize(self.config, area.size(), collection_body_row, picker_row);
     }
 
     fn effectiveDetailContentWidth(self: *const App) usize {
-        return detailContentWidthForSize(
+        return layout_mod.detailContentWidthForSize(
             self.config,
-            detailSurfaceSizeForTerminal(self.config, self.terminal_size),
+            layout_mod.detailSurfaceSizeForTerminal(self.config, self.terminal_size),
             self.config.interface.list_density,
         );
     }
 
     fn viewThread(self: *const App, sfc: *chasen.Surface) !void {
-        var area = threadSurface(sfc, self.config.display.thread_width);
+        var area = layout_mod.threadSurface(sfc, self.config.display.thread_width);
 
         switch (self.thread.load_state) {
             .idle, .loading => {
@@ -1105,7 +1096,7 @@ pub const App = struct {
                 self.drawCenteredGuidance(&area, "Could not load thread.", message);
             },
             .loaded => {
-                const thread_layout = threadLayout(area.size().height, self.config.interface.list_density);
+                const thread_layout = layout_mod.threadLayout(area.size().height, self.config.interface.list_density);
                 _ = area.borrowTextAt(0, thread_layout.title_row, self.thread.subject(), self.titleStyle());
                 _ = try area.printAt(0, thread_layout.meta_row, self.subtleStyle(), "{d} posts · {s}", .{ self.thread.postCount(), self.thread.sortLabel() });
 
@@ -1128,7 +1119,7 @@ pub const App = struct {
             },
         }
 
-        const thread_layout = threadLayout(area.size().height, self.config.interface.list_density);
+        const thread_layout = layout_mod.threadLayout(area.size().height, self.config.interface.list_density);
         _ = area.borrowTextAt(0, thread_layout.footer_row, self.footerHint(), self.subtleStyle());
     }
 
@@ -2065,7 +2056,7 @@ pub const App = struct {
     fn syncListImagePreview(self: *App, ctx: *chasen.Ctx(Msg)) !void {
         const allocator = self.allocator orelse ctx.allocator();
         const source = self.currentListImageSource();
-        if (!detailWantsImagePanel(self.config)) {
+        if (!layout_mod.detailWantsImagePanel(self.config)) {
             self.releaseListImageTerminalImage(ctx);
             _ = self.list_image.setSourceImmediate(allocator, null);
             self.list_image.setImageDisabled(allocator);
@@ -4041,12 +4032,6 @@ fn compareAsciiIgnoreCase(lhs: []const u8, rhs: []const u8) std.math.Order {
     return std.math.order(lhs.len, rhs.len);
 }
 
-// App screens receive a local surface. `ui.layout.center` handles clamping when
-// the terminal is smaller than the requested block.
-fn centeredSurface(surface: *chasen.Surface, size: chasen.Size) chasen.Surface {
-    return surface.child(ui.layout.center(surfaceRect(surface), size));
-}
-
 fn mainMenuContentWidth() u16 {
     var width: usize = 0;
     for (menu_items) |item| {
@@ -4056,67 +4041,6 @@ fn mainMenuContentWidth() u16 {
         }
     }
     return @intCast(@min(width, std.math.maxInt(u16)));
-}
-
-fn detailSurface(surface: *chasen.Surface, configured_width: u16) chasen.Surface {
-    // Detail is long-form content, so it uses the available body height while
-    // still constraining width through the user's display setting.
-    return surface.child(ui.layout.center(surfaceRect(surface), .{
-        .width = configured_width,
-        .height = surface.size().height,
-    }));
-}
-
-fn detailWantsImagePanel(config: config_mod.Config) bool {
-    return config.display.show_images and config.display.image_protocol != .off;
-}
-
-fn detailSurfaceSizeForTerminal(config: config_mod.Config, terminal_size: chasen.Size) chasen.Size {
-    const body_size = screenBodySizeForTerminal(terminal_size);
-    return .{
-        .width = @min(config.display.detail_width, body_size.width),
-        .height = body_size.height,
-    };
-}
-
-fn detailContentWidthForSize(config: config_mod.Config, size: chasen.Size, density: []const u8) usize {
-    const layout_value = detailLayout(size.height, density);
-    if (detailImagePanelRectForSize(config, size, layout_value)) |rect|
-        return rect.col -| detail_image_panel_gap;
-    return size.width;
-}
-
-fn detailImagePanelRectForSize(config: config_mod.Config, size: chasen.Size, detail_layout: screens.detail.Layout) ?chasen.Rect {
-    if (!detailWantsImagePanel(config)) return null;
-
-    if (size.width < detail_image_min_text_width + detail_image_panel_gap + detail_image_panel_width)
-        return null;
-    if (size.height <= detail_layout.content_row + 6) return null;
-
-    const available_height = size.height - detail_layout.content_row - 2;
-    return .{
-        .col = size.width - detail_image_panel_width,
-        .row = detail_layout.content_row,
-        .width = detail_image_panel_width,
-        .height = @min(detail_image_panel_height, available_height),
-    };
-}
-
-fn listImagePanelRectForSize(config: config_mod.Config, size: chasen.Size, body_row: u16, bottom_limit: ?u16) ?chasen.Rect {
-    if (!detailWantsImagePanel(config)) return null;
-    if (size.width < list_image_min_text_width + list_image_panel_gap + list_image_panel_width)
-        return null;
-    if (size.height <= body_row + 6) return null;
-
-    const panel_bottom = bottom_limit orelse size.height -| 1;
-    if (panel_bottom <= body_row + 5) return null;
-    const available_height = panel_bottom - body_row - 1;
-    return .{
-        .col = size.width - list_image_panel_width,
-        .row = body_row,
-        .width = list_image_panel_width,
-        .height = @min(list_image_panel_height, available_height),
-    };
 }
 
 fn sameOptionalListImageSource(a: ?ListImageSource, b: ?ListImageSource) bool {
@@ -4156,74 +4080,12 @@ fn listImagePanelMessage(message: []const u8) []const u8 {
     return message;
 }
 
-fn listSurface(surface: *chasen.Surface, configured_width: u16) chasen.Surface {
-    // Hot Games and Collection have stat legends/columns. Keep a practical
-    // minimum width so those columns are visible, while still allowing users to
-    // expand wider through the list width setting.
-    return surface.child(ui.layout.center(surfaceRect(surface), .{
-        .width = @max(configured_width, list_screen_min_stats_width),
-        .height = list_screen_max_height,
-    }));
-}
-
-fn forumSurface(surface: *chasen.Surface) chasen.Surface {
-    return surface.child(ui.layout.center(surfaceRect(surface), forum_screen_max_size));
-}
-
-fn forumListSurface(surface: *chasen.Surface, item_count: usize) chasen.Surface {
-    const count: u16 = @intCast(@min(item_count, std.math.maxInt(u16)));
-    const height = @min(forum_screen_max_size.height, @max(@as(u16, 7), list_body_row + count + 2));
-    return surface.child(ui.layout.center(surfaceRect(surface), .{
-        .width = forum_screen_max_size.width,
-        .height = height,
-    }));
-}
-
-fn threadSurface(surface: *chasen.Surface, configured_width: u16) chasen.Surface {
-    // Threads are long-form content like Detail, so height follows the available
-    // body while width remains user-configurable.
-    return surface.child(ui.layout.center(surfaceRect(surface), .{
-        .width = configured_width,
-        .height = surface.size().height,
-    }));
-}
-
-fn threadLayout(area_height: u16, density: []const u8) screens.thread.Layout {
-    return screens.thread.layout(area_height, density, .{ .outer_reserved_rows = thread_outer_reserved_rows });
-}
-
 fn threadLayoutForTerminal(self: *const App) screens.thread.Layout {
-    return threadLayout(screenBodySizeForTerminal(self.terminal_size).height, self.config.interface.list_density);
-}
-
-fn detailLayout(area_height: u16, density: []const u8) screens.detail.Layout {
-    // The Go version computed detail density from full terminal height. Chasen
-    // renders inside a panel plus global status row, so compensate for that
-    // outer chrome while keeping Detail's child surface as the drawing boundary.
-    return screens.detail.layout(area_height, density, .{ .outer_reserved_rows = detail_outer_reserved_rows });
+    return layout_mod.threadLayout(layout_mod.screenBodySizeForTerminal(self.terminal_size).height, self.config.interface.list_density);
 }
 
 fn detailLayoutForTerminal(self: *const App) screens.detail.Layout {
-    return detailLayout(screenBodySizeForTerminal(self.terminal_size).height, self.config.interface.list_density);
-}
-
-fn screenBodySizeForTerminal(terminal_size: chasen.Size) chasen.Size {
-    const shell_rect = chasen.Rect{
-        .col = 0,
-        .row = 0,
-        .width = terminal_size.width,
-        .height = terminal_size.height -| 1,
-    };
-    const body_rect = ui.Panel.contentRectFor(shell_rect, .all(1));
-    return .{
-        .width = body_rect.width,
-        .height = @max(@as(u16, 1), body_rect.height),
-    };
-}
-
-fn surfaceRect(surface: *const chasen.Surface) chasen.Rect {
-    const size = surface.size();
-    return .{ .col = 0, .row = 0, .width = size.width, .height = size.height };
+    return layout_mod.detailLayout(layout_mod.screenBodySizeForTerminal(self.terminal_size).height, self.config.interface.list_density);
 }
 
 fn freePendingHotGameStatsTasks(ctx: *chasen.Ctx(App.Msg)) void {
@@ -4372,7 +4234,7 @@ test "app starts on setup token screen without configured token" {
 }
 
 test "screen body size follows shell panel content rect" {
-    const body_size = screenBodySizeForTerminal(.{ .width = 80, .height = 10 });
+    const body_size = layout_mod.screenBodySizeForTerminal(.{ .width = 80, .height = 10 });
 
     try std.testing.expectEqual(@as(u16, 76), body_size.width);
     try std.testing.expectEqual(@as(u16, 5), body_size.height);
@@ -5875,13 +5737,13 @@ test "collection list image preview waits before uncached PNG download" {
 
 test "collection list image panel avoids status picker area" {
     const config: config_mod.Config = .{};
-    const compact_size = chasen.Size{ .width = list_image_min_text_width + list_image_panel_gap + list_image_panel_width, .height = 20 };
+    const compact_size = chasen.Size{ .width = layout_mod.list_image_min_text_width + list_image_panel_gap + layout_mod.list_image_panel_width, .height = 20 };
     const compact_picker_row = @max(collection_body_row, compact_size.height -| (collection_status_picker_lines + 1));
-    try std.testing.expectEqual(@as(?chasen.Rect, null), listImagePanelRectForSize(config, compact_size, collection_body_row, compact_picker_row));
+    try std.testing.expectEqual(@as(?chasen.Rect, null), layout_mod.listImagePanelRectForSize(config, compact_size, collection_body_row, compact_picker_row));
 
-    const roomy_size = chasen.Size{ .width = list_image_min_text_width + list_image_panel_gap + list_image_panel_width, .height = 34 };
+    const roomy_size = chasen.Size{ .width = layout_mod.list_image_min_text_width + list_image_panel_gap + layout_mod.list_image_panel_width, .height = 34 };
     const roomy_picker_row = @max(collection_body_row, roomy_size.height -| (collection_status_picker_lines + 1));
-    const rect = listImagePanelRectForSize(config, roomy_size, collection_body_row, roomy_picker_row).?;
+    const rect = layout_mod.listImagePanelRectForSize(config, roomy_size, collection_body_row, roomy_picker_row).?;
     try std.testing.expect(rect.row + rect.height < roomy_picker_row);
 }
 
@@ -6946,111 +6808,6 @@ test "invalid search submit invalidates in-flight search results" {
 
     try std.testing.expect(app.search.load_state == .failed);
     try std.testing.expectEqual(@as(usize, 0), app.search.list.items.len);
-}
-
-test "surfaceRect creates a root-relative rectangle" {
-    var ts: chasen.testing.TestSurface = undefined;
-    try ts.init(80, 24);
-    defer ts.deinit();
-
-    try std.testing.expectEqual(chasen.Rect{
-        .col = 0,
-        .row = 0,
-        .width = 80,
-        .height = 24,
-    }, surfaceRect(&ts.surface));
-}
-
-test "list surface keeps stats columns visible" {
-    var ts: chasen.testing.TestSurface = undefined;
-    try ts.init(120, 40);
-    defer ts.deinit();
-
-    const area = listSurface(&ts.surface, 40);
-
-    try std.testing.expectEqual(list_screen_min_stats_width, area.size().width);
-    try std.testing.expectEqual(list_screen_max_height, area.size().height);
-}
-
-test "list surface can expand beyond stats minimum" {
-    var ts: chasen.testing.TestSurface = undefined;
-    try ts.init(140, 40);
-    defer ts.deinit();
-
-    const area = listSurface(&ts.surface, 120);
-
-    try std.testing.expectEqual(@as(u16, 120), area.size().width);
-    try std.testing.expectEqual(list_screen_max_height, area.size().height);
-}
-
-test "list surface shrinks for small terminals" {
-    var ts: chasen.testing.TestSurface = undefined;
-    try ts.init(40, 12);
-    defer ts.deinit();
-
-    const area = listSurface(&ts.surface, 40);
-
-    try std.testing.expectEqual(@as(u16, 40), area.size().width);
-    try std.testing.expectEqual(@as(u16, 12), area.size().height);
-}
-
-test "centered surface shrinks for narrow terminals" {
-    var ts: chasen.testing.TestSurface = undefined;
-    try ts.init(36, 10);
-    defer ts.deinit();
-
-    const area = centeredSurface(&ts.surface, .{ .width = 72, .height = 27 });
-
-    try std.testing.expectEqual(@as(u16, 36), area.size().width);
-    try std.testing.expectEqual(@as(u16, 10), area.size().height);
-}
-
-test "detail surface clamps configured width to available width" {
-    var ts: chasen.testing.TestSurface = undefined;
-    try ts.init(50, 16);
-    defer ts.deinit();
-
-    const area = detailSurface(&ts.surface, 120);
-
-    try std.testing.expectEqual(@as(u16, 50), area.size().width);
-    try std.testing.expectEqual(@as(u16, 16), area.size().height);
-}
-
-test "detail content width reserves room for image panel when enabled" {
-    const full_size = chasen.Size{ .width = 120, .height = 24 };
-    const narrow_size = chasen.Size{ .width = 80, .height = 24 };
-
-    try std.testing.expectEqual(@as(usize, 120), detailContentWidthForSize(.{
-        .display = .{ .detail_width = 120, .show_images = false },
-    }, full_size, "normal"));
-    try std.testing.expectEqual(@as(usize, 120), detailContentWidthForSize(.{
-        .display = .{ .detail_width = 120, .image_protocol = .off },
-    }, full_size, "normal"));
-    try std.testing.expectEqual(@as(usize, 90), detailContentWidthForSize(.{
-        .display = .{ .detail_width = 120, .show_images = true, .image_protocol = .auto },
-    }, full_size, "normal"));
-    try std.testing.expectEqual(@as(usize, 80), detailContentWidthForSize(.{
-        .display = .{ .detail_width = 80, .show_images = true, .image_protocol = .auto },
-    }, narrow_size, "normal"));
-}
-
-test "detail image panel requires enough width and enabled images" {
-    var ts: chasen.testing.TestSurface = undefined;
-    try ts.init(120, 24);
-    defer ts.deinit();
-
-    var app = App.create(.{
-        .api = .{ .token = "token" },
-        .display = .{ .show_images = true, .image_protocol = .auto },
-    }, .{});
-    const layout_value = detailLayout(24, "normal");
-
-    const rect = app.detailImagePanelRect(&ts.surface, layout_value).?;
-    try std.testing.expectEqual(@as(u16, 92), rect.col);
-    try std.testing.expectEqual(@as(u16, detail_image_panel_width), rect.width);
-
-    app.config.display.image_protocol = .off;
-    try std.testing.expect(app.detailImagePanelRect(&ts.surface, layout_value) == null);
 }
 
 test "effective detail content width uses clamped terminal width" {
