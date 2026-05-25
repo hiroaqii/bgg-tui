@@ -3,9 +3,6 @@ const chasen = @import("chasen");
 const anim = @import("chasen_anim");
 const ui = @import("chasen_ui");
 
-const bgg_client = @import("bgg/client.zig");
-const bgg_endpoint = @import("bgg/endpoint.zig");
-const bgg_error = @import("bgg/error.zig");
 const bgg_model = @import("bgg/model.zig");
 const bgg_xml = @import("bgg/xml.zig");
 const browser = @import("browser.zig");
@@ -18,6 +15,7 @@ const list_view = @import("list_view.zig");
 const motion = @import("motion.zig");
 const screens = @import("screens/root.zig");
 const style_mod = @import("style.zig");
+const task_bgg = @import("tasks/bgg.zig");
 const transitions = @import("transitions.zig");
 
 // Keep top-level screens centered until a screen needs its own full-page layout.
@@ -3134,20 +3132,8 @@ const HotGamesState = struct {
     }
 };
 
-const HotGamesResult = union(enum) {
-    ok: []bgg_model.HotGame,
-    failed: []const u8,
-};
-
-const HotGameStatsResult = struct {
-    request_id: u64,
-    result: Result,
-
-    const Result = union(enum) {
-        ok: []bgg_model.Game,
-        failed: []const u8,
-    };
-};
+const HotGamesResult = task_bgg.HotGamesResult;
+const HotGameStatsResult = task_bgg.HotGameStatsResult;
 
 const SetupTokenMsg = union(enum) {
     input: ui.PasswordInput.Msg,
@@ -3339,15 +3325,8 @@ const SearchState = struct {
     }
 };
 
-const SearchResult = union(enum) {
-    ok: []bgg_model.GameSearchResult,
-    failed: []const u8,
-};
-
-const SearchTaskResult = struct {
-    request_id: u64,
-    result: SearchResult,
-};
+const SearchResult = task_bgg.SearchResult;
+const SearchTaskResult = task_bgg.SearchTaskResult;
 
 const SearchMsg = union(enum) {
     input: ui.TextInput.Msg,
@@ -3507,15 +3486,8 @@ const CollectionState = struct {
     }
 };
 
-const CollectionResult = union(enum) {
-    ok: []bgg_model.CollectionItem,
-    failed: []const u8,
-};
-
-const CollectionTaskResult = struct {
-    request_id: u64,
-    result: CollectionResult,
-};
+const CollectionResult = task_bgg.CollectionResult;
+const CollectionTaskResult = task_bgg.CollectionTaskResult;
 
 const CollectionMsg = union(enum) {
     username_input: ui.TextInput.Msg,
@@ -3535,20 +3507,14 @@ const CollectionMsg = union(enum) {
     list: ui.List.Msg,
 };
 
-const GameDetailResult = union(enum) {
-    ok: []bgg_model.Game,
-    failed: []const u8,
-};
+const GameDetailResult = task_bgg.GameDetailResult;
 
 const GameDetailImageResult = union(enum) {
     ok: []u8,
     failed: []const u8,
 };
 
-const GameDetailTaskResult = struct {
-    request_id: u64,
-    result: GameDetailResult,
-};
+const GameDetailTaskResult = task_bgg.GameDetailTaskResult;
 
 const GameDetailImageTaskResult = struct {
     request_id: u64,
@@ -3609,25 +3575,10 @@ const ListImageMsg = union(enum) {
     terminal_image_failed: ListImageTerminalImageFailed,
 };
 
-const ForumListResult = union(enum) {
-    ok: []bgg_model.Forum,
-    failed: []const u8,
-};
-
-const ForumListTaskResult = struct {
-    request_id: u64,
-    result: ForumListResult,
-};
-
-const ForumThreadsResult = union(enum) {
-    ok: bgg_model.ThreadList,
-    failed: []const u8,
-};
-
-const ForumThreadsTaskResult = struct {
-    request_id: u64,
-    result: ForumThreadsResult,
-};
+const ForumListResult = task_bgg.ForumListResult;
+const ForumListTaskResult = task_bgg.ForumListTaskResult;
+const ForumThreadsResult = task_bgg.ForumThreadsResult;
+const ForumThreadsTaskResult = task_bgg.ForumThreadsTaskResult;
 
 const ForumMsg = union(enum) {
     open,
@@ -3641,15 +3592,8 @@ const ForumMsg = union(enum) {
     previous_page,
 };
 
-const ThreadResult = union(enum) {
-    ok: bgg_model.Thread,
-    failed: []const u8,
-};
-
-const ThreadTaskResult = struct {
-    request_id: u64,
-    result: ThreadResult,
-};
+const ThreadResult = task_bgg.ThreadResult;
+const ThreadTaskResult = task_bgg.ThreadTaskResult;
 
 const ThreadMsg = union(enum) {
     loaded: ThreadTaskResult,
@@ -3715,7 +3659,7 @@ const HotGamesTask = struct {
             allocator.destroy(task);
         }
 
-        return .{ .hot_games = .{ .loaded = loadHotGames(allocator, io, task.token) catch |err| .{ .failed = @errorName(err) } } };
+        return .{ .hot_games = .{ .loaded = task_bgg.loadHotGames(allocator, io, task.token) catch |err| .{ .failed = @errorName(err) } } };
     }
 };
 
@@ -3734,7 +3678,7 @@ const HotGameStatsTask = struct {
 
         return .{ .hot_games = .{ .stats_loaded = .{
             .request_id = task.request_id,
-            .result = loadHotGameStats(allocator, io, task.token, task.ids) catch |err| .{ .failed = @errorName(err) },
+            .result = task_bgg.loadHotGameStats(allocator, io, task.token, task.ids) catch |err| .{ .failed = @errorName(err) },
         } } };
     }
 };
@@ -3754,7 +3698,7 @@ const SearchTask = struct {
 
         return .{ .search = .{ .results_loaded = .{
             .request_id = task.request_id,
-            .result = loadSearchResults(allocator, io, task.token, task.query) catch |err| .{ .failed = @errorName(err) },
+            .result = task_bgg.loadSearchResults(allocator, io, task.token, task.query) catch |err| .{ .failed = @errorName(err) },
         } } };
     }
 };
@@ -3774,7 +3718,7 @@ const CollectionTask = struct {
 
         return .{ .collection = .{ .items_loaded = .{
             .request_id = task.request_id,
-            .result = loadCollectionItems(allocator, io, task.token, task.username) catch |err| .{ .failed = @errorName(err) },
+            .result = task_bgg.loadCollectionItems(allocator, io, task.token, task.username) catch |err| .{ .failed = @errorName(err) },
         } } };
     }
 };
@@ -3793,7 +3737,7 @@ const GameDetailTask = struct {
 
         return .{ .game_detail = .{ .loaded = .{
             .request_id = task.request_id,
-            .result = loadGameDetail(allocator, io, task.token, task.game_id) catch |err| .{ .failed = @errorName(err) },
+            .result = task_bgg.loadGameDetail(allocator, io, task.token, task.game_id) catch |err| .{ .failed = @errorName(err) },
         } } };
     }
 };
@@ -3898,7 +3842,7 @@ const ForumListTask = struct {
 
         return .{ .forum = .{ .loaded = .{
             .request_id = task.request_id,
-            .result = loadForumList(allocator, io, task.token, task.game_id) catch |err| .{ .failed = @errorName(err) },
+            .result = task_bgg.loadForumList(allocator, io, task.token, task.game_id) catch |err| .{ .failed = @errorName(err) },
         } } };
     }
 };
@@ -3918,7 +3862,7 @@ const ForumThreadsTask = struct {
 
         return .{ .forum = .{ .threads_loaded = .{
             .request_id = task.request_id,
-            .result = loadForumThreads(allocator, io, task.token, task.forum_id, task.page) catch |err| .{ .failed = @errorName(err) },
+            .result = task_bgg.loadForumThreads(allocator, io, task.token, task.forum_id, task.page) catch |err| .{ .failed = @errorName(err) },
         } } };
     }
 };
@@ -3937,7 +3881,7 @@ const ThreadTask = struct {
 
         return .{ .thread = .{ .loaded = .{
             .request_id = task.request_id,
-            .result = loadThread(allocator, io, task.token, task.thread_id) catch |err| .{ .failed = @errorName(err) },
+            .result = task_bgg.loadThread(allocator, io, task.token, task.thread_id) catch |err| .{ .failed = @errorName(err) },
         } } };
     }
 };
@@ -3968,199 +3912,6 @@ const BrowserOpenTask = struct {
         } } };
     }
 };
-
-fn loadHotGames(allocator: std.mem.Allocator, io: std.Io, token: []const u8) !HotGamesResult {
-    var client = bgg_client.Client.init(allocator, io, .{ .token = token });
-    defer client.deinit();
-
-    const path = try bgg_endpoint.hot(allocator);
-    defer allocator.free(path);
-
-    const result = try client.getPath(path, .generic);
-    switch (result) {
-        .ok => |response| {
-            defer response.deinit(allocator);
-            const games = bgg_xml.parseHotResponse(allocator, response.body) catch |parse_error| switch (parse_error) {
-                error.OutOfMemory => return error.OutOfMemory,
-                else => return .{ .failed = apiErrorMessage(bgg_error.classifyParseError(parse_error)) },
-            };
-            return .{ .ok = games };
-        },
-        .api_error => |err| return .{ .failed = apiErrorMessage(err) },
-    }
-}
-
-fn loadHotGameStats(allocator: std.mem.Allocator, io: std.Io, token: []const u8, ids: []const u32) !HotGameStatsResult.Result {
-    var client = bgg_client.Client.init(allocator, io, .{ .token = token });
-    defer client.deinit();
-
-    var stats: std.ArrayList(bgg_model.Game) = .empty;
-    errdefer {
-        bgg_xml.freeGameItems(allocator, stats.items);
-        stats.deinit(allocator);
-    }
-
-    var start: usize = 0;
-    while (start < ids.len) {
-        const end = @min(start + bgg_endpoint.max_thing_ids, ids.len);
-        const path = try bgg_endpoint.thing(allocator, ids[start..end]);
-        defer allocator.free(path);
-
-        const result = try client.getPath(path, .generic);
-        switch (result) {
-            .ok => |response| {
-                defer response.deinit(allocator);
-                const batch = bgg_xml.parseThingResponse(allocator, response.body) catch |parse_error| switch (parse_error) {
-                    error.OutOfMemory => return error.OutOfMemory,
-                    else => return .{ .failed = apiErrorMessage(bgg_error.classifyParseError(parse_error)) },
-                };
-                var batch_owned = true;
-                errdefer if (batch_owned) bgg_xml.freeGameItems(allocator, batch);
-                defer allocator.free(batch);
-                try stats.appendSlice(allocator, batch);
-                batch_owned = false;
-            },
-            .api_error => |err| return .{ .failed = apiErrorMessage(err) },
-        }
-
-        start = end;
-    }
-
-    return .{ .ok = try stats.toOwnedSlice(allocator) };
-}
-
-fn loadSearchResults(allocator: std.mem.Allocator, io: std.Io, token: []const u8, query: []const u8) !SearchResult {
-    var client = bgg_client.Client.init(allocator, io, .{ .token = token });
-    defer client.deinit();
-
-    const path = try bgg_endpoint.search(allocator, query);
-    defer allocator.free(path);
-
-    const result = try client.getPath(path, .generic);
-    switch (result) {
-        .ok => |response| {
-            defer response.deinit(allocator);
-            const results = bgg_xml.parseSearchResponse(allocator, response.body) catch |parse_error| switch (parse_error) {
-                error.OutOfMemory => return error.OutOfMemory,
-                else => return .{ .failed = apiErrorMessage(bgg_error.classifyParseError(parse_error)) },
-            };
-            return .{ .ok = results };
-        },
-        .api_error => |err| return .{ .failed = apiErrorMessage(err) },
-    }
-}
-
-fn loadCollectionItems(
-    allocator: std.mem.Allocator,
-    io: std.Io,
-    token: []const u8,
-    username: []const u8,
-) !CollectionResult {
-    var client = bgg_client.Client.init(allocator, io, .{ .token = token });
-    defer client.deinit();
-
-    const path = try bgg_endpoint.collection(allocator, username, .{});
-    defer allocator.free(path);
-
-    const result = try client.getPath(path, .collection);
-    switch (result) {
-        .ok => |response| {
-            defer response.deinit(allocator);
-            const items = bgg_xml.parseCollectionResponse(allocator, response.body) catch |parse_error| switch (parse_error) {
-                error.OutOfMemory => return error.OutOfMemory,
-                else => return .{ .failed = apiErrorMessage(bgg_error.classifyParseError(parse_error)) },
-            };
-            return .{ .ok = items };
-        },
-        .api_error => |err| return .{ .failed = apiErrorMessage(err) },
-    }
-}
-
-fn loadGameDetail(allocator: std.mem.Allocator, io: std.Io, token: []const u8, game_id: u32) !GameDetailResult {
-    var client = bgg_client.Client.init(allocator, io, .{ .token = token });
-    defer client.deinit();
-
-    const ids = [_]u32{game_id};
-    const path = try bgg_endpoint.thing(allocator, &ids);
-    defer allocator.free(path);
-
-    const result = try client.getPath(path, .generic);
-    switch (result) {
-        .ok => |response| {
-            defer response.deinit(allocator);
-            const games = bgg_xml.parseThingResponse(allocator, response.body) catch |parse_error| switch (parse_error) {
-                error.OutOfMemory => return error.OutOfMemory,
-                else => return .{ .failed = apiErrorMessage(bgg_error.classifyParseError(parse_error)) },
-            };
-            return .{ .ok = games };
-        },
-        .api_error => |err| return .{ .failed = apiErrorMessage(err) },
-    }
-}
-
-fn loadForumList(allocator: std.mem.Allocator, io: std.Io, token: []const u8, game_id: u32) !ForumListResult {
-    var client = bgg_client.Client.init(allocator, io, .{ .token = token });
-    defer client.deinit();
-
-    const path = try bgg_endpoint.forumList(allocator, game_id);
-    defer allocator.free(path);
-
-    const result = try client.getPath(path, .generic);
-    switch (result) {
-        .ok => |response| {
-            defer response.deinit(allocator);
-            const forums = bgg_xml.parseForumListResponse(allocator, response.body) catch |parse_error| switch (parse_error) {
-                error.OutOfMemory => return error.OutOfMemory,
-                else => return .{ .failed = apiErrorMessage(bgg_error.classifyParseError(parse_error)) },
-            };
-            return .{ .ok = forums };
-        },
-        .api_error => |err| return .{ .failed = apiErrorMessage(err) },
-    }
-}
-
-fn loadForumThreads(allocator: std.mem.Allocator, io: std.Io, token: []const u8, forum_id: u32, page: u32) !ForumThreadsResult {
-    var client = bgg_client.Client.init(allocator, io, .{ .token = token });
-    defer client.deinit();
-
-    const requested_page = if (page == 0) 1 else page;
-    const path = try bgg_endpoint.forum(allocator, forum_id, requested_page);
-    defer allocator.free(path);
-
-    const result = try client.getPath(path, .generic);
-    switch (result) {
-        .ok => |response| {
-            defer response.deinit(allocator);
-            const threads = bgg_xml.parseForumResponse(allocator, response.body, requested_page) catch |parse_error| switch (parse_error) {
-                error.OutOfMemory => return error.OutOfMemory,
-                else => return .{ .failed = apiErrorMessage(bgg_error.classifyParseError(parse_error)) },
-            };
-            return .{ .ok = threads };
-        },
-        .api_error => |err| return .{ .failed = apiErrorMessage(err) },
-    }
-}
-
-fn loadThread(allocator: std.mem.Allocator, io: std.Io, token: []const u8, thread_id: u32) !ThreadResult {
-    var client = bgg_client.Client.init(allocator, io, .{ .token = token });
-    defer client.deinit();
-
-    const path = try bgg_endpoint.thread(allocator, thread_id);
-    defer allocator.free(path);
-
-    const result = try client.getPath(path, .generic);
-    switch (result) {
-        .ok => |response| {
-            defer response.deinit(allocator);
-            const thread = bgg_xml.parseThreadResponse(allocator, response.body) catch |parse_error| switch (parse_error) {
-                error.OutOfMemory => return error.OutOfMemory,
-                else => return .{ .failed = apiErrorMessage(bgg_error.classifyParseError(parse_error)) },
-            };
-            return .{ .ok = thread };
-        },
-        .api_error => |err| return .{ .failed = apiErrorMessage(err) },
-    }
-}
 
 fn drawDescriptionPreview(surface: *chasen.Surface, description: []const u8) void {
     const size = surface.size();
@@ -4233,16 +3984,6 @@ fn labeledFormattedText(allocator: std.mem.Allocator, label: []const u8, write_f
     try out.writer.print("{s}: ", .{label});
     try @call(.auto, write_fn, .{&out.writer} ++ args);
     return try out.toOwnedSlice();
-}
-
-fn apiErrorMessage(err: bgg_error.ApiError) []const u8 {
-    return switch (err) {
-        .auth => |auth| auth.message,
-        .rate_limit => |rate_limit| rate_limit.message,
-        .not_found => "BGG API resource was not found",
-        .network => |network| network.message,
-        .parse => |parse| parse.message,
-    };
 }
 
 fn collectionStatusBit(index: usize) u8 {

@@ -13,6 +13,7 @@ pub const list_view = @import("list_view.zig");
 pub const motion = @import("motion.zig");
 pub const screens = @import("screens/root.zig");
 pub const style = @import("style.zig");
+pub const tasks = @import("tasks/root.zig");
 
 test {
     _ = app;
@@ -27,4 +28,5 @@ test {
     _ = motion;
     _ = screens;
     _ = style;
+    _ = tasks;
 }
