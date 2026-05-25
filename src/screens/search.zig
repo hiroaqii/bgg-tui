@@ -6,11 +6,40 @@ const bgg_model = @import("../bgg/model.zig");
 const bgg_xml = @import("../bgg/xml.zig");
 const labels_mod = @import("../labels.zig");
 const list_filter = @import("../list_filter.zig");
+const list_view = @import("../list_view.zig");
 const list_sort = @import("../list_sort.zig");
+const motion = @import("../motion.zig");
 const task_bgg = @import("../tasks/bgg.zig");
+
+const filter_row: u16 = 4;
+const position_row: u16 = 2;
+const body_row: u16 = 4;
+const filtered_body_row: u16 = 6;
+const footer_gap: u16 = 1;
 
 pub const Result = task_bgg.SearchResult;
 pub const TaskResult = task_bgg.SearchTaskResult;
+
+pub const InputViewOptions = struct {
+    title_style: chasen.TextStyle,
+    muted_title_style: chasen.TextStyle,
+    muted_style: chasen.TextStyle,
+    subtle_style: chasen.TextStyle,
+    footer_hint: []const u8,
+    loading_scan_frame: u64,
+};
+
+pub const ResultsViewOptions = struct {
+    title_style: chasen.TextStyle,
+    focused_style: chasen.TextStyle,
+    muted_style: chasen.TextStyle,
+    subtle_style: chasen.TextStyle,
+    footer_hint: []const u8,
+    list_density: list_view.Density,
+    selection: []const u8,
+    animation_frame: u64,
+    loading_scan_frame: u64,
+};
 
 pub const Msg = union(enum) {
     input: ui.TextInput.Msg,
@@ -214,6 +243,60 @@ pub const State = struct {
         }
     }
 
+    pub fn viewInput(self: *const State, area: *chasen.Surface, opts: InputViewOptions) void {
+        _ = area.borrowTextAt(0, 0, "Search Games", opts.title_style);
+
+        if (self.input) |*input| {
+            var input_area = area.child(.{ .col = 0, .row = 2, .width = @min(area.size().width, 48), .height = 1 });
+            input.view(&input_area, .{});
+        }
+
+        switch (self.load_state) {
+            .idle => drawGuidance(area, 4, "Search board games", "Enter at least 3 characters and press Enter.", opts.muted_title_style, opts.muted_style),
+            .loading => drawLoadingGuidance(area, 4, "Search board games", "Search request is running...", opts.muted_title_style, opts.muted_style, opts.loading_scan_frame),
+            .failed => |message| drawGuidance(area, 4, "Could not search games.", message, opts.muted_title_style, opts.muted_style),
+            .loaded => drawGuidance(area, 4, "Search complete", "Press Enter to run a new search.", opts.muted_title_style, opts.muted_style),
+        }
+
+        _ = area.borrowTextAt(0, area.size().height -| 1, opts.footer_hint, opts.subtle_style);
+    }
+
+    pub fn viewResults(self: *const State, area: *chasen.Surface, opts: ResultsViewOptions) !void {
+        _ = try area.printAt(0, 0, opts.title_style, "Search Results ({s})", .{self.sort_mode.label(.search_results)});
+
+        switch (self.load_state) {
+            .idle => drawCenteredGuidance(area, "No search yet", "Run a search to see matching board games."),
+            .loading => drawCenteredLoadingGuidance(area, "Search Results", "Searching BoardGameGeek...", opts.muted_style, opts.loading_scan_frame),
+            .failed => |message| drawCenteredGuidance(area, "Could not search games.", message),
+            .loaded => {
+                if (self.list.items.len == 0) {
+                    drawCenteredGuidance(area, "No results", "No games matched the current query.");
+                } else if (self.filter_active and self.filter.labels.len == 0) {
+                    self.drawFilterInput(area, filter_row, opts.subtle_style);
+                    drawCenteredGuidanceKeepingCursor(area, "No matches", "No search results match the filter.");
+                } else {
+                    const current_body_row = if (self.filter_active) filtered_body_row else body_row;
+                    if (self.filter_active) self.drawFilterInput(area, filter_row, opts.subtle_style);
+                    const list = self.activeList();
+                    var list_area = area.child(.{
+                        .col = 0,
+                        .row = current_body_row,
+                        .width = area.size().width,
+                        .height = area.size().height -| (current_body_row + 1 + footer_gap),
+                    });
+                    list_view.viewListWithDensitySelection(list, &list_area, .{
+                        .focused_style = opts.focused_style,
+                        .show_cursor = false,
+                    }, opts.list_density, opts.selection, opts.animation_frame);
+                    try drawListPosition(area, list, opts.subtle_style);
+                    drawSortMode(area, self.sort_mode.label(.search_results), opts.subtle_style);
+                }
+            },
+        }
+
+        _ = area.borrowTextAt(0, area.size().height -| 1, opts.footer_hint, opts.subtle_style);
+    }
+
     pub fn deinit(self: *State, allocator: std.mem.Allocator) void {
         self.clearResults(allocator);
         self.load_state = .idle;
@@ -261,6 +344,47 @@ pub const State = struct {
         self.filter_active = false;
     }
 };
+
+fn drawGuidance(surface: *chasen.Surface, row: u16, title: []const u8, message: []const u8, title_style: chasen.TextStyle, message_style: chasen.TextStyle) void {
+    _ = surface.borrowTextAt(0, row, title, title_style);
+    _ = surface.borrowTextAt(0, row + 1, message, message_style);
+}
+
+fn drawLoadingGuidance(surface: *chasen.Surface, row: u16, title: []const u8, message: []const u8, title_style: chasen.TextStyle, message_style: chasen.TextStyle, frame: u64) void {
+    _ = surface.borrowTextAt(0, row, title, title_style);
+    motion.drawStatusScanText(surface, 0, row + 1, message, message_style, frame);
+}
+
+fn drawCenteredGuidance(surface: *chasen.Surface, title: []const u8, message: []const u8) void {
+    const block = ui.MessageBlock.init(.{ .title = title, .message = message });
+    block.view(surface, .{});
+}
+
+fn drawCenteredLoadingGuidance(surface: *chasen.Surface, title: []const u8, message: []const u8, style: chasen.TextStyle, frame: u64) void {
+    const block = ui.MessageBlock.init(.{ .title = title, .message = message });
+    block.view(surface, .{});
+    if (block.layout(surface.size()).message) |point| {
+        motion.drawStatusScanText(surface, point.col, point.row, message, style, frame);
+    }
+}
+
+fn drawCenteredGuidanceKeepingCursor(surface: *chasen.Surface, title: []const u8, message: []const u8) void {
+    const block = ui.MessageBlock.init(.{ .title = title, .message = message });
+    block.view(surface, .{ .hide_cursor = false });
+}
+
+fn drawListPosition(surface: *chasen.Surface, list: *const ui.List, style: chasen.TextStyle) !void {
+    const item_count = list.items.len;
+    if (item_count == 0 or surface.size().height < 2) return;
+
+    const text = try list_view.focusedPositionText(surface.frameAllocator(), list.focusedIndex(), item_count);
+    _ = surface.borrowTextAt(0, position_row, text, style);
+}
+
+fn drawSortMode(surface: *chasen.Surface, label: []const u8, style: chasen.TextStyle) void {
+    if (surface.size().width <= 12 or surface.size().height <= position_row) return;
+    _ = surface.borrowTextAt(10, position_row, label, style);
+}
 
 fn searchResultNameLessThan(results: []const bgg_model.GameSearchResult, lhs: usize, rhs: usize) bool {
     const order = compareAsciiIgnoreCase(results[lhs].name, results[rhs].name);

@@ -555,72 +555,29 @@ pub const App = struct {
 
     fn viewSearch(self: *const App, sfc: *chasen.Surface) !void {
         var area = layout_mod.centeredSurface(sfc, search_input_size);
-        _ = area.borrowTextAt(0, 0, "Search Games", self.titleStyle());
-
-        if (self.search.input) |*input| {
-            var input_area = area.child(.{ .col = 0, .row = 2, .width = @min(area.size().width, 48), .height = 1 });
-            input.view(&input_area, .{});
-        }
-
-        switch (self.search.load_state) {
-            .idle => {
-                self.drawGuidance(&area, 4, "Search board games", "Enter at least 3 characters and press Enter.");
-            },
-            .loading => {
-                self.drawLoadingGuidance(&area, 4, "Search board games", "Search request is running...");
-            },
-            .failed => |message| {
-                self.drawGuidance(&area, 4, "Could not search games.", message);
-            },
-            .loaded => {
-                self.drawGuidance(&area, 4, "Search complete", "Press Enter to run a new search.");
-            },
-        }
-
-        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), self.subtleStyle());
+        self.search.viewInput(&area, .{
+            .title_style = self.titleStyle(),
+            .muted_title_style = self.mutedTitleStyle(),
+            .muted_style = self.mutedStyle(),
+            .subtle_style = self.subtleStyle(),
+            .footer_hint = self.footerHint(),
+            .loading_scan_frame = self.loadingScanFrame(),
+        });
     }
 
     fn viewSearchResults(self: *const App, sfc: *chasen.Surface) !void {
         var area = layout_mod.listSurface(sfc, self.config.display.list_width);
-        _ = try area.printAt(0, 0, self.titleStyle(), "Search Results ({s})", .{self.search.sort_mode.label(.search_results)});
-
-        switch (self.search.load_state) {
-            .idle => {
-                self.drawCenteredGuidance(&area, "No search yet", "Run a search to see matching board games.");
-            },
-            .loading => {
-                self.drawCenteredLoadingGuidance(&area, "Search Results", "Searching BoardGameGeek...");
-            },
-            .failed => |message| {
-                self.drawCenteredGuidance(&area, "Could not search games.", message);
-            },
-            .loaded => {
-                if (self.search.list.items.len == 0) {
-                    self.drawCenteredGuidance(&area, "No results", "No games matched the current query.");
-                } else if (self.search.filter_active and self.search.filter.labels.len == 0) {
-                    self.search.drawFilterInput(&area, list_filter_row, self.subtleStyle());
-                    self.drawCenteredGuidanceKeepingCursor(&area, "No matches", "No search results match the filter.");
-                } else {
-                    const body_row = if (self.search.filter_active) list_filtered_body_row else list_body_row;
-                    if (self.search.filter_active) self.search.drawFilterInput(&area, list_filter_row, self.subtleStyle());
-                    const list = self.search.activeList();
-                    var list_area = area.child(.{
-                        .col = 0,
-                        .row = body_row,
-                        .width = area.size().width,
-                        .height = area.size().height -| (body_row + 1 + list_footer_gap),
-                    });
-                    list_view.viewListWithDensitySelection(list, &list_area, .{
-                        .focused_style = self.focusedStyle(),
-                        .show_cursor = false,
-                    }, self.listDensity(), self.config.interface.selection, self.animation_frame);
-                    try self.drawListPosition(&area, list);
-                    self.drawSortMode(&area, self.search.sort_mode.label(.search_results));
-                }
-            },
-        }
-
-        _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), self.subtleStyle());
+        try self.search.viewResults(&area, .{
+            .title_style = self.titleStyle(),
+            .focused_style = self.focusedStyle(),
+            .muted_style = self.mutedStyle(),
+            .subtle_style = self.subtleStyle(),
+            .footer_hint = self.footerHint(),
+            .list_density = self.listDensity(),
+            .selection = self.config.interface.selection,
+            .animation_frame = self.animation_frame,
+            .loading_scan_frame = self.loadingScanFrame(),
+        });
     }
 
     fn viewCollection(self: *const App, sfc: *chasen.Surface) !void {
