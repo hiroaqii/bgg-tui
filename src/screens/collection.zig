@@ -8,6 +8,9 @@ const labels_mod = @import("../labels.zig");
 const list_filter = @import("../list_filter.zig");
 const task_bgg = @import("../tasks/bgg.zig");
 
+const filter_row: u16 = 4;
+const username_row: u16 = 2;
+
 pub const Result = task_bgg.CollectionResult;
 pub const TaskResult = task_bgg.CollectionTaskResult;
 
@@ -72,6 +75,12 @@ pub const Msg = union(enum) {
     status_close,
     items_loaded: TaskResult,
     list: ui.List.Msg,
+};
+
+pub const EventAction = union(enum) {
+    msg: Msg,
+    main_menu,
+    quit,
 };
 
 pub const State = struct {
@@ -154,6 +163,64 @@ pub const State = struct {
         return self.list.handleEvent(event);
     }
 
+    pub fn handleScreenEvent(self: *const State, event: chasen.Event) ?EventAction {
+        if (self.status_picker) {
+            switch (event) {
+                .key_press => |key| {
+                    if (key.matches(chasen.Key.escape, .{})) return .{ .msg = .status_close };
+                    if (key.matches(chasen.Key.up, .{}) or key.codepoint == 'k') return .{ .msg = .status_move_prev };
+                    if (key.matches(chasen.Key.down, .{}) or key.codepoint == 'j') return .{ .msg = .status_move_next };
+                    if (key.matches(chasen.Key.enter, .{})) return .{ .msg = .status_toggle };
+                },
+                else => {},
+            }
+            return null;
+        }
+
+        if (self.filter_active) {
+            switch (event) {
+                .key_press => |key| {
+                    if (key.matches(chasen.Key.escape, .{})) return .{ .msg = .filter_clear };
+                    if (key.matches(chasen.Key.enter, .{})) {
+                        if (self.handleEvent(event)) |msg| return .{ .msg = .{ .list = msg } };
+                        return null;
+                    }
+                },
+                .paste => |text| return .{ .msg = .{ .filter_paste = text } },
+                else => {},
+            }
+            if (self.filter_input) |*input| {
+                if (input.handleEvent(event)) |msg| return .{ .msg = .{ .filter_input = msg } };
+            }
+            if (self.handleEvent(event)) |msg| return .{ .msg = .{ .list = msg } };
+            return null;
+        }
+
+        switch (event) {
+            .key_press => |key| {
+                if (self.load_state == .loaded) {
+                    if (key.codepoint == 's') return .{ .msg = .status_open };
+                    if (key.codepoint == '/') return .{ .msg = .filter_start };
+                    if (key.codepoint == 'u') return .{ .msg = .change_user };
+                    if (key.codepoint == 'r') return .{ .msg = .refresh };
+                    if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'm') return .main_menu;
+                    if (key.codepoint == 'q') return .quit;
+                } else if (key.matches(chasen.Key.escape, .{})) {
+                    return .main_menu;
+                }
+            },
+            .paste => |text| if (self.load_state != .loaded) return .{ .msg = .{ .username_paste = text } },
+            else => {},
+        }
+
+        if (self.load_state == .loaded) {
+            if (self.handleEvent(event)) |msg| return .{ .msg = .{ .list = msg } };
+        } else if (self.username_input) |*input| {
+            if (input.handleEvent(event)) |msg| return .{ .msg = .{ .username_input = msg } };
+        }
+        return null;
+    }
+
     pub fn activeList(self: *const State) *const ui.List {
         if (self.filter_active) return &self.filter.list;
         return &self.list;
@@ -200,6 +267,32 @@ pub const State = struct {
     pub fn clearFilter(self: *State, allocator: std.mem.Allocator) void {
         self.filter.deinit(allocator);
         self.filter_active = false;
+    }
+
+    pub fn drawUsernameInput(self: *const State, surface: *chasen.Surface, style: chasen.TextStyle) void {
+        _ = surface.borrowTextAt(0, username_row, "User:", style);
+        if (self.username_input) |*input| {
+            var input_area = surface.child(.{
+                .col = 6,
+                .row = username_row,
+                .width = surface.size().width -| 6,
+                .height = 1,
+            });
+            input.view(&input_area, .{});
+        }
+    }
+
+    pub fn drawFilterInput(self: *const State, surface: *chasen.Surface, style: chasen.TextStyle) void {
+        _ = surface.borrowTextAt(0, filter_row, "Filter:", style);
+        if (self.filter_input) |*input| {
+            var input_area = surface.child(.{
+                .col = 8,
+                .row = filter_row,
+                .width = surface.size().width -| 8,
+                .height = 1,
+            });
+            input.view(&input_area, .{});
+        }
     }
 
     pub fn deinit(self: *State, allocator: std.mem.Allocator) void {
@@ -303,4 +396,90 @@ test "collection focus resets and clamps after status projection" {
     try state.applyStatusFilter(std.testing.allocator, statusBit(0));
     try std.testing.expectEqual(@as(usize, 0), state.activeList().focusedIndex());
     try std.testing.expectEqual(@as(u32, 1), state.items[state.sourceIndex(0).?].id);
+}
+
+test "collection screen event routes loaded list activation and shortcuts" {
+    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 1);
+    items[0] = .{ .id = 13, .name = try std.testing.allocator.dupe(u8, "CATAN"), .owned = true };
+
+    var state: State = .{};
+    try state.setLoaded(std.testing.allocator, items, 0);
+    defer state.deinit(std.testing.allocator);
+
+    const activate = state.handleScreenEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
+    try std.testing.expect(activate == .msg);
+    try std.testing.expectEqual(ui.List.Msg{ .activate = 0 }, activate.msg.list);
+
+    const filter = state.handleScreenEvent(.{ .key_press = .{ .codepoint = '/' } }).?;
+    try std.testing.expect(filter == .msg);
+    try std.testing.expect(filter.msg == .filter_start);
+
+    const status = state.handleScreenEvent(.{ .key_press = .{ .codepoint = 's' } }).?;
+    try std.testing.expect(status == .msg);
+    try std.testing.expect(status.msg == .status_open);
+
+    const change_user = state.handleScreenEvent(.{ .key_press = .{ .codepoint = 'u' } }).?;
+    try std.testing.expect(change_user == .msg);
+    try std.testing.expect(change_user.msg == .change_user);
+
+    const refresh = state.handleScreenEvent(.{ .key_press = .{ .codepoint = 'r' } }).?;
+    try std.testing.expect(refresh == .msg);
+    try std.testing.expect(refresh.msg == .refresh);
+}
+
+test "collection screen event routes status picker controls" {
+    var state: State = .{ .status_picker = true };
+
+    const prev = state.handleScreenEvent(.{ .key_press = .{ .codepoint = 'k' } }).?;
+    try std.testing.expect(prev == .msg);
+    try std.testing.expect(prev.msg == .status_move_prev);
+
+    const next = state.handleScreenEvent(.{ .key_press = .{ .codepoint = 'j' } }).?;
+    try std.testing.expect(next == .msg);
+    try std.testing.expect(next.msg == .status_move_next);
+
+    const toggle = state.handleScreenEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
+    try std.testing.expect(toggle == .msg);
+    try std.testing.expect(toggle.msg == .status_toggle);
+
+    const close = state.handleScreenEvent(.{ .key_press = .{ .codepoint = chasen.Key.escape } }).?;
+    try std.testing.expect(close == .msg);
+    try std.testing.expect(close.msg == .status_close);
+}
+
+test "collection screen event routes active filter input" {
+    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 1);
+    items[0] = .{ .id = 13, .name = try std.testing.allocator.dupe(u8, "CATAN") };
+
+    var state: State = .{};
+    state.filter_input = try ui.TextInput.init(std.testing.allocator, .{});
+    try state.setLoaded(std.testing.allocator, items, 0);
+    try state.applyFilter(std.testing.allocator, "");
+    defer {
+        state.deinitInputs();
+        state.deinit(std.testing.allocator);
+    }
+
+    const paste_action = state.handleScreenEvent(.{ .paste = "cat" }).?;
+    try std.testing.expect(paste_action == .msg);
+    try std.testing.expect(paste_action.msg == .filter_paste);
+    try std.testing.expectEqualStrings("cat", paste_action.msg.filter_paste);
+
+    const clear = state.handleScreenEvent(.{ .key_press = .{ .codepoint = chasen.Key.escape } }).?;
+    try std.testing.expect(clear == .msg);
+    try std.testing.expect(clear.msg == .filter_clear);
+}
+
+test "collection screen event routes username input and navigation" {
+    var state: State = .{};
+    state.username_input = try ui.TextInput.init(std.testing.allocator, .{});
+    defer state.deinitInputs();
+
+    const paste_action = state.handleScreenEvent(.{ .paste = "hiro" }).?;
+    try std.testing.expect(paste_action == .msg);
+    try std.testing.expect(paste_action.msg == .username_paste);
+    try std.testing.expectEqualStrings("hiro", paste_action.msg.username_paste);
+
+    const exit = state.handleScreenEvent(.{ .key_press = .{ .codepoint = chasen.Key.escape } }).?;
+    try std.testing.expect(exit == .main_menu);
 }

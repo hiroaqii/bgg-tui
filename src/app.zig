@@ -35,7 +35,6 @@ const list_image_focus_settle_frames = features.list_image.focus_settle_frames;
 const list_position_row: u16 = 2;
 const list_body_row: u16 = 4;
 const list_footer_gap: u16 = 1;
-const list_filter_row: u16 = 4;
 const list_filtered_body_row: u16 = 6;
 const collection_status_bar_row: u16 = 3;
 const collection_body_row: u16 = 5;
@@ -309,57 +308,7 @@ pub const App = struct {
         }
 
         if (self.screen == .collection) {
-            if (self.collection.status_picker) {
-                switch (event) {
-                    .key_press => |key| {
-                        if (key.matches(chasen.Key.escape, .{})) return .{ .collection = .status_close };
-                        if (key.matches(chasen.Key.up, .{}) or key.codepoint == 'k') return .{ .collection = .status_move_prev };
-                        if (key.matches(chasen.Key.down, .{}) or key.codepoint == 'j') return .{ .collection = .status_move_next };
-                        if (key.matches(chasen.Key.enter, .{})) return .{ .collection = .status_toggle };
-                    },
-                    else => {},
-                }
-                return null;
-            }
-            if (self.collection.filter_active) {
-                switch (event) {
-                    .key_press => |key| {
-                        if (key.matches(chasen.Key.escape, .{})) return .{ .collection = .filter_clear };
-                        if (key.matches(chasen.Key.enter, .{})) {
-                            if (self.collection.handleEvent(event)) |msg| return .{ .collection = .{ .list = msg } };
-                            return null;
-                        }
-                    },
-                    .paste => |text| return .{ .collection = .{ .filter_paste = text } },
-                    else => {},
-                }
-                if (self.collection.filter_input) |*input| {
-                    if (input.handleEvent(event)) |msg| return .{ .collection = .{ .filter_input = msg } };
-                }
-                if (self.collection.handleEvent(event)) |msg| return .{ .collection = .{ .list = msg } };
-                return null;
-            }
-            switch (event) {
-                .key_press => |key| {
-                    if (self.collection.load_state == .loaded) {
-                        if (key.codepoint == 's') return .{ .collection = .status_open };
-                        if (key.codepoint == '/') return .{ .collection = .filter_start };
-                        if (key.codepoint == 'u') return .{ .collection = .change_user };
-                        if (key.codepoint == 'r') return .{ .collection = .refresh };
-                        if (key.matches(chasen.Key.escape, .{}) or key.codepoint == 'm') return .{ .show_screen = .main_menu };
-                        if (key.codepoint == 'q') return .quit;
-                    } else if (key.matches(chasen.Key.escape, .{})) {
-                        return .{ .show_screen = .main_menu };
-                    }
-                },
-                .paste => |text| if (self.collection.load_state != .loaded) return .{ .collection = .{ .username_paste = text } },
-                else => {},
-            }
-            if (self.collection.load_state == .loaded) {
-                if (self.collection.handleEvent(event)) |msg| return .{ .collection = .{ .list = msg } };
-            } else if (self.collection.username_input) |*input| {
-                if (input.handleEvent(event)) |msg| return .{ .collection = .{ .username_input = msg } };
-            }
+            if (self.collection.handleScreenEvent(event)) |action| return collectionEventActionToMsg(action);
             return null;
         }
 
@@ -575,14 +524,14 @@ pub const App = struct {
 
         switch (self.collection.load_state) {
             .idle => {
-                try self.drawCollectionUsernameInput(&area);
+                self.collection.drawUsernameInput(&area, self.subtleStyle());
                 self.drawGuidance(&area, 4, "Load collection", "Enter a BGG username and press Enter.");
             },
             .loading => {
                 self.drawCenteredLoadingGuidance(&area, "Collection", "Loading BoardGameGeek collection...");
             },
             .failed => |message| {
-                try self.drawCollectionUsernameInput(&area);
+                self.collection.drawUsernameInput(&area, self.subtleStyle());
                 self.drawGuidance(&area, 4, "Could not load collection.", message);
             },
             .loaded => {
@@ -594,11 +543,11 @@ pub const App = struct {
                         self.drawCenteredGuidance(&area, "No collection items", "BGG did not return any games for this collection.");
                     }
                 } else if (self.collection.filter_active and self.collection.filter.labels.len == 0) {
-                    try self.drawCollectionFilterInput(&area);
+                    self.collection.drawFilterInput(&area, self.subtleStyle());
                     self.drawCenteredGuidanceKeepingCursor(&area, "No matches", "No collection items match the filter.");
                 } else {
                     const body_row = if (self.collection.filter_active) list_filtered_body_row else collection_body_row;
-                    if (self.collection.filter_active) try self.drawCollectionFilterInput(&area);
+                    if (self.collection.filter_active) self.collection.drawFilterInput(&area, self.subtleStyle());
                     const list = self.collection.activeList();
                     const picker_height = if (self.collection.status_picker) collection_status_picker_lines + collection_status_picker_gap else 0;
                     const image_panel_rect = self.collectionListImagePanelRect(&area);
@@ -2301,32 +2250,6 @@ pub const App = struct {
         block.view(surface, .{ .hide_cursor = false });
     }
 
-    fn drawCollectionUsernameInput(self: *const App, surface: *chasen.Surface) !void {
-        _ = surface.borrowTextAt(0, 2, "User:", self.subtleStyle());
-        if (self.collection.username_input) |*input| {
-            var input_area = surface.child(.{
-                .col = 6,
-                .row = 2,
-                .width = surface.size().width -| 6,
-                .height = 1,
-            });
-            input.view(&input_area, .{});
-        }
-    }
-
-    fn drawCollectionFilterInput(self: *const App, surface: *chasen.Surface) !void {
-        _ = surface.borrowTextAt(0, list_filter_row, "Filter:", self.subtleStyle());
-        if (self.collection.filter_input) |*input| {
-            var input_area = surface.child(.{
-                .col = 8,
-                .row = list_filter_row,
-                .width = surface.size().width -| 8,
-                .height = 1,
-            });
-            input.view(&input_area, .{});
-        }
-    }
-
     fn drawCollectionStatusBar(self: *const App, surface: *chasen.Surface) void {
         if (surface.size().height <= collection_status_bar_row) return;
         const text = screens.collection.statusSummary(surface.frameAllocator(), self.collection.status_mask) catch "Status: -";
@@ -3116,6 +3039,14 @@ fn searchEventActionToMsg(action: screens.search.EventAction) App.Msg {
     };
 }
 
+fn collectionEventActionToMsg(action: screens.collection.EventAction) App.Msg {
+    return switch (action) {
+        .msg => |msg| .{ .collection = msg },
+        .main_menu => .{ .show_screen = .main_menu },
+        .quit => .quit,
+    };
+}
+
 fn screenTransitionKind(value: []const u8) anim.TransitionKind {
     return transitions.kindForValue(value);
 }
@@ -3544,71 +3475,6 @@ test "loaded search results receive activation on search results screen" {
     const msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
     try std.testing.expect(msg == .search);
     try std.testing.expectEqual(ui.List.Msg{ .activate = 0 }, msg.search.list);
-}
-
-test "loaded collection receives activation on collection screen" {
-    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
-    app.allocator = std.testing.allocator;
-    app.screen = .collection;
-    defer app.deinitOwnedState();
-
-    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 1);
-    items[0] = .{ .id = 13, .name = try std.testing.allocator.dupe(u8, "CATAN"), .owned = true };
-
-    try app.collection.setLoaded(std.testing.allocator, items, 0);
-
-    const msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
-    try std.testing.expect(msg == .collection);
-    try std.testing.expectEqual(ui.List.Msg{ .activate = 0 }, msg.collection.list);
-}
-
-test "loaded collection slash starts filter" {
-    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
-    app.allocator = std.testing.allocator;
-    app.screen = .collection;
-    defer app.deinitOwnedState();
-
-    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 1);
-    items[0] = .{ .id = 13, .name = try std.testing.allocator.dupe(u8, "CATAN") };
-    try app.collection.setLoaded(std.testing.allocator, items, 0);
-
-    const msg = app.handleEvent(.{ .key_press = .{ .codepoint = '/' } }).?;
-    try std.testing.expect(msg == .collection);
-    try std.testing.expect(msg.collection == .filter_start);
-}
-
-test "loaded collection handles change user and refresh shortcuts" {
-    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
-    app.allocator = std.testing.allocator;
-    app.screen = .collection;
-    defer app.deinitOwnedState();
-
-    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 1);
-    items[0] = .{ .id = 13, .name = try std.testing.allocator.dupe(u8, "CATAN") };
-    try app.collection.setLoaded(std.testing.allocator, items, 0);
-
-    const user_msg = app.handleEvent(.{ .key_press = .{ .codepoint = 'u' } }).?;
-    try std.testing.expect(user_msg == .collection);
-    try std.testing.expect(user_msg.collection == .change_user);
-
-    const refresh_msg = app.handleEvent(.{ .key_press = .{ .codepoint = 'r' } }).?;
-    try std.testing.expect(refresh_msg == .collection);
-    try std.testing.expect(refresh_msg.collection == .refresh);
-}
-
-test "loaded collection s opens status picker" {
-    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
-    app.allocator = std.testing.allocator;
-    app.screen = .collection;
-    defer app.deinitOwnedState();
-
-    const items = try std.testing.allocator.alloc(bgg_model.CollectionItem, 1);
-    items[0] = .{ .id = 13, .name = try std.testing.allocator.dupe(u8, "CATAN") };
-    try app.collection.setLoaded(std.testing.allocator, items, 0);
-
-    const msg = app.handleEvent(.{ .key_press = .{ .codepoint = 's' } }).?;
-    try std.testing.expect(msg == .collection);
-    try std.testing.expect(msg.collection == .status_open);
 }
 
 test "collection status picker toggles multiple statuses without request" {
