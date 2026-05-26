@@ -180,6 +180,8 @@ pub const App = struct {
     pub fn view(self: *const App, sfc: *chasen.Surface) !void {
         const size = sfc.size();
         if (size.width == 0 or size.height == 0) return;
+        const render_config = self.effectiveRenderConfig();
+        const render_theme = style_mod.Theme.fromName(render_config.interface.color_theme);
 
         // Reserve the last row for global status; screens render inside the panel body.
         const status_row = if (size.height > 0) size.height - 1 else 0;
@@ -191,9 +193,9 @@ pub const App = struct {
         });
         const shell_frame = ui.Panel.frame(&shell_area, .{
             .title = "BoardGameGeek",
-            .border = self.panelBorder(),
-            .border_style = self.theme().border,
-            .title_style = self.theme().title,
+            .border = style_mod.borderFromName(render_config.interface.border_style),
+            .border_style = render_theme.border,
+            .title_style = render_theme.title,
         });
         shell_frame.view();
 
@@ -307,6 +309,18 @@ pub const App = struct {
         }
 
         if (self.screen == .settings) {
+            if (self.settings.pickerOpen()) {
+                switch (event) {
+                    .key_press => |key| {
+                        if (key.matches(chasen.Key.escape, .{})) return .{ .settings = .picker_cancel };
+                        if (key.matches(chasen.Key.enter, .{})) return .{ .settings = .picker_confirm };
+                        if (key.matches(chasen.Key.up, .{}) or key.codepoint == 'k') return .{ .settings = .picker_move_prev };
+                        if (key.matches(chasen.Key.down, .{}) or key.codepoint == 'j') return .{ .settings = .picker_move_next };
+                    },
+                    else => {},
+                }
+                return null;
+            }
             if (self.settings.editing) |field| {
                 switch (event) {
                     .key_press => |key| {
@@ -351,7 +365,10 @@ pub const App = struct {
                 .key_press => |key| {
                     if (key.matches(chasen.Key.enter, .{})) {
                         if (self.settings.isShowImagesFocused()) return .{ .settings = .show_images_toggle };
-                        if (self.settings.focusedCycleField()) |field| return .{ .settings = .{ .cycle_next = field } };
+                        if (self.settings.focusedCycleField()) |field| {
+                            if (screens.settings.pickerValues(field) != null) return .{ .settings = .{ .picker_open = field } };
+                            return .{ .settings = .{ .cycle_next = field } };
+                        }
                         if (self.settings.focusedEditField()) |field| {
                             return switch (field) {
                                 .token => .{ .settings = .token_start },
@@ -459,7 +476,9 @@ pub const App = struct {
 
     fn viewSettings(self: *const App, sfc: *chasen.Surface) !void {
         var area = layout_mod.centeredSurface(sfc, screens.settings.required_size);
-        try self.settings.view(&area, self.config, self.config_path, self.theme(), self.config.interface.selection, self.animation_frame);
+        const render_config = self.effectiveRenderConfig();
+        const render_theme = style_mod.Theme.fromName(render_config.interface.color_theme);
+        try self.settings.view(&area, render_config, self.config_path, render_theme, render_config.interface.selection, self.animation_frame);
     }
 
     fn viewHotGames(self: *const App, sfc: *chasen.Surface) !void {
@@ -865,6 +884,11 @@ pub const App = struct {
             .width_cancel => self.cancelSettingsWidthEdit(),
             .show_images_toggle => try self.toggleSettingsShowImages(ctx),
             .cycle_next => |field| try self.cycleSettingsField(ctx, field),
+            .picker_open => |field| self.settings.openPicker(field, self.config, self.animation_frame),
+            .picker_move_prev => self.settings.movePickerPrev(self.animation_frame),
+            .picker_move_next => self.settings.movePickerNext(self.animation_frame),
+            .picker_confirm => try self.confirmSettingsPicker(ctx),
+            .picker_cancel => self.settings.closePicker(),
             .list => |list_msg| self.settings.updateList(list_msg),
         }
     }
@@ -978,7 +1002,7 @@ pub const App = struct {
                 self.config.interface.selection = nextCycleValue(self.config.interface.selection, &selection_values);
                 self.requestMotionFrameIfNeeded(ctx);
             },
-            .border_style => self.config.interface.border_style = nextCycleValue(self.config.interface.border_style, &border_style_values),
+            .border_style => self.config.interface.border_style = nextCycleValue(self.config.interface.border_style, &screens.settings.border_style_values),
             .list_density => self.config.interface.list_density = nextCycleValue(self.config.interface.list_density, &list_density_values),
             .date_format => self.config.interface.date_format = nextCycleValue(self.config.interface.date_format, &date_format_values),
             .image_protocol => {
@@ -986,6 +1010,17 @@ pub const App = struct {
                 try self.syncListImagePreview(ctx);
             },
         }
+        try self.saveConfigIfAvailable(ctx);
+    }
+
+    fn confirmSettingsPicker(self: *App, ctx: *chasen.Ctx(Msg)) !void {
+        const picker = self.settings.picker orelse return;
+        const value = self.settings.pickerSelectedValue() orelse return;
+        switch (picker.field) {
+            .border_style => self.config.interface.border_style = value,
+            else => return,
+        }
+        self.settings.closePicker();
         try self.saveConfigIfAvailable(ctx);
     }
 
@@ -2114,6 +2149,11 @@ pub const App = struct {
         return style_mod.borderFromName(self.config.interface.border_style);
     }
 
+    fn effectiveRenderConfig(self: *const App) config_mod.Config {
+        if (self.screen != .settings) return self.config;
+        return self.settings.previewConfig(self.config);
+    }
+
     fn titleStyle(self: *const App) chasen.TextStyle {
         return self.theme().title;
     }
@@ -2277,6 +2317,8 @@ pub const App = struct {
             },
             .settings => if (self.settings.editing != null)
                 "Enter: save  Esc: cancel"
+            else if (self.settings.pickerOpen())
+                "Up/Down: choose  Enter: save  Esc: cancel"
             else if (self.settings.focusedEditField()) |field|
                 switch (field) {
                     .token => "Up/Down: move  Enter: edit token  m: menu  Esc/q: quit",
@@ -2921,7 +2963,6 @@ fn parseSettingsWidth(text: []const u8) !u16 {
 const color_theme_values = [_][]const u8{ "default", "blue", "orange", "mono", "matcha" };
 const transition_values = transitions.values;
 const selection_values = [_][]const u8{ "none", "invert", "wave", "blink", "glitch", "scan" };
-const border_style_values = [_][]const u8{ "none", "rounded", "thick", "double", "block", "dots" };
 const list_density_values = [_][]const u8{ "compact", "normal", "comfortable", "relaxed" };
 const date_format_values = [_][]const u8{ "yyyy-mm-dd", "yyyy/mm/dd", "relative", "YYYY-MM-DD" };
 
@@ -3873,6 +3914,75 @@ test "settings interface cycle fields update supported values" {
     try std.testing.expectEqualStrings("comfortable", app.config.interface.list_density);
     try app.cycleSettingsField(&tc.ctx, .date_format);
     try std.testing.expectEqualStrings("yyyy/mm/dd", app.config.interface.date_format);
+}
+
+test "settings enter opens border style picker but keeps image protocol cycling" {
+    var app = App.create(.{}, .{});
+    app.screen = .settings;
+
+    for (0..3) |_| app.settings.updateList(.move_next);
+    const border_msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
+    switch (border_msg) {
+        .settings => |settings_msg| switch (settings_msg) {
+            .picker_open => |field| try std.testing.expectEqual(screens.settings.CycleField.border_style, field),
+            else => return error.UnexpectedSettingsMessage,
+        },
+        else => return error.UnexpectedAppMessage,
+    }
+
+    for (0..4) |_| app.settings.updateList(.move_next);
+    const image_msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
+    switch (image_msg) {
+        .settings => |settings_msg| switch (settings_msg) {
+            .cycle_next => |field| try std.testing.expectEqual(screens.settings.CycleField.image_protocol, field),
+            else => return error.UnexpectedSettingsMessage,
+        },
+        else => return error.UnexpectedAppMessage,
+    }
+}
+
+test "settings border style picker previews before commit" {
+    var app = App.create(.{ .interface = .{ .border_style = "rounded" } }, .{});
+    app.screen = .settings;
+    app.animation_frame = 20;
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.update(.{ .settings = .{ .picker_open = .border_style } }, &tc.ctx);
+    try app.update(.{ .settings = .picker_move_next }, &tc.ctx);
+
+    try std.testing.expectEqualStrings("rounded", app.config.interface.border_style);
+    try std.testing.expectEqualStrings("thick", app.effectiveRenderConfig().interface.border_style);
+
+    try app.update(.{ .settings = .picker_cancel }, &tc.ctx);
+
+    try std.testing.expect(!app.settings.pickerOpen());
+    try std.testing.expectEqualStrings("rounded", app.config.interface.border_style);
+    try std.testing.expectEqualStrings("rounded", app.effectiveRenderConfig().interface.border_style);
+}
+
+test "settings border style picker confirm commits and saves" {
+    const path = ".zig-cache/test-bgg-tui-settings-border-picker/config.toml";
+
+    var app = App.create(.{ .interface = .{ .border_style = "rounded" } }, .{ .config_path = path });
+    app.screen = .settings;
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{
+        .ctx = .{ ._allocator = std.testing.allocator, ._io = std.testing.io },
+    };
+    try app.update(.{ .settings = .{ .picker_open = .border_style } }, &tc.ctx);
+    try app.update(.{ .settings = .picker_move_next }, &tc.ctx);
+    try app.update(.{ .settings = .picker_confirm }, &tc.ctx);
+
+    try std.testing.expect(!app.settings.pickerOpen());
+    try std.testing.expectEqualStrings("thick", app.config.interface.border_style);
+
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    var loaded = try config_mod.loadConfig(std.testing.allocator, std.testing.io, path, &env);
+    defer loaded.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualStrings("thick", loaded.config.interface.border_style);
 }
 
 test "animated selection requests animation frames" {

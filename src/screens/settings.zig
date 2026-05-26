@@ -55,8 +55,22 @@ pub const Msg = union(enum) {
     width_cancel,
     show_images_toggle,
     cycle_next: CycleField,
+    picker_open: CycleField,
+    picker_move_prev,
+    picker_move_next,
+    picker_confirm,
+    picker_cancel,
     list: ui.List.Msg,
 };
+
+pub const PickerState = struct {
+    field: CycleField,
+    committed_index: usize,
+    preview_index: usize,
+    preview_started_frame: u64,
+};
+
+pub const border_style_values = [_][]const u8{ "none", "rounded", "thick", "double", "block", "dots" };
 
 const items = [_]Item{
     .{ .label = "Color Theme", .section = "Interface", .kind = .cycle },
@@ -85,6 +99,7 @@ pub const State = struct {
     token_input: ?ui.PasswordInput = null,
     username_input: ?ui.TextInput = null,
     width_input: ?ui.TextInput = null,
+    picker: ?PickerState = null,
 
     pub fn initInputs(self: *State, allocator: std.mem.Allocator, default_username: ?[]const u8) !void {
         self.token_input = try ui.PasswordInput.init(allocator, .{
@@ -128,10 +143,64 @@ pub const State = struct {
 
     pub fn startEdit(self: *State, field: EditField) void {
         self.editing = field;
+        self.picker = null;
     }
 
     pub fn stopEditing(self: *State) void {
         self.editing = null;
+    }
+
+    pub fn openPicker(self: *State, field: CycleField, config: config_mod.Config, animation_frame: u64) void {
+        const index = pickerIndexFor(field, config) orelse return;
+        self.editing = null;
+        self.picker = .{
+            .field = field,
+            .committed_index = index,
+            .preview_index = index,
+            .preview_started_frame = animation_frame,
+        };
+    }
+
+    pub fn closePicker(self: *State) void {
+        self.picker = null;
+    }
+
+    pub fn movePickerPrev(self: *State, animation_frame: u64) void {
+        if (self.picker) |*picker| {
+            if (picker.preview_index > 0) {
+                picker.preview_index -= 1;
+                picker.preview_started_frame = animation_frame;
+            }
+        }
+    }
+
+    pub fn movePickerNext(self: *State, animation_frame: u64) void {
+        if (self.picker) |*picker| {
+            const values = pickerValues(picker.field) orelse return;
+            if (picker.preview_index + 1 < values.len) {
+                picker.preview_index += 1;
+                picker.preview_started_frame = animation_frame;
+            }
+        }
+    }
+
+    pub fn pickerSelectedValue(self: *const State) ?[]const u8 {
+        const picker = self.picker orelse return null;
+        const values = pickerValues(picker.field) orelse return null;
+        if (picker.preview_index >= values.len) return null;
+        return values[picker.preview_index];
+    }
+
+    pub fn previewConfig(self: *const State, config: config_mod.Config) config_mod.Config {
+        var effective = config;
+        const picker = self.picker orelse return effective;
+        switch (picker.field) {
+            .border_style => {
+                if (self.pickerSelectedValue()) |value| effective.interface.border_style = value;
+            },
+            else => {},
+        }
+        return effective;
     }
 
     pub fn focusedEditField(self: *const State) ?EditField {
@@ -160,6 +229,10 @@ pub const State = struct {
 
     pub fn isShowImagesFocused(self: *const State) bool {
         return self.list.focusedIndex() == show_images_index;
+    }
+
+    pub fn pickerOpen(self: *const State) bool {
+        return self.picker != null;
     }
 
     pub fn handleEvent(self: *const State, event: chasen.Event) ?ui.List.Msg {
@@ -205,7 +278,9 @@ pub const State = struct {
         }
 
         if (row < size.height) {
-            const help = if (self.editing != null)
+            const help = if (self.picker != null)
+                "j/k ↑↓: Choose  Enter: Save  Esc: Cancel"
+            else if (self.editing != null)
                 "Enter: Save  Esc: Cancel"
             else if (self.focusedEditField()) |field|
                 editHelp(field)
@@ -217,8 +292,75 @@ pub const State = struct {
                 "j/k ↑↓: Navigate  m: Menu  Esc/q: Quit";
             _ = surface.borrowTextAt(0, row +| 1, help, theme.subtle);
         }
+
+        self.drawPicker(surface, theme);
+    }
+
+    fn drawPicker(self: *const State, surface: *chasen.Surface, theme: style_mod.Theme) void {
+        const picker = self.picker orelse return;
+        const values = pickerValues(picker.field) orelse return;
+        const size = surface.size();
+        if (size.width < 34 or size.height < 12) return;
+
+        const width: u16 = 30;
+        const height: u16 = @intCast(@min(@as(usize, 10), values.len + 4));
+        const rect = chasen.Rect{
+            .col = (size.width - width) / 2,
+            .row = @min(@as(u16, 5), size.height - height),
+            .width = width,
+            .height = height,
+        };
+        surface.clear(rect);
+        var picker_area = surface.child(rect);
+        const selected_value = self.pickerSelectedValue() orelse "";
+        const frame = ui.Panel.frame(&picker_area, .{
+            .title = pickerTitle(picker.field),
+            .border = style_mod.borderFromName(selected_value),
+            .border_style = theme.border,
+            .title_style = theme.title,
+        });
+        frame.view();
+
+        var content = frame.contentSurface();
+        for (values, 0..) |value, index| {
+            const row: u16 = @intCast(index);
+            if (row >= content.size().height) break;
+            const focused = picker.preview_index == index;
+            const committed = picker.committed_index == index;
+            const cursor = if (focused) "> " else "  ";
+            const marker = if (committed) "*" else " ";
+            _ = content.borrowTextAt(0, row, cursor, .{ .bold = focused });
+            _ = content.borrowTextAt(2, row, marker, if (committed) .{ .fg = theme.accent } else theme.muted);
+            drawItemText(&content, 4, row, value, if (focused) theme.focused else .{}, focused, "none", 0);
+        }
     }
 };
+
+pub fn pickerValues(field: CycleField) ?[]const []const u8 {
+    return switch (field) {
+        .border_style => &border_style_values,
+        else => null,
+    };
+}
+
+pub fn pickerIndexFor(field: CycleField, config: config_mod.Config) ?usize {
+    const current = switch (field) {
+        .border_style => config.interface.border_style,
+        else => return null,
+    };
+    const values = pickerValues(field) orelse return null;
+    for (values, 0..) |value, index| {
+        if (std.mem.eql(u8, current, value)) return index;
+    }
+    return 0;
+}
+
+fn pickerTitle(field: CycleField) []const u8 {
+    return switch (field) {
+        .border_style => "Border Style",
+        else => "Setting",
+    };
+}
 
 fn drawItem(
     surface: *chasen.Surface,
@@ -491,4 +633,33 @@ test "settings exposes interface cycle rows" {
     try std.testing.expectEqual(CycleField.list_density, state.focusedCycleField().?);
     state.updateList(.move_next);
     try std.testing.expectEqual(CycleField.date_format, state.focusedCycleField().?);
+}
+
+test "settings border style picker previews without mutating committed config" {
+    var state: State = .{};
+    var config: config_mod.Config = .{ .interface = .{ .border_style = "rounded" } };
+
+    state.openPicker(.border_style, config, 10);
+
+    try std.testing.expect(state.pickerOpen());
+    try std.testing.expectEqual(@as(usize, 1), state.picker.?.committed_index);
+    try std.testing.expectEqual(@as(usize, 1), state.picker.?.preview_index);
+    try std.testing.expectEqualStrings("rounded", state.pickerSelectedValue().?);
+
+    state.movePickerNext(11);
+
+    try std.testing.expectEqualStrings("rounded", config.interface.border_style);
+    try std.testing.expectEqualStrings("thick", state.pickerSelectedValue().?);
+    try std.testing.expectEqualStrings("thick", state.previewConfig(config).interface.border_style);
+
+    config.interface.border_style = "double";
+    state.closePicker();
+    try std.testing.expect(!state.pickerOpen());
+    try std.testing.expectEqualStrings("double", state.previewConfig(config).interface.border_style);
+}
+
+test "settings picker only supports border style in first picker slice" {
+    try std.testing.expect(pickerValues(.border_style) != null);
+    try std.testing.expect(pickerValues(.transition) == null);
+    try std.testing.expect(pickerValues(.image_protocol) == null);
 }
