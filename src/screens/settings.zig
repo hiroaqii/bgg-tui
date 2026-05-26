@@ -71,6 +71,7 @@ pub const PickerState = struct {
 };
 
 pub const color_theme_values = [_][]const u8{ "default", "blue", "orange", "mono", "matcha" };
+pub const selection_values = [_][]const u8{ "none", "invert", "wave", "blink", "glitch", "scan" };
 pub const border_style_values = [_][]const u8{ "none", "rounded", "thick", "double", "block", "dots" };
 pub const list_density_values = [_][]const u8{ "compact", "normal", "comfortable", "relaxed" };
 pub const date_format_values = [_][]const u8{ "yyyy-mm-dd", "yyyy/mm/dd", "relative", "YYYY-MM-DD" };
@@ -201,6 +202,9 @@ pub const State = struct {
             .color_theme => {
                 if (self.pickerSelectedValue()) |value| effective.interface.color_theme = value;
             },
+            .selection => {
+                if (self.pickerSelectedValue()) |value| effective.interface.selection = value;
+            },
             .border_style => {
                 if (self.pickerSelectedValue()) |value| effective.interface.border_style = value;
             },
@@ -305,10 +309,10 @@ pub const State = struct {
             _ = surface.borrowTextAt(0, row +| 1, help, theme.subtle);
         }
 
-        self.drawPicker(surface, theme);
+        self.drawPicker(surface, theme, animation_frame);
     }
 
-    fn drawPicker(self: *const State, surface: *chasen.Surface, theme: style_mod.Theme) void {
+    fn drawPicker(self: *const State, surface: *chasen.Surface, theme: style_mod.Theme, animation_frame: u64) void {
         const picker = self.picker orelse return;
         const values = pickerValues(picker.field) orelse return;
         const size = surface.size();
@@ -343,7 +347,8 @@ pub const State = struct {
             const marker = if (committed) "*" else " ";
             _ = content.borrowTextAt(0, row, cursor, .{ .bold = focused });
             _ = content.borrowTextAt(2, row, marker, if (committed) .{ .fg = theme.accent } else theme.muted);
-            drawItemText(&content, 4, row, value, if (focused) theme.focused else .{}, focused, "none", 0);
+            const selection = if (picker.field == .selection) selected_value else "none";
+            drawItemText(&content, 4, row, value, if (focused) theme.focused else .{}, focused, selection, animation_frame);
         }
     }
 };
@@ -351,6 +356,7 @@ pub const State = struct {
 pub fn pickerValues(field: CycleField) ?[]const []const u8 {
     return switch (field) {
         .color_theme => &color_theme_values,
+        .selection => &selection_values,
         .border_style => &border_style_values,
         .list_density => &list_density_values,
         .date_format => &date_format_values,
@@ -361,6 +367,7 @@ pub fn pickerValues(field: CycleField) ?[]const []const u8 {
 pub fn pickerIndexFor(field: CycleField, config: config_mod.Config) ?usize {
     const current = switch (field) {
         .color_theme => config.interface.color_theme,
+        .selection => config.interface.selection,
         .border_style => config.interface.border_style,
         .list_density => config.interface.list_density,
         .date_format => config.interface.date_format,
@@ -376,6 +383,7 @@ pub fn pickerIndexFor(field: CycleField, config: config_mod.Config) ?usize {
 fn pickerTitle(field: CycleField) []const u8 {
     return switch (field) {
         .color_theme => "Color Theme",
+        .selection => "Selection",
         .border_style => "Border Style",
         .list_density => "List Density",
         .date_format => "Date Format",
@@ -683,6 +691,7 @@ test "settings visual pickers preview without mutating committed config" {
     var state: State = .{};
     const config: config_mod.Config = .{ .interface = .{
         .color_theme = "default",
+        .selection = "none",
         .border_style = "rounded",
         .list_density = "normal",
         .date_format = "yyyy-mm-dd",
@@ -692,6 +701,11 @@ test "settings visual pickers preview without mutating committed config" {
     state.movePickerNext(11);
     try std.testing.expectEqualStrings("default", config.interface.color_theme);
     try std.testing.expectEqualStrings("blue", state.previewConfig(config).interface.color_theme);
+
+    state.openPicker(.selection, config, 15);
+    state.movePickerNext(16);
+    try std.testing.expectEqualStrings("none", config.interface.selection);
+    try std.testing.expectEqualStrings("invert", state.previewConfig(config).interface.selection);
 
     state.openPicker(.list_density, config, 20);
     state.movePickerNext(21);
@@ -706,10 +720,10 @@ test "settings visual pickers preview without mutating committed config" {
 
 test "settings picker supports visual fields in current slice" {
     try std.testing.expect(pickerValues(.color_theme) != null);
+    try std.testing.expect(pickerValues(.selection) != null);
     try std.testing.expect(pickerValues(.border_style) != null);
     try std.testing.expect(pickerValues(.list_density) != null);
     try std.testing.expect(pickerValues(.date_format) != null);
     try std.testing.expect(pickerValues(.transition) == null);
-    try std.testing.expect(pickerValues(.selection) == null);
     try std.testing.expect(pickerValues(.image_protocol) == null);
 }

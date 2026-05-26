@@ -884,9 +884,18 @@ pub const App = struct {
             .width_cancel => self.cancelSettingsWidthEdit(),
             .show_images_toggle => try self.toggleSettingsShowImages(ctx),
             .cycle_next => |field| try self.cycleSettingsField(ctx, field),
-            .picker_open => |field| self.settings.openPicker(field, self.config, self.animation_frame),
-            .picker_move_prev => self.settings.movePickerPrev(self.animation_frame),
-            .picker_move_next => self.settings.movePickerNext(self.animation_frame),
+            .picker_open => |field| {
+                self.settings.openPicker(field, self.config, self.animation_frame);
+                self.requestPickerPreviewFrameIfNeeded(ctx);
+            },
+            .picker_move_prev => {
+                self.settings.movePickerPrev(self.animation_frame);
+                self.requestPickerPreviewFrameIfNeeded(ctx);
+            },
+            .picker_move_next => {
+                self.settings.movePickerNext(self.animation_frame);
+                self.requestPickerPreviewFrameIfNeeded(ctx);
+            },
             .picker_confirm => try self.confirmSettingsPicker(ctx),
             .picker_cancel => self.settings.closePicker(),
             .list => |list_msg| self.settings.updateList(list_msg),
@@ -999,7 +1008,7 @@ pub const App = struct {
                 self.startContentTransition(ctx);
             },
             .selection => {
-                self.config.interface.selection = nextCycleValue(self.config.interface.selection, &selection_values);
+                self.config.interface.selection = nextCycleValue(self.config.interface.selection, &screens.settings.selection_values);
                 self.requestMotionFrameIfNeeded(ctx);
             },
             .border_style => self.config.interface.border_style = nextCycleValue(self.config.interface.border_style, &screens.settings.border_style_values),
@@ -1018,6 +1027,10 @@ pub const App = struct {
         const value = self.settings.pickerSelectedValue() orelse return;
         switch (picker.field) {
             .color_theme => self.config.interface.color_theme = value,
+            .selection => {
+                self.config.interface.selection = value;
+                self.requestMotionFrameIfNeeded(ctx);
+            },
             .border_style => self.config.interface.border_style = value,
             .list_density => self.config.interface.list_density = value,
             .date_format => self.config.interface.date_format = value,
@@ -2180,7 +2193,13 @@ pub const App = struct {
     }
 
     fn requestMotionFrameIfNeeded(self: *const App, ctx: *chasen.Ctx(Msg)) void {
-        if (motion.selectionNeedsFrame(self.config.interface.selection) or self.hasActiveLoadingScan() or self.hasActiveScreenTransition() or self.listImageCandidateWaiting()) {
+        if (motion.selectionNeedsFrame(self.effectiveRenderConfig().interface.selection) or self.hasActiveLoadingScan() or self.hasActiveScreenTransition() or self.listImageCandidateWaiting()) {
+            ctx.requestFrame();
+        }
+    }
+
+    fn requestPickerPreviewFrameIfNeeded(self: *const App, ctx: *chasen.Ctx(Msg)) void {
+        if (self.screen == .settings and motion.selectionNeedsFrame(self.effectiveRenderConfig().interface.selection)) {
             ctx.requestFrame();
         }
     }
@@ -2964,7 +2983,6 @@ fn parseSettingsWidth(text: []const u8) !u16 {
 }
 
 const transition_values = transitions.values;
-const selection_values = [_][]const u8{ "none", "invert", "wave", "blink", "glitch", "scan" };
 
 fn nextCycleValue(current: []const u8, values: []const []const u8) []const u8 {
     for (values, 0..) |value, index| {
@@ -3916,7 +3934,7 @@ test "settings interface cycle fields update supported values" {
     try std.testing.expectEqualStrings("yyyy/mm/dd", app.config.interface.date_format);
 }
 
-test "settings enter opens visual pickers but keeps side effect fields cycling" {
+test "settings enter opens visual pickers but keeps transition and image protocol cycling" {
     var app = App.create(.{}, .{});
     app.screen = .settings;
 
@@ -3943,7 +3961,7 @@ test "settings enter opens visual pickers but keeps side effect fields cycling" 
     const selection_msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
     switch (selection_msg) {
         .settings => |settings_msg| switch (settings_msg) {
-            .cycle_next => |field| try std.testing.expectEqual(screens.settings.CycleField.selection, field),
+            .picker_open => |field| try std.testing.expectEqual(screens.settings.CycleField.selection, field),
             else => return error.UnexpectedSettingsMessage,
         },
         else => return error.UnexpectedAppMessage,
@@ -4024,6 +4042,49 @@ test "settings color theme picker previews before commit" {
 
     try std.testing.expect(!app.settings.pickerOpen());
     try std.testing.expectEqualStrings("blue", app.config.interface.color_theme);
+}
+
+test "settings selection picker previews and requests frames only when animated" {
+    var app = App.create(.{ .interface = .{ .selection = "none" } }, .{});
+    app.screen = .settings;
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.update(.{ .settings = .{ .picker_open = .selection } }, &tc.ctx);
+    try std.testing.expect(!tc.ctx.frame_requested);
+
+    try app.update(.{ .settings = .picker_move_next }, &tc.ctx);
+    try std.testing.expect(!tc.ctx.frame_requested);
+    try std.testing.expectEqualStrings("none", app.config.interface.selection);
+    try std.testing.expectEqualStrings("invert", app.effectiveRenderConfig().interface.selection);
+
+    try app.update(.{ .settings = .picker_move_next }, &tc.ctx);
+    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expectEqualStrings("none", app.config.interface.selection);
+    try std.testing.expectEqualStrings("wave", app.effectiveRenderConfig().interface.selection);
+
+    tc.resetTransient();
+    try app.update(.{ .settings = .picker_cancel }, &tc.ctx);
+
+    try std.testing.expect(!app.settings.pickerOpen());
+    try std.testing.expectEqualStrings("none", app.config.interface.selection);
+    try std.testing.expectEqualStrings("none", app.effectiveRenderConfig().interface.selection);
+}
+
+test "settings selection picker confirm commits animated selection and requests frames" {
+    var app = App.create(.{ .interface = .{ .selection = "none" } }, .{});
+    app.screen = .settings;
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.update(.{ .settings = .{ .picker_open = .selection } }, &tc.ctx);
+    try app.update(.{ .settings = .picker_move_next }, &tc.ctx);
+    try app.update(.{ .settings = .picker_move_next }, &tc.ctx);
+
+    tc.resetTransient();
+    try app.update(.{ .settings = .picker_confirm }, &tc.ctx);
+
+    try std.testing.expect(!app.settings.pickerOpen());
+    try std.testing.expectEqualStrings("wave", app.config.interface.selection);
+    try std.testing.expect(tc.ctx.frame_requested);
 }
 
 test "settings list density and date format pickers commit selected values" {
