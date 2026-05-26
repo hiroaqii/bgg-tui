@@ -1702,10 +1702,10 @@ pub const App = struct {
     fn gameDetailImageUrl(self: *const App) ?[]const u8 {
         if (self.game_detail.load_state != .loaded or self.game_detail.games.len == 0) return null;
         const game = self.game_detail.games[0];
-        if (game.image_url) |url| {
+        if (game.thumbnail_url) |url| {
             if (url.len > 0) return url;
         }
-        if (game.thumbnail_url) |url| {
+        if (game.image_url) |url| {
             if (url.len > 0) return url;
         }
         return null;
@@ -4082,7 +4082,7 @@ test "game detail load completion stores hidden result without transition" {
     try std.testing.expect(!tc.ctx.frame_requested);
 }
 
-test "game detail image url prefers full image over thumbnail" {
+test "game detail image url prefers thumbnail over full image" {
     var app = App.create(.{}, .{});
     app.allocator = std.testing.allocator;
     defer app.deinitOwnedState();
@@ -4097,10 +4097,10 @@ test "game detail image url prefers full image over thumbnail" {
 
     try app.game_detail.setLoaded(std.testing.allocator, games, app.config.display.detail_width);
 
-    try std.testing.expectEqualStrings("https://example.test/full.jpg", app.gameDetailImageUrl().?);
+    try std.testing.expectEqualStrings("https://example.test/thumb.jpg", app.gameDetailImageUrl().?);
 }
 
-test "game detail image url falls back to thumbnail" {
+test "game detail image url falls back to full image" {
     var app = App.create(.{}, .{});
     app.allocator = std.testing.allocator;
     defer app.deinitOwnedState();
@@ -4109,12 +4109,12 @@ test "game detail image url falls back to thumbnail" {
     games[0] = .{
         .id = 13,
         .name = try std.testing.allocator.dupe(u8, "Catan"),
-        .thumbnail_url = try std.testing.allocator.dupe(u8, "https://example.test/thumb.jpg"),
+        .image_url = try std.testing.allocator.dupe(u8, "https://example.test/full.jpg"),
     };
 
     try app.game_detail.setLoaded(std.testing.allocator, games, app.config.display.detail_width);
 
-    try std.testing.expectEqualStrings("https://example.test/thumb.jpg", app.gameDetailImageUrl().?);
+    try std.testing.expectEqualStrings("https://example.test/full.jpg", app.gameDetailImageUrl().?);
 }
 
 test "game detail skips unsupported cover formats before cache task" {
