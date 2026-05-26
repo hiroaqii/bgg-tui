@@ -63,13 +63,13 @@ pub fn sourceFormatFromUrl(url: []const u8) SourceFormat {
     return .unknown;
 }
 
-/// The current Chasen terminal image path can load local PNG files only.
-///
-/// JPEG/WebP decode is being developed in chasen-graphics. Until that path is
-/// connected, bgg-tui should avoid downloading unsupported covers only to fail
-/// later in the terminal image loader.
+/// The Chasen terminal image path can load PNG directly and can decode JPEG
+/// through chasen-graphics before terminal transport.
 pub fn canLoadTerminalImageFromUrl(url: []const u8) bool {
-    return sourceFormatFromUrl(url) == .png;
+    return switch (sourceFormatFromUrl(url)) {
+        .png, .jpeg => true,
+        .webp, .unknown => false,
+    };
 }
 
 pub fn cacheHit(io: std.Io, path: []const u8) bool {
@@ -249,8 +249,8 @@ test "source format is detected from url extension" {
     try std.testing.expectEqual(SourceFormat.unknown, sourceFormatFromUrl("https://example.com/cover"));
 }
 
-test "terminal image load is limited to PNG until decode pipeline expands" {
+test "terminal image load accepts PNG and JPEG" {
     try std.testing.expect(canLoadTerminalImageFromUrl("https://example.com/cover.png"));
-    try std.testing.expect(!canLoadTerminalImageFromUrl("https://example.com/cover.jpg"));
+    try std.testing.expect(canLoadTerminalImageFromUrl("https://example.com/cover.jpg"));
     try std.testing.expect(!canLoadTerminalImageFromUrl("https://example.com/cover.webp"));
 }

@@ -21,8 +21,10 @@ pub fn main(init: std.process.Init) !void {
 
     // Terminal image support stays optional: app code decides when to load an
     // image, while Chasen owns local path -> terminal image handle conversion.
+    // Use the decoded loader so chasen-graphics can handle JPEG cover art
+    // before terminal transport.
     const image_loader: ?chasen.TerminalImagePathLoaderFn = if (config.display.show_images and config.display.image_protocol != .off)
-        chasen_graphics_chasen.pngPathLoader
+        chasen_graphics_chasen.decodedImagePathLoader
     else
         null;
 

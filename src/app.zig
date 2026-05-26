@@ -2797,10 +2797,9 @@ fn detailImageLoadErrorText(reason: chasen.TerminalImageLoadError) []const u8 {
 
 fn detailUnsupportedImageFormatText(format_kind: image_mod.SourceFormat) []const u8 {
     return switch (format_kind) {
-        .jpeg => "JPEG covers not supported yet",
         .webp => "WebP covers not supported yet",
         .unknown => "Cover format not supported",
-        .png => "Could not load image",
+        .png, .jpeg => "Could not load image",
     };
 }
 
@@ -4127,7 +4126,7 @@ test "game detail skips unsupported cover formats before cache task" {
     games[0] = .{
         .id = 13,
         .name = try std.testing.allocator.dupe(u8, "Catan"),
-        .image_url = try std.testing.allocator.dupe(u8, "https://example.test/full.jpg"),
+        .image_url = try std.testing.allocator.dupe(u8, "https://example.test/full.webp"),
     };
 
     try app.game_detail.setLoaded(std.testing.allocator, games, app.config.display.detail_width);
@@ -4137,12 +4136,12 @@ test "game detail skips unsupported cover formats before cache task" {
 
     try std.testing.expectEqual(@as(usize, 0), tc.ctx.pendingTaskWithSlice().len);
     switch (app.game_detail.image_state) {
-        .failed => |message| try std.testing.expectEqualStrings("JPEG covers not supported yet", message),
+        .failed => |message| try std.testing.expectEqualStrings("WebP covers not supported yet", message),
         else => return error.TestExpectedEqual,
     }
 }
 
-test "hot list image preview reports unsupported JPEG thumbnail without cache task" {
+test "hot list image preview reports unsupported WebP thumbnail without cache task" {
     var app = App.create(.{}, .{ .image_cache_dir = "/tmp/bgg-tui-images" });
     app.allocator = std.testing.allocator;
     app.screen = .hot_games;
@@ -4153,7 +4152,7 @@ test "hot list image preview reports unsupported JPEG thumbnail without cache ta
         .id = 13,
         .rank = 1,
         .name = try std.testing.allocator.dupe(u8, "Catan"),
-        .thumbnail_url = try std.testing.allocator.dupe(u8, "https://example.test/thumb.jpg"),
+        .thumbnail_url = try std.testing.allocator.dupe(u8, "https://example.test/thumb.webp"),
     };
     try app.hot_games.setLoaded(std.testing.allocator, games);
 
@@ -4164,7 +4163,7 @@ test "hot list image preview reports unsupported JPEG thumbnail without cache ta
 
     try std.testing.expectEqual(@as(usize, 0), tc.ctx.pendingTaskWithSlice().len);
     switch (app.list_image.image_state) {
-        .failed => |message| try std.testing.expectEqualStrings("JPEG covers not supported yet", message),
+        .failed => |message| try std.testing.expectEqualStrings("WebP covers not supported yet", message),
         else => return error.TestExpectedEqual,
     }
 }
@@ -4248,7 +4247,7 @@ test "hot list image preview retries cached terminal load after transition" {
     try std.testing.expectEqual(@as(usize, 1), tc.ctx.pendingTerminalImageLoadSlice().len);
 }
 
-test "collection list image preview reports unsupported JPEG thumbnail without cache task" {
+test "collection list image preview reports unsupported WebP thumbnail without cache task" {
     var app = App.create(.{}, .{ .image_cache_dir = "/tmp/bgg-tui-images" });
     app.allocator = std.testing.allocator;
     app.screen = .collection;
@@ -4258,7 +4257,7 @@ test "collection list image preview reports unsupported JPEG thumbnail without c
     items[0] = .{
         .id = 13,
         .name = try std.testing.allocator.dupe(u8, "Catan"),
-        .thumbnail_url = try std.testing.allocator.dupe(u8, "https://example.test/thumb.jpg"),
+        .thumbnail_url = try std.testing.allocator.dupe(u8, "https://example.test/thumb.webp"),
         .owned = true,
     };
     try app.collection.setLoaded(std.testing.allocator, items, 0);
@@ -4270,7 +4269,7 @@ test "collection list image preview reports unsupported JPEG thumbnail without c
 
     try std.testing.expectEqual(@as(usize, 0), tc.ctx.pendingTaskWithSlice().len);
     switch (app.list_image.image_state) {
-        .failed => |message| try std.testing.expectEqualStrings("JPEG covers not supported yet", message),
+        .failed => |message| try std.testing.expectEqualStrings("WebP covers not supported yet", message),
         else => return error.TestExpectedEqual,
     }
 }
