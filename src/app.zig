@@ -162,6 +162,7 @@ pub const App = struct {
                 }
                 try self.maybeStartSettledListImageDownload(ctx);
                 self.requestMotionFrameIfNeeded(ctx);
+                self.requestPickerPreviewFrameIfNeeded(ctx);
             },
             .menu => |menu_msg| switch (menu_msg) {
                 .move_prev, .move_next => self.menu.update(menu_msg),
@@ -1004,7 +1005,7 @@ pub const App = struct {
         switch (field) {
             .color_theme => self.config.interface.color_theme = nextCycleValue(self.config.interface.color_theme, &screens.settings.color_theme_values),
             .transition => {
-                self.config.interface.transition = nextCycleValue(self.config.interface.transition, &transition_values);
+                self.config.interface.transition = nextCycleValue(self.config.interface.transition, &screens.settings.transition_values);
                 self.startContentTransition(ctx);
             },
             .selection => {
@@ -1027,6 +1028,10 @@ pub const App = struct {
         const value = self.settings.pickerSelectedValue() orelse return;
         switch (picker.field) {
             .color_theme => self.config.interface.color_theme = value,
+            .transition => {
+                self.config.interface.transition = value;
+                self.startContentTransition(ctx);
+            },
             .selection => {
                 self.config.interface.selection = value;
                 self.requestMotionFrameIfNeeded(ctx);
@@ -2199,8 +2204,17 @@ pub const App = struct {
     }
 
     fn requestPickerPreviewFrameIfNeeded(self: *const App, ctx: *chasen.Ctx(Msg)) void {
-        if (self.screen == .settings and motion.selectionNeedsFrame(self.effectiveRenderConfig().interface.selection)) {
+        if (self.screen != .settings) return;
+        if (motion.selectionNeedsFrame(self.effectiveRenderConfig().interface.selection)) {
             ctx.requestFrame();
+            return;
+        }
+        const picker = self.settings.picker orelse return;
+        if (picker.field == .transition) {
+            const value = self.settings.pickerSelectedValue() orelse return;
+            if (screenTransitionKindForConfig(value, transitionChoiceSeed(self.transition_choice_seed, self.animation_frame, self.screen, self.screen)) != .none) {
+                ctx.requestFrame();
+            }
         }
     }
 
@@ -2981,8 +2995,6 @@ fn parseSettingsWidth(text: []const u8) !u16 {
     if (value < 20 or value > 240) return error.InvalidWidth;
     return value;
 }
-
-const transition_values = transitions.values;
 
 fn nextCycleValue(current: []const u8, values: []const []const u8) []const u8 {
     for (values, 0..) |value, index| {
@@ -3934,7 +3946,7 @@ test "settings interface cycle fields update supported values" {
     try std.testing.expectEqualStrings("yyyy/mm/dd", app.config.interface.date_format);
 }
 
-test "settings enter opens visual pickers but keeps transition and image protocol cycling" {
+test "settings enter opens settings pickers but keeps image protocol cycling" {
     var app = App.create(.{}, .{});
     app.screen = .settings;
 
@@ -3951,7 +3963,7 @@ test "settings enter opens visual pickers but keeps transition and image protoco
     const transition_msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
     switch (transition_msg) {
         .settings => |settings_msg| switch (settings_msg) {
-            .cycle_next => |field| try std.testing.expectEqual(screens.settings.CycleField.transition, field),
+            .picker_open => |field| try std.testing.expectEqual(screens.settings.CycleField.transition, field),
             else => return error.UnexpectedSettingsMessage,
         },
         else => return error.UnexpectedAppMessage,
@@ -4042,6 +4054,54 @@ test "settings color theme picker previews before commit" {
 
     try std.testing.expect(!app.settings.pickerOpen());
     try std.testing.expectEqualStrings("blue", app.config.interface.color_theme);
+}
+
+test "settings transition picker previews without committing or starting real transition" {
+    var app = App.create(.{ .interface = .{ .transition = "none" } }, .{});
+    app.screen = .settings;
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.update(.{ .settings = .{ .picker_open = .transition } }, &tc.ctx);
+    try std.testing.expect(!tc.ctx.frame_requested);
+
+    try app.update(.{ .settings = .picker_move_next }, &tc.ctx);
+
+    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expectEqualStrings("none", app.config.interface.transition);
+    try std.testing.expect(!app.hasActiveScreenTransition());
+
+    tc.resetTransient();
+    try app.update(.{ .frame = .{ .now_ns = 100, .delta_ns = 16, .index = 1 } }, &tc.ctx);
+    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expectEqualStrings("none", app.config.interface.transition);
+    try std.testing.expect(!app.hasActiveScreenTransition());
+
+    tc.resetTransient();
+    try app.update(.{ .settings = .picker_cancel }, &tc.ctx);
+
+    try std.testing.expect(!app.settings.pickerOpen());
+    try std.testing.expectEqualStrings("none", app.config.interface.transition);
+    try std.testing.expect(!app.hasActiveScreenTransition());
+    try std.testing.expect(!tc.ctx.frame_requested);
+}
+
+test "settings transition picker confirm commits and starts real transition" {
+    var app = App.create(.{ .interface = .{ .transition = "none" } }, .{});
+    app.screen = .settings;
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.update(.{ .settings = .{ .picker_open = .transition } }, &tc.ctx);
+    try app.update(.{ .settings = .picker_move_next }, &tc.ctx);
+
+    tc.resetTransient();
+    try app.update(.{ .settings = .picker_confirm }, &tc.ctx);
+
+    try std.testing.expect(!app.settings.pickerOpen());
+    try std.testing.expectEqualStrings("fade", app.config.interface.transition);
+    try std.testing.expect(app.hasActiveScreenTransition());
+    try std.testing.expectEqual(Screen.settings, app.transition_from_screen.?);
+    try std.testing.expectEqual(Screen.settings, app.transition_to_screen.?);
+    try std.testing.expect(tc.ctx.frame_requested);
 }
 
 test "settings selection picker previews and requests frames only when animated" {

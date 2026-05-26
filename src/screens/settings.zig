@@ -1,10 +1,12 @@
 const std = @import("std");
 const chasen = @import("chasen");
+const anim = @import("chasen_anim");
 const ui = @import("chasen_ui");
 
 const config_mod = @import("../config.zig");
 const motion = @import("../motion.zig");
 const style_mod = @import("../style.zig");
+const transitions = @import("../transitions.zig");
 
 const Kind = enum {
     text,
@@ -71,6 +73,7 @@ pub const PickerState = struct {
 };
 
 pub const color_theme_values = [_][]const u8{ "default", "blue", "orange", "mono", "matcha" };
+pub const transition_values = transitions.values;
 pub const selection_values = [_][]const u8{ "none", "invert", "wave", "blink", "glitch", "scan" };
 pub const border_style_values = [_][]const u8{ "none", "rounded", "thick", "double", "block", "dots" };
 pub const list_density_values = [_][]const u8{ "compact", "normal", "comfortable", "relaxed" };
@@ -202,6 +205,7 @@ pub const State = struct {
             .color_theme => {
                 if (self.pickerSelectedValue()) |value| effective.interface.color_theme = value;
             },
+            .transition => {},
             .selection => {
                 if (self.pickerSelectedValue()) |value| effective.interface.selection = value;
             },
@@ -318,8 +322,10 @@ pub const State = struct {
         const size = surface.size();
         if (size.width < 34 or size.height < 12) return;
 
-        const width: u16 = 30;
-        const height: u16 = @intCast(@min(@as(usize, 10), values.len + 4));
+        const width: u16 = if (picker.field == .transition) 44 else 30;
+        if (size.width < width) return;
+        const desired_height = if (picker.field == .transition) values.len + 12 else @min(@as(usize, 10), values.len + 4);
+        const height: u16 = @intCast(@min(desired_height, @as(usize, size.height -| 2)));
         const rect = chasen.Rect{
             .col = (size.width - width) / 2,
             .row = @min(@as(u16, 5), size.height - height),
@@ -338,8 +344,13 @@ pub const State = struct {
         frame.view();
 
         var content = frame.contentSurface();
+        var list_start_row: u16 = 0;
+        if (picker.field == .transition) {
+            drawTransitionPreview(&content, selected_value, picker.preview_started_frame, animation_frame, theme);
+            list_start_row = 10;
+        }
         for (values, 0..) |value, index| {
-            const row: u16 = @intCast(index);
+            const row: u16 = list_start_row + @as(u16, @intCast(index));
             if (row >= content.size().height) break;
             const focused = picker.preview_index == index;
             const committed = picker.committed_index == index;
@@ -356,6 +367,7 @@ pub const State = struct {
 pub fn pickerValues(field: CycleField) ?[]const []const u8 {
     return switch (field) {
         .color_theme => &color_theme_values,
+        .transition => &transition_values,
         .selection => &selection_values,
         .border_style => &border_style_values,
         .list_density => &list_density_values,
@@ -367,6 +379,7 @@ pub fn pickerValues(field: CycleField) ?[]const []const u8 {
 pub fn pickerIndexFor(field: CycleField, config: config_mod.Config) ?usize {
     const current = switch (field) {
         .color_theme => config.interface.color_theme,
+        .transition => config.interface.transition,
         .selection => config.interface.selection,
         .border_style => config.interface.border_style,
         .list_density => config.interface.list_density,
@@ -383,12 +396,49 @@ pub fn pickerIndexFor(field: CycleField, config: config_mod.Config) ?usize {
 fn pickerTitle(field: CycleField) []const u8 {
     return switch (field) {
         .color_theme => "Color Theme",
+        .transition => "Transition",
         .selection => "Selection",
         .border_style => "Border Style",
         .list_density => "List Density",
         .date_format => "Date Format",
         else => "Setting",
     };
+}
+
+fn drawTransitionPreview(surface: *chasen.Surface, value: []const u8, started_frame: u64, animation_frame: u64, theme: style_mod.Theme) void {
+    const size = surface.size();
+    if (size.width == 0 or size.height < 9) return;
+
+    const preview_height: u16 = 9;
+    const preview_rect = chasen.Rect{
+        .col = 0,
+        .row = 0,
+        .width = size.width,
+        .height = @min(preview_height, size.height),
+    };
+    var preview = surface.child(preview_rect);
+    preview.clear(.{ .col = 0, .row = 0, .width = preview_rect.width, .height = preview_rect.height });
+    _ = preview.borrowTextAt(1, 0, "Transition preview", theme.muted);
+    if (preview_rect.height > 1) _ = preview.borrowTextAt(1, 1, "BoardGameGeek", theme.title);
+    if (preview_rect.height > 2) _ = preview.borrowTextAt(1, 2, "Hot Games -> Detail", theme.subtle);
+    if (preview_rect.height > 3) _ = preview.borrowTextAt(1, 3, "  #   title              rank", theme.muted);
+    if (preview_rect.height > 4) _ = preview.borrowTextAt(1, 4, "  1   CATAN              1", theme.subtle);
+    if (preview_rect.height > 5) _ = preview.borrowTextAt(1, 5, "  2   Ark Nova           2", theme.subtle);
+    if (preview_rect.height > 6) _ = preview.borrowTextAt(1, 6, "  3   Brass Birmingham   3", theme.subtle);
+    if (preview_rect.height > 7) _ = preview.borrowTextAt(1, 7, "  4   Dune Imperium      4", theme.subtle);
+    if (preview_rect.height > 8) _ = preview.borrowTextAt(1, 8, "  5   Wingspan           5", theme.subtle);
+
+    const kind = transitions.kindForConfig(value, started_frame);
+    if (kind == .none) return;
+
+    const max_frame = transitions.framesForKind(kind);
+    const elapsed = animation_frame -| started_frame;
+    const frame = if (max_frame == 0) 0 else (elapsed % max_frame) + 1;
+    motion.applyScreenTransition(&preview, anim.Transition{
+        .kind = kind,
+        .frame = frame,
+        .max_frame = max_frame,
+    });
 }
 
 fn drawItem(
@@ -691,6 +741,7 @@ test "settings visual pickers preview without mutating committed config" {
     var state: State = .{};
     const config: config_mod.Config = .{ .interface = .{
         .color_theme = "default",
+        .transition = "none",
         .selection = "none",
         .border_style = "rounded",
         .list_density = "normal",
@@ -701,6 +752,11 @@ test "settings visual pickers preview without mutating committed config" {
     state.movePickerNext(11);
     try std.testing.expectEqualStrings("default", config.interface.color_theme);
     try std.testing.expectEqualStrings("blue", state.previewConfig(config).interface.color_theme);
+
+    state.openPicker(.transition, config, 12);
+    state.movePickerNext(13);
+    try std.testing.expectEqualStrings("none", config.interface.transition);
+    try std.testing.expectEqualStrings("none", state.previewConfig(config).interface.transition);
 
     state.openPicker(.selection, config, 15);
     state.movePickerNext(16);
@@ -720,10 +776,10 @@ test "settings visual pickers preview without mutating committed config" {
 
 test "settings picker supports visual fields in current slice" {
     try std.testing.expect(pickerValues(.color_theme) != null);
+    try std.testing.expect(pickerValues(.transition) != null);
     try std.testing.expect(pickerValues(.selection) != null);
     try std.testing.expect(pickerValues(.border_style) != null);
     try std.testing.expect(pickerValues(.list_density) != null);
     try std.testing.expect(pickerValues(.date_format) != null);
-    try std.testing.expect(pickerValues(.transition) == null);
     try std.testing.expect(pickerValues(.image_protocol) == null);
 }
