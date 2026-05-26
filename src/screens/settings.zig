@@ -323,24 +323,18 @@ pub const State = struct {
         if (size.width < 34 or size.height < 12) return;
 
         const width: u16 = if (picker.field == .transition) 44 else 30;
-        if (size.width < width) return;
         const desired_height = if (picker.field == .transition) values.len + 12 else @min(@as(usize, 10), values.len + 4);
         const height: u16 = @intCast(@min(desired_height, @as(usize, size.height -| 2)));
-        const rect = chasen.Rect{
-            .col = (size.width - width) / 2,
-            .row = @min(@as(u16, 5), size.height - height),
-            .width = width,
-            .height = height,
-        };
-        surface.clear(rect);
-        var picker_area = surface.child(rect);
         const selected_value = self.pickerSelectedValue() orelse "";
-        const frame = ui.Panel.frame(&picker_area, .{
-            .title = pickerTitle(picker.field),
-            .border = style_mod.borderFromName(selected_value),
-            .border_style = theme.border,
-            .title_style = theme.title,
-        });
+        const frame = ui.Overlay.frame(surface, .{
+            .size = .{ .width = width, .height = height },
+            .panel = .{
+                .title = pickerTitle(picker.field),
+                .border = style_mod.borderFromName(selected_value),
+                .border_style = theme.border,
+                .title_style = theme.title,
+            },
+        }) orelse return;
         frame.view();
 
         var content = frame.contentSurface();
