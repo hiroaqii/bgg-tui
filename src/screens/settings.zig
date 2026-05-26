@@ -70,7 +70,10 @@ pub const PickerState = struct {
     preview_started_frame: u64,
 };
 
+pub const color_theme_values = [_][]const u8{ "default", "blue", "orange", "mono", "matcha" };
 pub const border_style_values = [_][]const u8{ "none", "rounded", "thick", "double", "block", "dots" };
+pub const list_density_values = [_][]const u8{ "compact", "normal", "comfortable", "relaxed" };
+pub const date_format_values = [_][]const u8{ "yyyy-mm-dd", "yyyy/mm/dd", "relative", "YYYY-MM-DD" };
 
 const items = [_]Item{
     .{ .label = "Color Theme", .section = "Interface", .kind = .cycle },
@@ -195,8 +198,17 @@ pub const State = struct {
         var effective = config;
         const picker = self.picker orelse return effective;
         switch (picker.field) {
+            .color_theme => {
+                if (self.pickerSelectedValue()) |value| effective.interface.color_theme = value;
+            },
             .border_style => {
                 if (self.pickerSelectedValue()) |value| effective.interface.border_style = value;
+            },
+            .list_density => {
+                if (self.pickerSelectedValue()) |value| effective.interface.list_density = value;
+            },
+            .date_format => {
+                if (self.pickerSelectedValue()) |value| effective.interface.date_format = value;
             },
             else => {},
         }
@@ -338,14 +350,20 @@ pub const State = struct {
 
 pub fn pickerValues(field: CycleField) ?[]const []const u8 {
     return switch (field) {
+        .color_theme => &color_theme_values,
         .border_style => &border_style_values,
+        .list_density => &list_density_values,
+        .date_format => &date_format_values,
         else => null,
     };
 }
 
 pub fn pickerIndexFor(field: CycleField, config: config_mod.Config) ?usize {
     const current = switch (field) {
+        .color_theme => config.interface.color_theme,
         .border_style => config.interface.border_style,
+        .list_density => config.interface.list_density,
+        .date_format => config.interface.date_format,
         else => return null,
     };
     const values = pickerValues(field) orelse return null;
@@ -357,7 +375,10 @@ pub fn pickerIndexFor(field: CycleField, config: config_mod.Config) ?usize {
 
 fn pickerTitle(field: CycleField) []const u8 {
     return switch (field) {
+        .color_theme => "Color Theme",
         .border_style => "Border Style",
+        .list_density => "List Density",
+        .date_format => "Date Format",
         else => "Setting",
     };
 }
@@ -658,8 +679,37 @@ test "settings border style picker previews without mutating committed config" {
     try std.testing.expectEqualStrings("double", state.previewConfig(config).interface.border_style);
 }
 
-test "settings picker only supports border style in first picker slice" {
+test "settings visual pickers preview without mutating committed config" {
+    var state: State = .{};
+    const config: config_mod.Config = .{ .interface = .{
+        .color_theme = "default",
+        .border_style = "rounded",
+        .list_density = "normal",
+        .date_format = "yyyy-mm-dd",
+    } };
+
+    state.openPicker(.color_theme, config, 10);
+    state.movePickerNext(11);
+    try std.testing.expectEqualStrings("default", config.interface.color_theme);
+    try std.testing.expectEqualStrings("blue", state.previewConfig(config).interface.color_theme);
+
+    state.openPicker(.list_density, config, 20);
+    state.movePickerNext(21);
+    try std.testing.expectEqualStrings("normal", config.interface.list_density);
+    try std.testing.expectEqualStrings("comfortable", state.previewConfig(config).interface.list_density);
+
+    state.openPicker(.date_format, config, 30);
+    state.movePickerNext(31);
+    try std.testing.expectEqualStrings("yyyy-mm-dd", config.interface.date_format);
+    try std.testing.expectEqualStrings("yyyy/mm/dd", state.previewConfig(config).interface.date_format);
+}
+
+test "settings picker supports visual fields in current slice" {
+    try std.testing.expect(pickerValues(.color_theme) != null);
     try std.testing.expect(pickerValues(.border_style) != null);
+    try std.testing.expect(pickerValues(.list_density) != null);
+    try std.testing.expect(pickerValues(.date_format) != null);
     try std.testing.expect(pickerValues(.transition) == null);
+    try std.testing.expect(pickerValues(.selection) == null);
     try std.testing.expect(pickerValues(.image_protocol) == null);
 }

@@ -993,7 +993,7 @@ pub const App = struct {
 
     fn cycleSettingsField(self: *App, ctx: *chasen.Ctx(Msg), field: screens.settings.CycleField) !void {
         switch (field) {
-            .color_theme => self.config.interface.color_theme = nextCycleValue(self.config.interface.color_theme, &color_theme_values),
+            .color_theme => self.config.interface.color_theme = nextCycleValue(self.config.interface.color_theme, &screens.settings.color_theme_values),
             .transition => {
                 self.config.interface.transition = nextCycleValue(self.config.interface.transition, &transition_values);
                 self.startContentTransition(ctx);
@@ -1003,8 +1003,8 @@ pub const App = struct {
                 self.requestMotionFrameIfNeeded(ctx);
             },
             .border_style => self.config.interface.border_style = nextCycleValue(self.config.interface.border_style, &screens.settings.border_style_values),
-            .list_density => self.config.interface.list_density = nextCycleValue(self.config.interface.list_density, &list_density_values),
-            .date_format => self.config.interface.date_format = nextCycleValue(self.config.interface.date_format, &date_format_values),
+            .list_density => self.config.interface.list_density = nextCycleValue(self.config.interface.list_density, &screens.settings.list_density_values),
+            .date_format => self.config.interface.date_format = nextCycleValue(self.config.interface.date_format, &screens.settings.date_format_values),
             .image_protocol => {
                 self.config.display.image_protocol = nextImageProtocol(self.config.display.image_protocol);
                 try self.syncListImagePreview(ctx);
@@ -1017,7 +1017,10 @@ pub const App = struct {
         const picker = self.settings.picker orelse return;
         const value = self.settings.pickerSelectedValue() orelse return;
         switch (picker.field) {
+            .color_theme => self.config.interface.color_theme = value,
             .border_style => self.config.interface.border_style = value,
+            .list_density => self.config.interface.list_density = value,
+            .date_format => self.config.interface.date_format = value,
             else => return,
         }
         self.settings.closePicker();
@@ -2960,11 +2963,8 @@ fn parseSettingsWidth(text: []const u8) !u16 {
     return value;
 }
 
-const color_theme_values = [_][]const u8{ "default", "blue", "orange", "mono", "matcha" };
 const transition_values = transitions.values;
 const selection_values = [_][]const u8{ "none", "invert", "wave", "blink", "glitch", "scan" };
-const list_density_values = [_][]const u8{ "compact", "normal", "comfortable", "relaxed" };
-const date_format_values = [_][]const u8{ "yyyy-mm-dd", "yyyy/mm/dd", "relative", "YYYY-MM-DD" };
 
 fn nextCycleValue(current: []const u8, values: []const []const u8) []const u8 {
     for (values, 0..) |value, index| {
@@ -3916,11 +3916,40 @@ test "settings interface cycle fields update supported values" {
     try std.testing.expectEqualStrings("yyyy/mm/dd", app.config.interface.date_format);
 }
 
-test "settings enter opens border style picker but keeps image protocol cycling" {
+test "settings enter opens visual pickers but keeps side effect fields cycling" {
     var app = App.create(.{}, .{});
     app.screen = .settings;
 
-    for (0..3) |_| app.settings.updateList(.move_next);
+    const color_msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
+    switch (color_msg) {
+        .settings => |settings_msg| switch (settings_msg) {
+            .picker_open => |field| try std.testing.expectEqual(screens.settings.CycleField.color_theme, field),
+            else => return error.UnexpectedSettingsMessage,
+        },
+        else => return error.UnexpectedAppMessage,
+    }
+
+    app.settings.updateList(.move_next);
+    const transition_msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
+    switch (transition_msg) {
+        .settings => |settings_msg| switch (settings_msg) {
+            .cycle_next => |field| try std.testing.expectEqual(screens.settings.CycleField.transition, field),
+            else => return error.UnexpectedSettingsMessage,
+        },
+        else => return error.UnexpectedAppMessage,
+    }
+
+    app.settings.updateList(.move_next);
+    const selection_msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
+    switch (selection_msg) {
+        .settings => |settings_msg| switch (settings_msg) {
+            .cycle_next => |field| try std.testing.expectEqual(screens.settings.CycleField.selection, field),
+            else => return error.UnexpectedSettingsMessage,
+        },
+        else => return error.UnexpectedAppMessage,
+    }
+
+    app.settings.updateList(.move_next);
     const border_msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
     switch (border_msg) {
         .settings => |settings_msg| switch (settings_msg) {
@@ -3930,7 +3959,27 @@ test "settings enter opens border style picker but keeps image protocol cycling"
         else => return error.UnexpectedAppMessage,
     }
 
-    for (0..4) |_| app.settings.updateList(.move_next);
+    app.settings.updateList(.move_next);
+    const density_msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
+    switch (density_msg) {
+        .settings => |settings_msg| switch (settings_msg) {
+            .picker_open => |field| try std.testing.expectEqual(screens.settings.CycleField.list_density, field),
+            else => return error.UnexpectedSettingsMessage,
+        },
+        else => return error.UnexpectedAppMessage,
+    }
+
+    app.settings.updateList(.move_next);
+    const date_msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
+    switch (date_msg) {
+        .settings => |settings_msg| switch (settings_msg) {
+            .picker_open => |field| try std.testing.expectEqual(screens.settings.CycleField.date_format, field),
+            else => return error.UnexpectedSettingsMessage,
+        },
+        else => return error.UnexpectedAppMessage,
+    }
+
+    for (0..2) |_| app.settings.updateList(.move_next);
     const image_msg = app.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?;
     switch (image_msg) {
         .settings => |settings_msg| switch (settings_msg) {
@@ -3958,6 +4007,41 @@ test "settings border style picker previews before commit" {
     try std.testing.expect(!app.settings.pickerOpen());
     try std.testing.expectEqualStrings("rounded", app.config.interface.border_style);
     try std.testing.expectEqualStrings("rounded", app.effectiveRenderConfig().interface.border_style);
+}
+
+test "settings color theme picker previews before commit" {
+    var app = App.create(.{ .interface = .{ .color_theme = "default" } }, .{});
+    app.screen = .settings;
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.update(.{ .settings = .{ .picker_open = .color_theme } }, &tc.ctx);
+    try app.update(.{ .settings = .picker_move_next }, &tc.ctx);
+
+    try std.testing.expectEqualStrings("default", app.config.interface.color_theme);
+    try std.testing.expectEqualStrings("blue", app.effectiveRenderConfig().interface.color_theme);
+
+    try app.update(.{ .settings = .picker_confirm }, &tc.ctx);
+
+    try std.testing.expect(!app.settings.pickerOpen());
+    try std.testing.expectEqualStrings("blue", app.config.interface.color_theme);
+}
+
+test "settings list density and date format pickers commit selected values" {
+    var app = App.create(.{ .interface = .{
+        .list_density = "normal",
+        .date_format = "yyyy-mm-dd",
+    } }, .{});
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+    try app.update(.{ .settings = .{ .picker_open = .list_density } }, &tc.ctx);
+    try app.update(.{ .settings = .picker_move_next }, &tc.ctx);
+    try app.update(.{ .settings = .picker_confirm }, &tc.ctx);
+    try std.testing.expectEqualStrings("comfortable", app.config.interface.list_density);
+
+    try app.update(.{ .settings = .{ .picker_open = .date_format } }, &tc.ctx);
+    try app.update(.{ .settings = .picker_move_next }, &tc.ctx);
+    try app.update(.{ .settings = .picker_confirm }, &tc.ctx);
+    try std.testing.expectEqualStrings("yyyy/mm/dd", app.config.interface.date_format);
 }
 
 test "settings border style picker confirm commits and saves" {
