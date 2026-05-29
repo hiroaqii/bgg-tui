@@ -317,6 +317,8 @@ pub const App = struct {
                         if (key.matches(chasen.Key.enter, .{})) return .{ .settings = .picker_confirm };
                         if (key.matches(chasen.Key.up, .{}) or key.codepoint == 'k') return .{ .settings = .picker_move_prev };
                         if (key.matches(chasen.Key.down, .{}) or key.codepoint == 'j') return .{ .settings = .picker_move_next };
+                        if (key.matches(chasen.Key.left, .{}) or key.codepoint == 'h') return .{ .settings = .picker_move_left };
+                        if (key.matches(chasen.Key.right, .{}) or key.codepoint == 'l') return .{ .settings = .picker_move_right };
                     },
                     else => {},
                 }
@@ -895,6 +897,14 @@ pub const App = struct {
             },
             .picker_move_next => {
                 self.settings.movePickerNext(self.animation_frame);
+                self.requestPickerPreviewFrameIfNeeded(ctx);
+            },
+            .picker_move_left => {
+                self.settings.movePickerLeft(self.animation_frame);
+                self.requestPickerPreviewFrameIfNeeded(ctx);
+            },
+            .picker_move_right => {
+                self.settings.movePickerRight(self.animation_frame);
                 self.requestPickerPreviewFrameIfNeeded(ctx);
             },
             .picker_confirm => try self.confirmSettingsPicker(ctx),

@@ -60,6 +60,8 @@ pub const Msg = union(enum) {
     picker_open: CycleField,
     picker_move_prev,
     picker_move_next,
+    picker_move_left,
+    picker_move_right,
     picker_confirm,
     picker_cancel,
     list: ui.List.Msg,
@@ -78,6 +80,12 @@ pub const selection_values = [_][]const u8{ "none", "invert", "wave", "blink", "
 pub const border_style_values = [_][]const u8{ "none", "rounded", "thick", "double", "block", "dots" };
 pub const list_density_values = [_][]const u8{ "compact", "normal", "comfortable", "relaxed" };
 pub const date_format_values = [_][]const u8{ "yyyy-mm-dd", "yyyy/mm/dd", "relative", "YYYY-MM-DD" };
+
+const transition_picker_width: u16 = 56;
+const transition_picker_column_count: usize = 2;
+const transition_picker_list_start_row: u16 = 10;
+const transition_picker_min_visible_rows: usize = 8;
+const picker_overlay_vertical_overhead: usize = 4;
 
 const items = [_]Item{
     .{ .label = "Color Theme", .section = "Interface", .kind = .cycle },
@@ -191,6 +199,22 @@ pub const State = struct {
         }
     }
 
+    pub fn movePickerLeft(self: *State, animation_frame: u64) void {
+        if (self.picker) |*picker| {
+            const target = pickerHorizontalTarget(picker.*, .left) orelse return;
+            picker.preview_index = target;
+            picker.preview_started_frame = animation_frame;
+        }
+    }
+
+    pub fn movePickerRight(self: *State, animation_frame: u64) void {
+        if (self.picker) |*picker| {
+            const target = pickerHorizontalTarget(picker.*, .right) orelse return;
+            picker.preview_index = target;
+            picker.preview_started_frame = animation_frame;
+        }
+    }
+
     pub fn pickerSelectedValue(self: *const State) ?[]const u8 {
         const picker = self.picker orelse return null;
         const values = pickerValues(picker.field) orelse return null;
@@ -298,8 +322,8 @@ pub const State = struct {
         }
 
         if (row < size.height) {
-            const help = if (self.picker != null)
-                "j/k ↑↓: Choose  Enter: Save  Esc: Cancel"
+            const help = if (self.picker) |picker|
+                pickerHelp(picker.field)
             else if (self.editing != null)
                 "Enter: Save  Esc: Cancel"
             else if (self.focusedEditField()) |field|
@@ -322,8 +346,8 @@ pub const State = struct {
         const size = surface.size();
         if (size.width < 34 or size.height < 12) return;
 
-        const width: u16 = if (picker.field == .transition) 44 else 30;
-        const desired_height = if (picker.field == .transition) values.len + 12 else @min(@as(usize, 10), values.len + 4);
+        const width = pickerOverlayWidth(picker.field);
+        const desired_height = pickerOverlayHeight(picker.field, values.len);
         const height: u16 = @intCast(@min(desired_height, @as(usize, size.height -| 2)));
         const selected_value = self.pickerSelectedValue() orelse "";
         const frame = ui.Overlay.frame(surface, .{
@@ -341,7 +365,9 @@ pub const State = struct {
         var list_start_row: u16 = 0;
         if (picker.field == .transition) {
             drawTransitionPreview(&content, selected_value, picker.preview_started_frame, animation_frame, theme);
-            list_start_row = 10;
+            list_start_row = transition_picker_list_start_row;
+            drawTransitionPickerItems(&content, values, picker, list_start_row, theme, animation_frame);
+            return;
         }
         for (values, 0..) |value, index| {
             const row: u16 = list_start_row + @as(u16, @intCast(index));
@@ -357,6 +383,96 @@ pub const State = struct {
         }
     }
 };
+
+fn drawTransitionPickerItems(
+    surface: *chasen.Surface,
+    values: []const []const u8,
+    picker: PickerState,
+    list_start_row: u16,
+    theme: style_mod.Theme,
+    animation_frame: u64,
+) void {
+    const size = surface.size();
+    if (list_start_row >= size.height) return;
+
+    const rows_per_column = gridRows(values.len, transition_picker_column_count);
+    const column_width: u16 = @max(@as(u16, 20), size.width / 2);
+    const visible_rows: usize = size.height - list_start_row;
+    const focused_row = picker.preview_index % rows_per_column;
+    const scroll_start = scrollStartForFocusedRow(focused_row, rows_per_column, visible_rows);
+    const scroll_end = @min(rows_per_column, scroll_start + visible_rows);
+
+    for (values, 0..) |value, index| {
+        const column: u16 = @intCast(index / rows_per_column);
+        const local_row = index % rows_per_column;
+        if (local_row < scroll_start or local_row >= scroll_end) continue;
+
+        const row = list_start_row + @as(u16, @intCast(local_row - scroll_start));
+
+        const col = column * column_width;
+        if (col + 4 >= size.width) continue;
+
+        const focused = picker.preview_index == index;
+        const committed = picker.committed_index == index;
+        const cursor = if (focused) "> " else "  ";
+        const marker = if (committed) "*" else " ";
+        _ = surface.borrowTextAt(col, row, cursor, .{ .bold = focused });
+        _ = surface.borrowTextAt(col + 2, row, marker, if (committed) .{ .fg = theme.accent } else theme.muted);
+        drawItemText(surface, col + 4, row, value, if (focused) theme.focused else .{}, focused, "none", animation_frame);
+    }
+}
+
+fn pickerOverlayWidth(field: CycleField) u16 {
+    return switch (field) {
+        .transition => transition_picker_width,
+        else => 30,
+    };
+}
+
+fn pickerOverlayHeight(field: CycleField, value_count: usize) usize {
+    return switch (field) {
+        .transition => blk: {
+            const transition_rows = gridRows(value_count, transition_picker_column_count);
+            const visible_rows = @min(transition_rows, transition_picker_min_visible_rows);
+            break :blk @as(usize, transition_picker_list_start_row) + visible_rows + picker_overlay_vertical_overhead;
+        },
+        else => @min(@as(usize, 10), value_count + 4),
+    };
+}
+
+fn scrollStartForFocusedRow(focused_row: usize, total_rows: usize, visible_rows: usize) usize {
+    if (visible_rows == 0 or total_rows <= visible_rows) return 0;
+    const max_start = total_rows - visible_rows;
+    if (focused_row > max_start) return max_start;
+    return focused_row;
+}
+
+const HorizontalDirection = enum { left, right };
+
+fn pickerHorizontalTarget(picker: PickerState, direction: HorizontalDirection) ?usize {
+    if (picker.field != .transition) return null;
+    const values = pickerValues(picker.field) orelse return null;
+    return gridHorizontalTarget(picker.preview_index, values.len, transition_picker_column_count, direction);
+}
+
+fn gridHorizontalTarget(index: usize, item_count: usize, column_count: usize, direction: HorizontalDirection) ?usize {
+    const rows_per_column = gridRows(item_count, column_count);
+    const target = switch (direction) {
+        .left => if (index >= rows_per_column) index - rows_per_column else return null,
+        .right => index + rows_per_column,
+    };
+    if (target >= item_count) return null;
+    return target;
+}
+
+fn transitionPickerRows() usize {
+    return gridRows(transition_values.len, transition_picker_column_count);
+}
+
+fn gridRows(item_count: usize, column_count: usize) usize {
+    if (column_count == 0) return 0;
+    return (item_count + column_count - 1) / column_count;
+}
 
 pub fn pickerValues(field: CycleField) ?[]const []const u8 {
     return switch (field) {
@@ -551,6 +667,13 @@ fn cycleHelp(field: CycleField) []const u8 {
         .list_density => "j/k ↑↓: Navigate  Enter: Change List Density  m: Menu  Esc/q: Quit",
         .date_format => "j/k ↑↓: Navigate  Enter: Change Date Format  m: Menu  Esc/q: Quit",
         .image_protocol => "j/k ↑↓: Navigate  Enter: Change Image Protocol  m: Menu  Esc/q: Quit",
+    };
+}
+
+fn pickerHelp(field: CycleField) []const u8 {
+    return switch (field) {
+        .transition => "h/l ←→: Column  j/k ↑↓: Choose  Enter: Save  Esc: Cancel",
+        else => "j/k ↑↓: Choose  Enter: Save  Esc: Cancel",
     };
 }
 
@@ -766,6 +889,53 @@ test "settings visual pickers preview without mutating committed config" {
     state.movePickerNext(31);
     try std.testing.expectEqualStrings("yyyy-mm-dd", config.interface.date_format);
     try std.testing.expectEqualStrings("yyyy/mm/dd", state.previewConfig(config).interface.date_format);
+}
+
+test "settings transition picker moves horizontally across columns" {
+    var state: State = .{};
+    const config: config_mod.Config = .{ .interface = .{ .transition = "none" } };
+
+    state.openPicker(.transition, config, 10);
+    try std.testing.expectEqual(@as(usize, 0), state.picker.?.preview_index);
+
+    state.movePickerRight(11);
+    try std.testing.expectEqual(transitionPickerRows(), state.picker.?.preview_index);
+    try std.testing.expectEqual(@as(u64, 11), state.picker.?.preview_started_frame);
+
+    state.movePickerLeft(12);
+    try std.testing.expectEqual(@as(usize, 0), state.picker.?.preview_index);
+    try std.testing.expectEqual(@as(u64, 12), state.picker.?.preview_started_frame);
+}
+
+test "settings transition picker horizontal movement ignores missing cells" {
+    var state: State = .{};
+    const config: config_mod.Config = .{ .interface = .{ .transition = "random" } };
+
+    state.openPicker(.transition, config, 20);
+    try std.testing.expectEqual(transition_values.len - 1, state.picker.?.preview_index);
+
+    state.movePickerRight(21);
+    try std.testing.expectEqual(transition_values.len - 1, state.picker.?.preview_index);
+    try std.testing.expectEqual(@as(u64, 20), state.picker.?.preview_started_frame);
+}
+
+test "settings transition picker grid helpers preserve visible focused row" {
+    try std.testing.expectEqual(@as(usize, 7), transitionPickerRows());
+    try std.testing.expectEqual(@as(usize, 0), scrollStartForFocusedRow(0, 7, 8));
+    try std.testing.expectEqual(@as(usize, 4), scrollStartForFocusedRow(6, 7, 3));
+    try std.testing.expectEqual(@as(?usize, 7), gridHorizontalTarget(0, transition_values.len, transition_picker_column_count, .right));
+    try std.testing.expectEqual(@as(?usize, 13), gridHorizontalTarget(6, transition_values.len, transition_picker_column_count, .right));
+    try std.testing.expectEqual(@as(?usize, null), gridHorizontalTarget(13, transition_values.len, transition_picker_column_count, .right));
+}
+
+test "settings transition picker height caps visible list rows" {
+    const capped_height = @as(usize, transition_picker_list_start_row) + transition_picker_min_visible_rows + picker_overlay_vertical_overhead;
+
+    try std.testing.expectEqual(
+        @as(usize, transition_picker_list_start_row) + transitionPickerRows() + picker_overlay_vertical_overhead,
+        pickerOverlayHeight(.transition, transition_values.len),
+    );
+    try std.testing.expectEqual(capped_height, pickerOverlayHeight(.transition, 40));
 }
 
 test "settings picker supports visual fields in current slice" {
