@@ -29,10 +29,14 @@ pub fn main(init: std.process.Init) !void {
         null;
 
     try chasen.runWith(.{
-        .allocator = init.gpa,
-        .io = init.io,
-        .env_map = init.environ_map,
-        .terminal_image_path_loader = image_loader,
+        .runtime = .{
+            .allocator = init.gpa,
+            .io = init.io,
+        },
+        .terminal = .{
+            .env_map = init.environ_map,
+            .image_path_loader = image_loader,
+        },
     }, bgg_tui.app.App.create(config, .{
         .config_path = config_path,
         .image_cache_dir = image_cache_dir,
