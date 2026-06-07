@@ -28,6 +28,7 @@ pub const State = struct {
     image_request_id: u64 = 0,
     load_state: LoadState = .idle,
     image_state: ImageState = .idle,
+    terminal_image_request_id: ?chasen.TerminalImageRequestId = null,
     terminal_image_handle: ?chasen.TerminalImageHandle = null,
     terminal_image_load_error: ?chasen.TerminalImageLoadError = null,
     games: []bgg_model.Game = &.{},
@@ -75,6 +76,7 @@ pub const State = struct {
     }
 
     pub fn setTerminalImageLoading(self: *State) void {
+        self.terminal_image_request_id = null;
         self.terminal_image_handle = null;
         self.terminal_image_load_error = null;
     }
@@ -169,6 +171,7 @@ pub const State = struct {
         self.image_state = .idle;
         self.terminal_image_handle = null;
         self.terminal_image_load_error = null;
+        self.terminal_image_request_id = null;
     }
 
     fn rebuildLines(self: *State, allocator: std.mem.Allocator, detail_width: usize) !void {

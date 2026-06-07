@@ -174,6 +174,10 @@ pub const App = struct {
         self.requestMotionFrameIfNeeded(ctx);
     }
 
+    pub fn deinit(self: *App, _: chasen.AppDeinitContext) void {
+        self.deinitOwnedState();
+    }
+
     pub fn update(self: *App, msg: Msg, ctx: *chasen.Ctx(Msg)) !void {
         switch (msg) {
             .setup_token => |setup_msg| try self.updateSetupToken(setup_msg, ctx),
@@ -208,10 +212,7 @@ pub const App = struct {
             .show_screen => |screen| try self.showScreen(screen, ctx),
             .help_open => self.help_open = true,
             .help_close => self.help_open = false,
-            .quit => {
-                self.deinitOwnedState();
-                ctx.quit();
-            },
+            .quit => ctx.quit(),
         }
     }
 
@@ -1595,22 +1596,16 @@ pub const App = struct {
     fn startGameDetailTerminalImageLoad(self: *App, ctx: *chasen.Ctx(Msg), path: []const u8) !void {
         self.releaseGameDetailTerminalImage(ctx);
 
-        const load_ctx = try self.allocator.?.create(GameDetailTerminalImageLoadContext);
-        errdefer self.allocator.?.destroy(load_ctx);
-        load_ctx.* = .{ .request_id = self.game_detail.image_request_id };
-
         self.game_detail.setTerminalImageLoading();
-        ctx.loadTerminalImagePath(path, load_ctx, &gameDetailTerminalImageLoaded, &gameDetailTerminalImageFailed) catch |err| {
+        const request_id = ctx.loadTerminalImagePath(path, &gameDetailTerminalImageLoaded, &gameDetailTerminalImageFailed) catch |err| {
             self.game_detail.setTerminalImageFailed(.load_failed);
             return err;
         };
+        self.game_detail.terminal_image_request_id = request_id;
     }
 
     fn finishGameDetailTerminalImageLoad(self: *App, ctx: *chasen.Ctx(Msg), result: GameDetailTerminalImageLoaded) void {
-        const load_ctx = result.load_ctx;
-        defer self.allocator.?.destroy(load_ctx);
-
-        if (load_ctx.request_id != self.game_detail.image_request_id) {
+        if (!sameTerminalImageRequestId(result.request_id, self.game_detail.terminal_image_request_id)) {
             ctx.unloadTerminalImage(result.handle) catch {};
             return;
         }
@@ -1619,10 +1614,7 @@ pub const App = struct {
     }
 
     fn finishGameDetailTerminalImageFailure(self: *App, result: GameDetailTerminalImageFailed) void {
-        const load_ctx = result.load_ctx;
-        defer self.allocator.?.destroy(load_ctx);
-
-        if (load_ctx.request_id != self.game_detail.image_request_id) return;
+        if (!sameTerminalImageRequestId(result.request_id, self.game_detail.terminal_image_request_id)) return;
         self.game_detail.setTerminalImageFailed(result.reason);
     }
 
@@ -1757,22 +1749,16 @@ pub const App = struct {
     fn startListImageTerminalImageLoad(self: *App, ctx: *chasen.Ctx(Msg), path: []const u8) !void {
         self.releaseListImageTerminalImage(ctx);
 
-        const load_ctx = try self.allocator.?.create(ListImageTerminalImageLoadContext);
-        errdefer self.allocator.?.destroy(load_ctx);
-        load_ctx.* = .{ .request_id = self.list_image.request_id };
-
         self.list_image.setTerminalImageLoading();
-        ctx.loadTerminalImagePath(path, load_ctx, &listImageTerminalImageLoaded, &listImageTerminalImageFailed) catch |err| {
+        const request_id = ctx.loadTerminalImagePath(path, &listImageTerminalImageLoaded, &listImageTerminalImageFailed) catch |err| {
             self.list_image.setTerminalImageFailed(.load_failed);
             return err;
         };
+        self.list_image.terminal_image_request_id = request_id;
     }
 
     fn finishListImageTerminalImageLoad(self: *App, ctx: *chasen.Ctx(Msg), result: ListImageTerminalImageLoaded) void {
-        const load_ctx = result.load_ctx;
-        defer self.allocator.?.destroy(load_ctx);
-
-        if (load_ctx.request_id != self.list_image.request_id) {
+        if (!sameTerminalImageRequestId(result.request_id, self.list_image.terminal_image_request_id)) {
             ctx.unloadTerminalImage(result.handle) catch {};
             return;
         }
@@ -1781,10 +1767,7 @@ pub const App = struct {
     }
 
     fn finishListImageTerminalImageFailure(self: *App, result: ListImageTerminalImageFailed) void {
-        const load_ctx = result.load_ctx;
-        defer self.allocator.?.destroy(load_ctx);
-
-        if (load_ctx.request_id != self.list_image.request_id) return;
+        if (!sameTerminalImageRequestId(result.request_id, self.list_image.terminal_image_request_id)) return;
         self.list_image.setTerminalImageFailed(result.reason);
     }
 
@@ -2526,17 +2509,13 @@ const GameDetailImageTaskResult = struct {
     result: GameDetailImageResult,
 };
 
-const GameDetailTerminalImageLoadContext = struct {
-    request_id: u64,
-};
-
 const GameDetailTerminalImageLoaded = struct {
-    load_ctx: *GameDetailTerminalImageLoadContext,
+    request_id: chasen.TerminalImageRequestId,
     handle: chasen.TerminalImageHandle,
 };
 
 const GameDetailTerminalImageFailed = struct {
-    load_ctx: *GameDetailTerminalImageLoadContext,
+    request_id: chasen.TerminalImageRequestId,
     reason: chasen.TerminalImageLoadError,
 };
 
@@ -2550,17 +2529,13 @@ const ListImageTaskResult = struct {
     result: ListImageResult,
 };
 
-const ListImageTerminalImageLoadContext = struct {
-    request_id: u64,
-};
-
 const ListImageTerminalImageLoaded = struct {
-    load_ctx: *ListImageTerminalImageLoadContext,
+    request_id: chasen.TerminalImageRequestId,
     handle: chasen.TerminalImageHandle,
 };
 
 const ListImageTerminalImageFailed = struct {
-    load_ctx: *ListImageTerminalImageLoadContext,
+    request_id: chasen.TerminalImageRequestId,
     reason: chasen.TerminalImageLoadError,
 };
 
@@ -2778,34 +2753,30 @@ const ListImageTask = struct {
     }
 };
 
-fn gameDetailTerminalImageLoaded(ctx_ptr: *anyopaque, handle: chasen.TerminalImageHandle) App.Msg {
-    const load_ctx: *GameDetailTerminalImageLoadContext = @ptrCast(@alignCast(ctx_ptr));
+fn gameDetailTerminalImageLoaded(request_id: chasen.TerminalImageRequestId, handle: chasen.TerminalImageHandle) App.Msg {
     return .{ .game_detail = .{ .terminal_image_loaded = .{
-        .load_ctx = load_ctx,
+        .request_id = request_id,
         .handle = handle,
     } } };
 }
 
-fn gameDetailTerminalImageFailed(ctx_ptr: *anyopaque, reason: chasen.TerminalImageLoadError) App.Msg {
-    const load_ctx: *GameDetailTerminalImageLoadContext = @ptrCast(@alignCast(ctx_ptr));
+fn gameDetailTerminalImageFailed(request_id: chasen.TerminalImageRequestId, reason: chasen.TerminalImageLoadError) App.Msg {
     return .{ .game_detail = .{ .terminal_image_failed = .{
-        .load_ctx = load_ctx,
+        .request_id = request_id,
         .reason = reason,
     } } };
 }
 
-fn listImageTerminalImageLoaded(ctx_ptr: *anyopaque, handle: chasen.TerminalImageHandle) App.Msg {
-    const load_ctx: *ListImageTerminalImageLoadContext = @ptrCast(@alignCast(ctx_ptr));
+fn listImageTerminalImageLoaded(request_id: chasen.TerminalImageRequestId, handle: chasen.TerminalImageHandle) App.Msg {
     return .{ .list_image = .{ .terminal_image_loaded = .{
-        .load_ctx = load_ctx,
+        .request_id = request_id,
         .handle = handle,
     } } };
 }
 
-fn listImageTerminalImageFailed(ctx_ptr: *anyopaque, reason: chasen.TerminalImageLoadError) App.Msg {
-    const load_ctx: *ListImageTerminalImageLoadContext = @ptrCast(@alignCast(ctx_ptr));
+fn listImageTerminalImageFailed(request_id: chasen.TerminalImageRequestId, reason: chasen.TerminalImageLoadError) App.Msg {
     return .{ .list_image = .{ .terminal_image_failed = .{
-        .load_ctx = load_ctx,
+        .request_id = request_id,
         .reason = reason,
     } } };
 }
@@ -3007,6 +2978,11 @@ fn listImagePanelMessage(message: []const u8) []const u8 {
     if (std.mem.eql(u8, message, "WebP covers not supported yet")) return "WebP not supported";
     if (std.mem.eql(u8, message, "Cover format not supported")) return "Unsupported format";
     return message;
+}
+
+fn sameTerminalImageRequestId(actual: chasen.TerminalImageRequestId, expected: ?chasen.TerminalImageRequestId) bool {
+    const expected_id = expected orelse return false;
+    return actual.id == expected_id.id;
 }
 
 fn threadLayoutForTerminal(self: *const App) screens.thread.Layout {
@@ -4770,13 +4746,42 @@ test "hot list image preview retries cached terminal load after transition" {
     defer {
         for (tc.ctx.pendingTerminalImageLoadSlice()) |entry| {
             std.testing.allocator.free(entry.path);
-            const load_ctx: *ListImageTerminalImageLoadContext = @ptrCast(@alignCast(entry.ctx));
-            std.testing.allocator.destroy(load_ctx);
         }
         tc.ctx.pending_terminal_image_loads_len = 0;
     }
 
     try std.testing.expectEqual(@as(usize, 1), tc.ctx.pendingTerminalImageLoadSlice().len);
+}
+
+test "superseded list image terminal load unloads stale handle" {
+    var app = App.create(.{}, .{});
+    app.allocator = std.testing.allocator;
+    defer app.deinitOwnedState();
+
+    var tc: chasen.testing.TestCtx(App.Msg) = .{};
+
+    app.list_image.request_id = 1;
+    try app.startListImageTerminalImageLoad(&tc.ctx, "/tmp/old-cover.png");
+
+    app.list_image.request_id = 2;
+    try app.startListImageTerminalImageLoad(&tc.ctx, "/tmp/new-cover.png");
+
+    defer {
+        for (tc.ctx.pendingTerminalImageLoadSlice()) |entry| {
+            std.testing.allocator.free(entry.path);
+        }
+        tc.ctx.pending_terminal_image_loads_len = 0;
+    }
+
+    const pending = tc.ctx.pendingTerminalImageLoadSlice();
+    try std.testing.expectEqual(@as(usize, 2), pending.len);
+
+    app.finishListImageTerminalImageLoad(&tc.ctx, .{
+        .request_id = pending[0].request_id,
+        .handle = .{ .id = 7, .generation = 1 },
+    });
+
+    try std.testing.expectEqual(@as(usize, 1), tc.ctx.pendingTerminalImageUnloadSlice().len);
 }
 
 test "collection list image preview reports unsupported WebP thumbnail without cache task" {
@@ -4912,8 +4917,6 @@ test "game detail cached image queues terminal image load" {
     defer {
         for (tc.ctx.pendingTerminalImageLoadSlice()) |entry| {
             std.testing.allocator.free(entry.path);
-            const load_ctx: *GameDetailTerminalImageLoadContext = @ptrCast(@alignCast(entry.ctx));
-            std.testing.allocator.destroy(load_ctx);
         }
         tc.ctx.pending_terminal_image_loads_len = 0;
     }
@@ -4949,8 +4952,6 @@ test "game detail terminal image load waits for transition completion" {
     defer {
         for (tc.ctx.pendingTerminalImageLoadSlice()) |entry| {
             std.testing.allocator.free(entry.path);
-            const load_ctx: *GameDetailTerminalImageLoadContext = @ptrCast(@alignCast(entry.ctx));
-            std.testing.allocator.destroy(load_ctx);
         }
         tc.ctx.pending_terminal_image_loads_len = 0;
     }
@@ -4980,8 +4981,6 @@ test "returning to detail retries deferred terminal image load without transitio
     defer {
         for (tc.ctx.pendingTerminalImageLoadSlice()) |entry| {
             std.testing.allocator.free(entry.path);
-            const load_ctx: *GameDetailTerminalImageLoadContext = @ptrCast(@alignCast(entry.ctx));
-            std.testing.allocator.destroy(load_ctx);
         }
         tc.ctx.pending_terminal_image_loads_len = 0;
     }
@@ -4997,13 +4996,10 @@ test "stale terminal image load is unloaded" {
     defer app.deinitOwnedState();
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
-    app.game_detail.image_request_id = 5;
-
-    const load_ctx = try std.testing.allocator.create(GameDetailTerminalImageLoadContext);
-    load_ctx.* = .{ .request_id = 4 };
+    app.game_detail.terminal_image_request_id = .{ .id = 5 };
 
     app.finishGameDetailTerminalImageLoad(&tc.ctx, .{
-        .load_ctx = load_ctx,
+        .request_id = .{ .id = 4 },
         .handle = .{ .id = 9, .generation = 1 },
     });
 

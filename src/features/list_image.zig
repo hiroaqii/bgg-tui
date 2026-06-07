@@ -3,7 +3,7 @@ const chasen = @import("chasen");
 
 const screens = @import("../screens/root.zig");
 
-pub const focus_settle_frames: u64 = 8;
+pub const focus_settle_frames: u64 = 12;
 
 pub const SourceKind = enum {
     hot_games,
@@ -28,6 +28,7 @@ pub const State = struct {
     candidate: ?Source = null,
     candidate_start_frame: u64 = 0,
     image_state: screens.detail.ImageState = .idle,
+    terminal_image_request_id: ?chasen.TerminalImageRequestId = null,
     terminal_image_handle: ?chasen.TerminalImageHandle = null,
     terminal_image_load_error: ?chasen.TerminalImageLoadError = null,
     cache_task_pending: bool = false,
@@ -88,6 +89,7 @@ pub const State = struct {
     }
 
     pub fn setTerminalImageLoading(self: *State) void {
+        self.terminal_image_request_id = null;
         self.terminal_image_handle = null;
         self.terminal_image_load_error = null;
     }
@@ -115,6 +117,7 @@ pub const State = struct {
             else => {},
         }
         self.image_state = .idle;
+        self.terminal_image_request_id = null;
         self.terminal_image_handle = null;
         self.terminal_image_load_error = null;
         self.cache_task_pending = false;
