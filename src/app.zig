@@ -246,12 +246,11 @@ pub const App = struct {
             .width = size.width,
             .height = 1,
         });
-        const status_footer = try footer.allocText(sfc.frameAllocator(), self.statusItems(), footer.drawOptions(self.subtleStyle(), .{}));
         const status_left = try std.fmt.allocPrint(sfc.frameAllocator(), "bgg-tui {s}", .{build_options.version});
         const status = ui.StatusLine.init(.{
             .left = status_left,
             .center = screenTitle(self.screen),
-            .right = status_footer,
+            .right = self.statusRightText(),
         });
         status.view(&status_area, .{});
 
@@ -2440,8 +2439,9 @@ pub const App = struct {
         };
     }
 
-    fn statusItems(self: *const App) []const footer.Item {
-        return self.footerItems();
+    fn statusRightText(self: *const App) []const u8 {
+        if (self.help_open) return "any key: close";
+        return if (self.canOpenHelp()) "?: help" else "";
     }
 
     fn footerMaxLines(self: *const App) u16 {
@@ -3255,12 +3255,6 @@ fn expectFooterText(app: *const App, expected: []const u8) !void {
     try std.testing.expectEqualStrings(expected, actual);
 }
 
-fn expectStatusText(app: *const App, expected: []const u8) !void {
-    const actual = try footer.allocText(std.testing.allocator, app.statusItems(), footer.drawOptions(.{}, .{}));
-    defer std.testing.allocator.free(actual);
-    try std.testing.expectEqualStrings(expected, actual);
-}
-
 test "footer hint matches screen key handling" {
     var app = App.create(.{ .api = .{ .token = "token" } }, .{});
 
@@ -3326,12 +3320,23 @@ test "footer hint matches screen key handling" {
     try expectFooterText(&app, "Arrows/j/k/h/l: choose  Enter: save  Esc: cancel");
 }
 
-test "main menu status hint matches footer hint" {
+test "status right shows global help hint only when available" {
     var app = App.create(.{ .api = .{ .token = "token" } }, .{});
     app.screen = .main_menu;
 
     try expectFooterText(&app, "↑/↓/j/k: move  Enter: open  Esc/q: quit");
-    try expectStatusText(&app, "↑/↓/j/k: move  Enter: open  Esc/q: quit");
+    try std.testing.expectEqualStrings("?: help", app.statusRightText());
+
+    app.help_open = true;
+    try std.testing.expectEqualStrings("any key: close", app.statusRightText());
+
+    app.help_open = false;
+    app.screen = .search;
+    try std.testing.expectEqualStrings("", app.statusRightText());
+
+    app.screen = .hot_games;
+    app.hot_games.filter_active = true;
+    try std.testing.expectEqualStrings("", app.statusRightText());
 }
 
 test "collection footer wraps to two lines at item boundaries" {
