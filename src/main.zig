@@ -5,6 +5,12 @@ const bgg_tui = @import("bgg_tui");
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
+    const args = try init.minimal.args.toSlice(allocator);
+    if (wantsVersion(args)) {
+        try printVersion(init.io);
+        return;
+    }
+
     const config_path = bgg_tui.config.resolveConfigPath(allocator, init.environ_map) catch |err| switch (err) {
         error.MissingConfigDirectory => null,
         else => return err,
@@ -41,4 +47,29 @@ pub fn main(init: std.process.Init) !void {
         .config_path = config_path,
         .image_cache_dir = image_cache_dir,
     }));
+}
+
+fn wantsVersion(args: []const []const u8) bool {
+    for (args[1..]) |arg| {
+        if (std.mem.eql(u8, arg, "--version")) return true;
+    }
+    return false;
+}
+
+fn printVersion(io: std.Io) !void {
+    var buffer: [128]u8 = undefined;
+    var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &buffer);
+    const stdout = &stdout_file_writer.interface;
+    try stdout.print("{s}\n", .{bgg_tui.version});
+    try stdout.flush();
+}
+
+test "wantsVersion detects version flag" {
+    const args = [_][]const u8{ "bgg-tui", "--version" };
+    try std.testing.expect(wantsVersion(&args));
+}
+
+test "wantsVersion ignores ordinary args" {
+    const args = [_][]const u8{"bgg-tui"};
+    try std.testing.expect(!wantsVersion(&args));
 }

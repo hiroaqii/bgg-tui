@@ -1,5 +1,7 @@
+const build_options = @import("build_options");
+
 pub const name = "bgg-tui";
-pub const version = "0.0.0";
+pub const version = build_options.version;
 
 pub const app = @import("app.zig");
 pub const bgg = @import("bgg/root.zig");

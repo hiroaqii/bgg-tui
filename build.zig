@@ -25,10 +25,15 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const version = "0.4.0-dev";
+    const build_options = b.addOptions();
+    build_options.addOption([]const u8, "version", version);
+
     const mod = b.addModule("bgg_tui", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .imports = &.{
+            .{ .name = "build_options", .module = build_options.createModule() },
             .{ .name = "xml", .module = xml_dep.module("xml") },
             .{ .name = "chasen", .module = chasen_dep.module("chasen") },
             .{ .name = "chasen_ui", .module = chasen_ui_dep.module("chasen_ui") },

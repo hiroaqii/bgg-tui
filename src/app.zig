@@ -3,6 +3,7 @@ const chasen = @import("chasen");
 const anim = @import("chasen_anim");
 const ui = @import("chasen_ui");
 
+const build_options = @import("build_options");
 const bgg_model = @import("bgg/model.zig");
 const bgg_xml = @import("bgg/xml.zig");
 const browser = @import("browser.zig");
@@ -10,6 +11,7 @@ const config_mod = @import("config.zig");
 const features = @import("features/root.zig");
 const footer = @import("footer.zig");
 const format = @import("format.zig");
+const help_overlay = @import("help_overlay.zig");
 const image_mod = @import("image.zig");
 const layout_mod = @import("layout.zig");
 const list_view = @import("list_view.zig");
@@ -124,6 +126,7 @@ pub const App = struct {
     screen_transition: anim.Transition = .{},
     transition_from_screen: ?Screen = null,
     transition_to_screen: ?Screen = null,
+    help_open: bool = false,
     pub const Msg = union(enum) {
         setup_token: SetupTokenMsg,
         hot_games: HotGamesMsg,
@@ -139,6 +142,8 @@ pub const App = struct {
         frame: chasen.Frame,
         menu: ui.Menu.Msg,
         show_screen: Screen,
+        help_open,
+        help_close,
         quit,
     };
 
@@ -201,6 +206,8 @@ pub const App = struct {
                 },
             },
             .show_screen => |screen| try self.showScreen(screen, ctx),
+            .help_open => self.help_open = true,
+            .help_close => self.help_open = false,
             .quit => {
                 self.deinitOwnedState();
                 ctx.quit();
@@ -240,8 +247,9 @@ pub const App = struct {
             .height = 1,
         });
         const status_footer = try footer.allocText(sfc.frameAllocator(), self.statusItems(), footer.drawOptions(self.subtleStyle(), .{}));
+        const status_left = try std.fmt.allocPrint(sfc.frameAllocator(), "bgg-tui {s}", .{build_options.version});
         const status = ui.StatusLine.init(.{
-            .left = "bgg-tui",
+            .left = status_left,
             .center = screenTitle(self.screen),
             .right = status_footer,
         });
@@ -250,6 +258,8 @@ pub const App = struct {
         if (self.hasActiveScreenTransition()) {
             motion.applyScreenTransition(sfc, self.screen_transition);
         }
+
+        if (self.help_open) self.drawHelpOverlay(sfc);
     }
 
     pub fn handleEvent(self: *const App, event: chasen.Event) ?Msg {
@@ -257,6 +267,16 @@ pub const App = struct {
         if (event == .winsize) {
             return .{ .terminal_resized = .{ .width = event.winsize.cols, .height = event.winsize.rows } };
         }
+
+        if (self.help_open) {
+            switch (event) {
+                .key_press => return .help_close,
+                else => {},
+            }
+            return null;
+        }
+
+        if (event == .key_press and isHelpKey(event.key_press) and self.canOpenHelp()) return .help_open;
 
         if (self.screen == .setup_token) {
             switch (event) {
@@ -2445,7 +2465,32 @@ pub const App = struct {
             .overflow = self.footerOverflow(),
         });
     }
+
+    fn canOpenHelp(self: *const App) bool {
+        return switch (self.screen) {
+            .setup_token, .search => false,
+            .hot_games => !self.hot_games.filter_active,
+            .search_results => !self.search.filter_active,
+            .collection => self.collection.load_state == .loaded and !self.collection.filter_active,
+            .settings => !self.settings.pickerOpen() and self.settings.editing == null,
+            else => true,
+        };
+    }
+
+    fn drawHelpOverlay(self: *const App, surface: *chasen.Surface) void {
+        const render_config = self.effectiveRenderConfig();
+        const render_theme = style_mod.Theme.fromName(render_config.interface.color_theme);
+        help_overlay.draw(surface, .{
+            .version = build_options.version,
+            .border = style_mod.borderFromName(render_config.interface.border_style),
+            .theme = render_theme,
+        });
+    }
 };
+
+fn isHelpKey(key: chasen.Key) bool {
+    return key.matches('?', .{});
+}
 
 const HotGamesState = screens.hot_games.State;
 const HotGamesMsg = screens.hot_games.Msg;
@@ -3319,6 +3364,51 @@ test "main menu accepts vim-style movement" {
     try std.testing.expectEqual(App.Msg{ .menu = .move_prev }, app.handleEvent(.{
         .key_press = .{ .codepoint = 'k' },
     }).?);
+}
+
+test "help overlay opens and closes from normal screens" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.screen = .main_menu;
+
+    try std.testing.expectEqual(App.Msg.help_open, app.handleEvent(.{
+        .key_press = .{ .codepoint = '?' },
+    }).?);
+
+    try std.testing.expectEqual(App.Msg.help_open, app.handleEvent(.{
+        .key_press = .{ .codepoint = '/', .shifted_codepoint = '?', .mods = .{ .shift = true } },
+    }).?);
+
+    app.help_open = true;
+    try std.testing.expectEqual(App.Msg.help_close, app.handleEvent(.{
+        .key_press = .{ .codepoint = chasen.Key.escape },
+    }).?);
+    try std.testing.expectEqual(App.Msg.help_close, app.handleEvent(.{
+        .key_press = .{ .codepoint = 'q' },
+    }).?);
+    try std.testing.expectEqual(App.Msg.help_close, app.handleEvent(.{
+        .key_press = .{ .codepoint = '?' },
+    }).?);
+    try std.testing.expectEqual(App.Msg.help_close, app.handleEvent(.{
+        .key_press = .{ .codepoint = '/', .shifted_codepoint = '?', .mods = .{ .shift = true } },
+    }).?);
+    try std.testing.expectEqual(App.Msg.help_close, app.handleEvent(.{
+        .key_press = .{ .codepoint = 'x' },
+    }).?);
+}
+
+test "help overlay does not steal question mark from text entry modes" {
+    var app = App.create(.{}, .{});
+
+    app.screen = .setup_token;
+    try std.testing.expect(app.handleEvent(.{ .key_press = .{ .codepoint = '?' } }) == null);
+
+    app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.screen = .search;
+    try std.testing.expect(app.handleEvent(.{ .key_press = .{ .codepoint = '?' } }) == null);
+
+    app.screen = .hot_games;
+    app.hot_games.filter_active = true;
+    try std.testing.expect(app.handleEvent(.{ .key_press = .{ .codepoint = '?' } }) == null);
 }
 
 test "setup token footer reflects save availability" {
