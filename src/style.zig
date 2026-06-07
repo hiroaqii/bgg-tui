@@ -43,7 +43,11 @@ pub fn borderFromName(name: []const u8) ui.Panel.Border {
 
 fn accentColor(name: []const u8) chasen.Color {
     if (std.mem.eql(u8, name, "blue")) return .{ .index = 12 };
-    if (std.mem.eql(u8, name, "orange")) return .{ .index = 3 };
+    if (std.mem.eql(u8, name, "red")) return .{ .rgb = .{ 243, 139, 168 } };
+    if (std.mem.eql(u8, name, "purple")) return .{ .rgb = .{ 203, 166, 247 } };
+    if (std.mem.eql(u8, name, "pink")) return .{ .rgb = .{ 245, 194, 231 } };
+    if (std.mem.eql(u8, name, "yellow")) return .{ .rgb = .{ 249, 226, 175 } };
+    if (std.mem.eql(u8, name, "orange")) return .{ .rgb = .{ 250, 179, 135 } };
     if (std.mem.eql(u8, name, "matcha")) return .{ .rgb = .{ 118, 150, 86 } };
     return .{ .index = 14 };
 }
@@ -51,7 +55,11 @@ fn accentColor(name: []const u8) chasen.Color {
 test "theme names map to accent colors" {
     try std.testing.expectEqual(chasen.Color{ .index = 14 }, Theme.fromName("default").accent);
     try std.testing.expectEqual(chasen.Color{ .index = 12 }, Theme.fromName("blue").accent);
-    try std.testing.expectEqual(chasen.Color{ .index = 3 }, Theme.fromName("orange").accent);
+    try std.testing.expectEqual(chasen.Color{ .rgb = .{ 243, 139, 168 } }, Theme.fromName("red").accent);
+    try std.testing.expectEqual(chasen.Color{ .rgb = .{ 203, 166, 247 } }, Theme.fromName("purple").accent);
+    try std.testing.expectEqual(chasen.Color{ .rgb = .{ 245, 194, 231 } }, Theme.fromName("pink").accent);
+    try std.testing.expectEqual(chasen.Color{ .rgb = .{ 249, 226, 175 } }, Theme.fromName("yellow").accent);
+    try std.testing.expectEqual(chasen.Color{ .rgb = .{ 250, 179, 135 } }, Theme.fromName("orange").accent);
     try std.testing.expectEqual(chasen.Color.default, Theme.fromName("mono").accent);
     try std.testing.expectEqual(chasen.Color{ .rgb = .{ 118, 150, 86 } }, Theme.fromName("matcha").accent);
     try std.testing.expectEqual(chasen.Color{ .index = 14 }, Theme.fromName("custom").accent);

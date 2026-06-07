@@ -74,7 +74,7 @@ pub const PickerState = struct {
     preview_started_frame: u64,
 };
 
-pub const color_theme_values = [_][]const u8{ "default", "blue", "orange", "mono", "matcha" };
+pub const color_theme_values = [_][]const u8{ "default", "blue", "red", "purple", "pink", "yellow", "orange", "matcha", "mono" };
 pub const transition_values = transitions.values;
 pub const selection_values = [_][]const u8{ "none", "invert", "wave", "blink", "glitch", "scan" };
 pub const border_style_values = [_][]const u8{ "none", "rounded", "thick", "double", "block", "dots" };
@@ -436,7 +436,7 @@ fn pickerOverlayHeight(field: CycleField, value_count: usize) usize {
             const visible_rows = @min(transition_rows, transition_picker_min_visible_rows);
             break :blk @as(usize, transition_picker_list_start_row) + visible_rows + picker_overlay_vertical_overhead;
         },
-        else => @min(@as(usize, 10), value_count + 4),
+        else => value_count + picker_overlay_vertical_overhead,
     };
 }
 
@@ -936,6 +936,11 @@ test "settings transition picker height caps visible list rows" {
         pickerOverlayHeight(.transition, transition_values.len),
     );
     try std.testing.expectEqual(capped_height, pickerOverlayHeight(.transition, 40));
+}
+
+test "settings color theme picker fits every option" {
+    try std.testing.expectEqualStrings("mono", color_theme_values[color_theme_values.len - 1]);
+    try std.testing.expectEqual(color_theme_values.len + picker_overlay_vertical_overhead, pickerOverlayHeight(.color_theme, color_theme_values.len));
 }
 
 test "settings picker supports visual fields in current slice" {

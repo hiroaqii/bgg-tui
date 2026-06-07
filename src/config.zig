@@ -78,7 +78,7 @@ pub const Config = struct {
         try validateWidth(config.display.list_width);
         try validateWidth(config.display.thread_width);
         try validateWidth(config.display.detail_width);
-        if (!isOneOf(config.interface.color_theme, &.{ "default", "blue", "orange", "mono", "matcha" })) return error.InvalidColorTheme;
+        if (!isOneOf(config.interface.color_theme, &.{ "default", "blue", "red", "purple", "pink", "yellow", "orange", "mono", "matcha" })) return error.InvalidColorTheme;
         if (!transitions.isValidValue(config.interface.transition)) return error.InvalidTransition;
         if (!isOneOf(config.interface.selection, &.{ "none", "invert", "wave", "blink", "glitch", "scan" })) return error.InvalidSelection;
         if (!isOneOf(config.interface.list_density, &.{ "compact", "normal", "comfortable", "relaxed" })) return error.InvalidListDensity;
@@ -772,7 +772,7 @@ test "config validates setting ranges and string option values" {
 }
 
 test "config validation accepts documented theme and border values" {
-    inline for (.{ "default", "blue", "orange", "mono", "matcha" }) |theme| {
+    inline for (.{ "default", "blue", "red", "purple", "pink", "yellow", "orange", "mono", "matcha" }) |theme| {
         var config = Config.defaults();
         config.interface.color_theme = theme;
         try config.validate();
