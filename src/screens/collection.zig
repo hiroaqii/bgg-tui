@@ -451,6 +451,8 @@ pub const State = struct {
     }
 
     pub fn view(self: *const State, area: *chasen.Surface, opts: ViewOptions) !?chasen.Rect {
+        if (self.load_state == .loaded and !self.filter_active) area.hideCursor();
+
         _ = area.borrowTextAt(0, 0, "Collection", opts.title_style);
 
         switch (self.load_state) {

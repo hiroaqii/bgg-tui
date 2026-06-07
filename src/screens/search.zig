@@ -337,6 +337,8 @@ pub const State = struct {
     }
 
     pub fn viewResults(self: *const State, area: *chasen.Surface, opts: ResultsViewOptions) !void {
+        if (!self.filter_active) area.hideCursor();
+
         _ = try area.printAt(0, 0, opts.title_style, "Search Results ({s})", .{self.sort_mode.label(.search_results)});
 
         switch (self.load_state) {

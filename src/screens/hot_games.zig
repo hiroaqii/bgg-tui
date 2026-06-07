@@ -323,6 +323,8 @@ pub const State = struct {
     }
 
     pub fn view(self: *const State, area: *chasen.Surface, opts: ViewOptions) !?chasen.Rect {
+        if (!self.filter_active) area.hideCursor();
+
         _ = try area.printAt(0, 0, opts.title_style, "Hot Games ({s})", .{self.sort_mode.label(.hot_games)});
 
         const image_rect = switch (self.load_state) {
