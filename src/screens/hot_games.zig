@@ -10,6 +10,7 @@ const list_view = @import("../list_view.zig");
 const motion = @import("../motion.zig");
 const paste = @import("../paste.zig");
 const list_sort = @import("../list_sort.zig");
+const shortcuts = @import("../shortcuts.zig");
 const task_bgg = @import("../tasks/bgg.zig");
 
 const filter_row: u16 = 4;
@@ -174,6 +175,7 @@ pub const State = struct {
             .key_press => |key| {
                 if (key.codepoint == '/') return .filter_start;
                 if (key.codepoint == 's') return .sort_toggle;
+                if (shortcuts.vimListMove(key)) |msg| return .{ .list = msg };
             },
             else => {},
         }
@@ -529,6 +531,28 @@ test "hot games sorted projection owns movement and activation" {
     try std.testing.expectEqual(@as(usize, 1), state.activeList().focusedIndex());
     try std.testing.expectEqual(@as(usize, 2), state.sourceIndex(state.activeList().focusedIndex()).?);
     try std.testing.expectEqual(ui.List.Msg{ .activate = 1 }, state.handleEvent(.{ .key_press = .{ .codepoint = chasen.Key.enter } }).?);
+}
+
+test "hot games vim movement stays out of filter text input" {
+    const games = try std.testing.allocator.alloc(bgg_model.HotGame, 2);
+    games[0] = .{ .id = 1, .rank = 1, .name = try std.testing.allocator.dupe(u8, "Root") };
+    games[1] = .{ .id = 2, .rank = 2, .name = try std.testing.allocator.dupe(u8, "Cascadia") };
+
+    var state: State = .{};
+    try state.setLoaded(std.testing.allocator, games);
+    state.filter_input = try ui.TextInput.init(std.testing.allocator, .{});
+    defer {
+        state.deinitInputs();
+        state.deinit(std.testing.allocator);
+    }
+
+    const move_msg = state.handleScreenEvent(.{ .key_press = .{ .codepoint = 'j' } }).?;
+    try std.testing.expectEqual(Msg{ .list = .move_next }, move_msg);
+
+    try state.applyFilter(std.testing.allocator, "");
+    const input_msg = state.handleScreenEvent(.{ .key_press = .{ .codepoint = 'j', .text = "j" } }).?;
+    try std.testing.expect(input_msg == .filter_input);
+    try std.testing.expectEqual(ui.TextInput.Msg{ .insert = 'j' }, input_msg.filter_input);
 }
 
 test "hot games focus clamps in source and sorted projections" {

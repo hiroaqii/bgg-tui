@@ -10,6 +10,7 @@ const list_view = @import("../list_view.zig");
 const list_sort = @import("../list_sort.zig");
 const motion = @import("../motion.zig");
 const paste = @import("../paste.zig");
+const shortcuts = @import("../shortcuts.zig");
 const task_bgg = @import("../tasks/bgg.zig");
 
 const filter_row: u16 = 4;
@@ -178,6 +179,7 @@ pub const State = struct {
                     if (key.codepoint == 'm') return .main_menu;
                     if (key.codepoint == 's') return .{ .msg = .sort_toggle };
                     if (key.codepoint == 'q') return .quit;
+                    if (shortcuts.vimListMove(key)) |msg| return .{ .msg = .{ .list = msg } };
                 }
             },
             .paste => |text| if (self.filter_active) return .{ .msg = .{ .filter_paste = text } },

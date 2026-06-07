@@ -14,6 +14,7 @@ const layout_mod = @import("layout.zig");
 const list_view = @import("list_view.zig");
 const motion = @import("motion.zig");
 const paste = @import("paste.zig");
+const shortcuts = @import("shortcuts.zig");
 const screens = @import("screens/root.zig");
 const style_mod = @import("style.zig");
 const task_bgg = @import("tasks/bgg.zig");
@@ -276,8 +277,10 @@ pub const App = struct {
                     if (self.forums.mode == .thread_list) {
                         if (key.codepoint == 'n' and self.forums.canOpenNextPage()) return .{ .forum = .next_page };
                         if (key.codepoint == 'p' and self.forums.canOpenPreviousPage()) return .{ .forum = .previous_page };
+                        if (shortcuts.vimListMove(key)) |msg| return .{ .forum = .{ .thread_list = msg } };
                         if (self.forums.thread_list.handleEvent(event)) |msg| return .{ .forum = .{ .thread_list = msg } };
                     } else if (self.forums.mode == .forum_list) {
+                        if (shortcuts.vimListMove(key)) |msg| return .{ .forum = .{ .list = msg } };
                         if (self.forums.forum_list.handleEvent(event)) |msg| return .{ .forum = .{ .list = msg } };
                     }
                 },
@@ -408,6 +411,9 @@ pub const App = struct {
 
         if (self.screen == .main_menu) {
             // Menu owns only cursor movement and activation; App maps activation to screens.
+            if (event == .key_press) {
+                if (shortcuts.vimMenuMove(event.key_press)) |msg| return .{ .menu = msg };
+            }
             if (self.menu.handleEvent(event)) |msg| return .{ .menu = msg };
         }
         return null;
@@ -2335,48 +2341,48 @@ pub const App = struct {
     fn footerHint(self: *const App) []const u8 {
         return switch (self.screen) {
             .setup_token => setupTokenSubmitHint(self.config_path),
-            .main_menu => "Up/Down: move  Enter: open  h, /, c, s: shortcuts  Esc/q: quit",
+            .main_menu => "Up/Down/j/k: move  Enter: open  h, /, c, s: shortcuts  Esc/q: quit",
             .hot_games => if (self.hot_games.filter_active)
                 "Type: filter  Up/Down: move  Enter: detail  Esc: clear"
             else
-                "Up/Down: move  Enter: detail  /: filter  s: sort  m: menu  Esc/q: quit",
+                "Up/Down/j/k: move  Enter: detail  /: filter  s: sort  m: menu  Esc/q: quit",
             .search => "Enter: search  Esc: menu",
             .search_results => if (self.search.filter_active)
                 "Type: filter  Up/Down: move  Enter: detail  Esc: clear  b: search"
             else
-                "Up/Down: move  Enter: detail  /: filter  s: sort  b/Esc: search  m: menu  q: quit",
-            .game_detail => "j/k Up/Down: scroll  o: open BGG  f: forums  b/Esc: back  m: menu  q: quit",
+                "Up/Down/j/k: move  Enter: detail  /: filter  s: sort  b/Esc: search  m: menu  q: quit",
+            .game_detail => "Up/Down/j/k: scroll  o: open BGG  f: forums  b/Esc: back  m: menu  q: quit",
             .forums => switch (self.forums.mode) {
-                .forum_list => "Up/Down: move  Enter: threads  b: detail  Esc/m: menu  q: quit",
-                .thread_list => "Up/Down: move  Enter: read  n/p: page  b: forums  Esc/m: menu  q: quit",
+                .forum_list => "Up/Down/j/k: move  Enter: threads  b: detail  Esc/m: menu  q: quit",
+                .thread_list => "Up/Down/j/k: move  Enter: read  n/p: page  b: forums  Esc/m: menu  q: quit",
             },
-            .thread => "j/k Up/Down: scroll  s: sort  o: open BGG  b: back  Esc/m: menu  q: quit",
+            .thread => "Up/Down/j/k: scroll  s: sort  o: open BGG  b: back  Esc/m: menu  q: quit",
             .collection => switch (self.collection.load_state) {
                 .idle, .failed => "Enter: load  Esc: menu",
                 .loading => "Esc: menu",
                 .loaded => if (self.collection.status_picker)
-                    "Up/Down: move  Enter: toggle  Esc: close"
+                    "Up/Down/j/k: move  Enter: toggle  Esc: close"
                 else if (self.collection.filter_active)
                     "Type: filter  Up/Down: move  Enter: detail  Esc: clear"
                 else
-                    "Up/Down: move  Enter: detail  /: filter  s: status  r: refresh  u: user  Esc/m: menu  q: quit",
+                    "Up/Down/j/k: move  Enter: detail  /: filter  s: status  r: refresh  u: user  Esc/m: menu  q: quit",
             },
             .settings => if (self.settings.editing != null)
                 "Enter: save  Esc: cancel"
             else if (self.settings.pickerOpen())
-                "Up/Down: choose  Enter: save  Esc: cancel"
+                "Arrows/j/k/h/l: choose  Enter: save  Esc: cancel"
             else if (self.settings.focusedEditField()) |field|
                 switch (field) {
-                    .token => "Up/Down: move  Enter: edit token  m: menu  Esc/q: quit",
-                    .username => "Up/Down: move  Enter: edit username  m: menu  Esc/q: quit",
-                    .list_width => "Up/Down: move  Enter: edit list width  m: menu  Esc/q: quit",
-                    .thread_width => "Up/Down: move  Enter: edit thread width  m: menu  Esc/q: quit",
-                    .detail_width => "Up/Down: move  Enter: edit detail width  m: menu  Esc/q: quit",
+                    .token => "Up/Down/j/k: move  Enter: edit token  m: menu  Esc/q: quit",
+                    .username => "Up/Down/j/k: move  Enter: edit username  m: menu  Esc/q: quit",
+                    .list_width => "Up/Down/j/k: move  Enter: edit list width  m: menu  Esc/q: quit",
+                    .thread_width => "Up/Down/j/k: move  Enter: edit thread width  m: menu  Esc/q: quit",
+                    .detail_width => "Up/Down/j/k: move  Enter: edit detail width  m: menu  Esc/q: quit",
                 }
             else if (self.settings.focusedCycleField() != null)
-                "Up/Down: move  Enter: change setting  m: menu  Esc/q: quit"
+                "Up/Down/j/k: move  Enter: change setting  m: menu  Esc/q: quit"
             else
-                "Up/Down: move  m: menu  Esc/q: quit",
+                "Up/Down/j/k: move  m: menu  Esc/q: quit",
         };
     }
 };
@@ -3149,10 +3155,10 @@ test "footer hint matches screen key handling" {
     var app = App.create(.{ .api = .{ .token = "token" } }, .{});
 
     app.screen = .main_menu;
-    try std.testing.expectEqualStrings("Up/Down: move  Enter: open  h, /, c, s: shortcuts  Esc/q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: open  h, /, c, s: shortcuts  Esc/q: quit", app.footerHint());
 
     app.screen = .hot_games;
-    try std.testing.expectEqualStrings("Up/Down: move  Enter: detail  /: filter  s: sort  m: menu  Esc/q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: detail  /: filter  s: sort  m: menu  Esc/q: quit", app.footerHint());
     app.hot_games.filter_active = true;
     try std.testing.expectEqualStrings("Type: filter  Up/Down: move  Enter: detail  Esc: clear", app.footerHint());
     app.hot_games.filter_active = false;
@@ -3161,51 +3167,65 @@ test "footer hint matches screen key handling" {
     try std.testing.expectEqualStrings("Enter: search  Esc: menu", app.footerHint());
 
     app.screen = .search_results;
-    try std.testing.expectEqualStrings("Up/Down: move  Enter: detail  /: filter  s: sort  b/Esc: search  m: menu  q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: detail  /: filter  s: sort  b/Esc: search  m: menu  q: quit", app.footerHint());
     app.search.filter_active = true;
     try std.testing.expectEqualStrings("Type: filter  Up/Down: move  Enter: detail  Esc: clear  b: search", app.footerHint());
     app.search.filter_active = false;
 
     app.screen = .game_detail;
-    try std.testing.expectEqualStrings("j/k Up/Down: scroll  o: open BGG  f: forums  b/Esc: back  m: menu  q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down/j/k: scroll  o: open BGG  f: forums  b/Esc: back  m: menu  q: quit", app.footerHint());
 
     app.screen = .forums;
     app.forums.mode = .forum_list;
-    try std.testing.expectEqualStrings("Up/Down: move  Enter: threads  b: detail  Esc/m: menu  q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: threads  b: detail  Esc/m: menu  q: quit", app.footerHint());
     app.forums.mode = .thread_list;
-    try std.testing.expectEqualStrings("Up/Down: move  Enter: read  n/p: page  b: forums  Esc/m: menu  q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: read  n/p: page  b: forums  Esc/m: menu  q: quit", app.footerHint());
 
     app.screen = .thread;
-    try std.testing.expectEqualStrings("j/k Up/Down: scroll  s: sort  o: open BGG  b: back  Esc/m: menu  q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down/j/k: scroll  s: sort  o: open BGG  b: back  Esc/m: menu  q: quit", app.footerHint());
 
     app.screen = .collection;
     try std.testing.expectEqualStrings("Enter: load  Esc: menu", app.footerHint());
     app.collection.load_state = .loading;
     try std.testing.expectEqualStrings("Esc: menu", app.footerHint());
     app.collection.load_state = .loaded;
-    try std.testing.expectEqualStrings("Up/Down: move  Enter: detail  /: filter  s: status  r: refresh  u: user  Esc/m: menu  q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: detail  /: filter  s: status  r: refresh  u: user  Esc/m: menu  q: quit", app.footerHint());
     app.collection.status_picker = true;
-    try std.testing.expectEqualStrings("Up/Down: move  Enter: toggle  Esc: close", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: toggle  Esc: close", app.footerHint());
     app.collection.status_picker = false;
     app.collection.filter_active = true;
     try std.testing.expectEqualStrings("Type: filter  Up/Down: move  Enter: detail  Esc: clear", app.footerHint());
     app.collection.filter_active = false;
 
     app.screen = .settings;
-    try std.testing.expectEqualStrings("Up/Down: move  Enter: change setting  m: menu  Esc/q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: change setting  m: menu  Esc/q: quit", app.footerHint());
     for (0..8) |_| app.settings.updateList(.move_next);
-    try std.testing.expectEqualStrings("Up/Down: move  Enter: edit list width  m: menu  Esc/q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: edit list width  m: menu  Esc/q: quit", app.footerHint());
     app.settings.updateList(.move_next);
-    try std.testing.expectEqualStrings("Up/Down: move  Enter: edit thread width  m: menu  Esc/q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: edit thread width  m: menu  Esc/q: quit", app.footerHint());
     app.settings.updateList(.move_next);
-    try std.testing.expectEqualStrings("Up/Down: move  Enter: edit detail width  m: menu  Esc/q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: edit detail width  m: menu  Esc/q: quit", app.footerHint());
     app.settings.updateList(.move_next);
-    try std.testing.expectEqualStrings("Up/Down: move  Enter: edit username  m: menu  Esc/q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: edit username  m: menu  Esc/q: quit", app.footerHint());
     app.settings.updateList(.move_next);
-    try std.testing.expectEqualStrings("Up/Down: move  Enter: edit token  m: menu  Esc/q: quit", app.footerHint());
+    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: edit token  m: menu  Esc/q: quit", app.footerHint());
     app.settings.startEdit(.token);
     try std.testing.expectEqualStrings("Enter: save  Esc: cancel", app.footerHint());
     app.settings.stopEditing();
+    app.settings.openPicker(.transition, app.config, app.animation_frame);
+    try std.testing.expectEqualStrings("Arrows/j/k/h/l: choose  Enter: save  Esc: cancel", app.footerHint());
+}
+
+test "main menu accepts vim-style movement" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.screen = .main_menu;
+
+    try std.testing.expectEqual(App.Msg{ .menu = .move_next }, app.handleEvent(.{
+        .key_press = .{ .codepoint = 'j' },
+    }).?);
+    try std.testing.expectEqual(App.Msg{ .menu = .move_prev }, app.handleEvent(.{
+        .key_press = .{ .codepoint = 'k' },
+    }).?);
 }
 
 test "setup token submit hint reflects save availability" {
