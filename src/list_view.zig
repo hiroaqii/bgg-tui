@@ -3,14 +3,7 @@ const chasen = @import("chasen");
 const ui = @import("chasen_ui");
 const motion = @import("motion.zig");
 
-pub const Range = struct {
-    start: usize,
-    end: usize,
-
-    pub fn len(self: Range) usize {
-        return self.end - self.start;
-    }
-};
+pub const Range = ui.ListViewport.Range;
 
 pub const Density = enum {
     compact,
@@ -42,21 +35,11 @@ pub const Density = enum {
 /// This helper is intentionally stateless. App state still owns the full list
 /// focus; rendering computes the slice needed for the current surface height.
 pub fn visibleRange(item_count: usize, focused_index: usize, visible_height: usize) Range {
-    if (item_count == 0 or visible_height == 0) return .{ .start = 0, .end = 0 };
-
-    const clamped_height = @min(visible_height, item_count);
-    const start = ui.Viewport.offsetKeepingIndexVisible(item_count, clamped_height, 0, focused_index);
-    const range = ui.Viewport.init(.{
-        .total = item_count,
-        .height = clamped_height,
-        .offset = start,
-    }).visibleRange();
-
-    return .{ .start = range.start, .end = range.end };
+    return ui.ListViewport.visibleRange(item_count, focused_index, visible_height);
 }
 
 pub fn viewList(list: *const ui.List, surface: *chasen.Surface, opts: ui.List.ViewOptions) void {
-    viewListWithDensity(list, surface, opts, .normal);
+    ui.ListViewport.view(list, surface, opts);
 }
 
 pub fn viewListWithDensity(list: *const ui.List, surface: *chasen.Surface, opts: ui.List.ViewOptions, density: Density) void {
@@ -69,7 +52,7 @@ pub fn viewListWithDensitySelection(list: *const ui.List, surface: *chasen.Surfa
 
     const visible_capacity = visibleItemCapacity(height, density);
     const range = visibleRange(list.items.len, list.focusedIndex(), visible_capacity);
-    if (range.len() == 0) return;
+    if (range.end <= range.start) return;
 
     const width = surface.size().width;
     const stride = density.rowStride();
@@ -107,13 +90,11 @@ pub fn visibleItemCapacity(visible_height: usize, density: Density) usize {
 }
 
 pub fn positionText(allocator: std.mem.Allocator, range: Range, item_count: usize) ![]u8 {
-    if (item_count == 0 or range.len() == 0) return try std.fmt.allocPrint(allocator, "0/{d}", .{item_count});
-    return try std.fmt.allocPrint(allocator, "{d}-{d}/{d}", .{ range.start + 1, range.end, item_count });
+    return ui.ListViewport.positionText(allocator, range, item_count);
 }
 
 pub fn focusedPositionText(allocator: std.mem.Allocator, focused_index: usize, item_count: usize) ![]u8 {
-    if (item_count == 0) return try std.fmt.allocPrint(allocator, "0/0", .{});
-    return try std.fmt.allocPrint(allocator, "{d}/{d}", .{ @min(focused_index, item_count - 1) + 1, item_count });
+    return ui.ListViewport.focusedPositionText(allocator, focused_index, item_count);
 }
 
 fn itemStyle(opts: ui.List.ViewOptions, focused: bool, selected: bool) chasen.TextStyle {
