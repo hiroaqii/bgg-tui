@@ -1304,7 +1304,7 @@ pub const App = struct {
 
         self.hot_games.setLoading();
         self.beginLoadingMotion(ctx);
-        ctx.spawnWith(task, HotGamesTask.run) catch |err| {
+        ctx.task().spawnWith(task, HotGamesTask.run) catch |err| {
             self.hot_games.setFailed("Could not start hot games loading task");
             return err;
         };
@@ -1337,7 +1337,7 @@ pub const App = struct {
         };
         errdefer ctx.allocator().free(task.token);
 
-        ctx.spawnWith(task, HotGameStatsTask.run) catch |err| {
+        ctx.task().spawnWith(task, HotGameStatsTask.run) catch |err| {
             return err;
         };
     }
@@ -1389,7 +1389,7 @@ pub const App = struct {
         self.search.setLoading(self.allocator.?);
         self.switchScreenWithoutTransition(.search_results);
         self.beginLoadingMotion(ctx);
-        ctx.spawnWith(task, SearchTask.run) catch |err| {
+        ctx.task().spawnWith(task, SearchTask.run) catch |err| {
             self.search.setFailed(self.allocator.?, "Could not start search task");
             return err;
         };
@@ -1447,7 +1447,7 @@ pub const App = struct {
         self.collection.setLoading(self.allocator.?);
         self.switchScreenWithoutTransition(.collection);
         self.beginLoadingMotion(ctx);
-        ctx.spawnWith(task, CollectionTask.run) catch |err| {
+        ctx.task().spawnWith(task, CollectionTask.run) catch |err| {
             self.collection.setFailed(self.allocator.?, "Could not start collection loading task");
             return err;
         };
@@ -1499,7 +1499,7 @@ pub const App = struct {
         self.game_detail.setLoading(self.allocator.?);
         self.switchScreenWithoutTransition(.game_detail);
         self.beginLoadingMotion(ctx);
-        ctx.spawnWith(task, GameDetailTask.run) catch |err| {
+        ctx.task().spawnWith(task, GameDetailTask.run) catch |err| {
             self.game_detail.setFailed("Could not start game detail task");
             return err;
         };
@@ -1560,7 +1560,7 @@ pub const App = struct {
         errdefer ctx.allocator().free(task.url);
 
         self.game_detail.setImageLoading(self.allocator.?);
-        ctx.spawnWith(task, GameDetailImageTask.run) catch |err| {
+        ctx.task().spawnWith(task, GameDetailImageTask.run) catch |err| {
             self.game_detail.setImageFailed(self.allocator.?, "Could not start image cache task");
             return err;
         };
@@ -1597,7 +1597,7 @@ pub const App = struct {
         self.releaseGameDetailTerminalImage(ctx);
 
         self.game_detail.setTerminalImageLoading();
-        const request_id = ctx.loadTerminalImagePath(path, &gameDetailTerminalImageLoaded, &gameDetailTerminalImageFailed) catch |err| {
+        const request_id = ctx.image().loadPath(path, &gameDetailTerminalImageLoaded, &gameDetailTerminalImageFailed) catch |err| {
             self.game_detail.setTerminalImageFailed(.load_failed);
             return err;
         };
@@ -1606,7 +1606,7 @@ pub const App = struct {
 
     fn finishGameDetailTerminalImageLoad(self: *App, ctx: *chasen.Ctx(Msg), result: GameDetailTerminalImageLoaded) void {
         if (!sameTerminalImageRequestId(result.request_id, self.game_detail.terminal_image_request_id)) {
-            ctx.unloadTerminalImage(result.handle) catch {};
+            ctx.image().unload(result.handle) catch {};
             return;
         }
 
@@ -1620,7 +1620,7 @@ pub const App = struct {
 
     fn releaseGameDetailTerminalImage(self: *App, ctx: *chasen.Ctx(Msg)) void {
         if (self.game_detail.terminal_image_handle) |handle| {
-            ctx.unloadTerminalImage(handle) catch {};
+            ctx.image().unload(handle) catch {};
             self.game_detail.terminal_image_handle = null;
         }
         self.game_detail.terminal_image_load_error = null;
@@ -1711,7 +1711,7 @@ pub const App = struct {
         errdefer ctx.allocator().free(task.url);
 
         self.list_image.cache_task_pending = true;
-        ctx.spawnWith(task, ListImageTask.run) catch |err| {
+        ctx.task().spawnWith(task, ListImageTask.run) catch |err| {
             self.list_image.cache_task_pending = false;
             self.list_image.setImageFailed(self.allocator.?, "Could not start image cache task");
             return err;
@@ -1750,7 +1750,7 @@ pub const App = struct {
         self.releaseListImageTerminalImage(ctx);
 
         self.list_image.setTerminalImageLoading();
-        const request_id = ctx.loadTerminalImagePath(path, &listImageTerminalImageLoaded, &listImageTerminalImageFailed) catch |err| {
+        const request_id = ctx.image().loadPath(path, &listImageTerminalImageLoaded, &listImageTerminalImageFailed) catch |err| {
             self.list_image.setTerminalImageFailed(.load_failed);
             return err;
         };
@@ -1759,7 +1759,7 @@ pub const App = struct {
 
     fn finishListImageTerminalImageLoad(self: *App, ctx: *chasen.Ctx(Msg), result: ListImageTerminalImageLoaded) void {
         if (!sameTerminalImageRequestId(result.request_id, self.list_image.terminal_image_request_id)) {
-            ctx.unloadTerminalImage(result.handle) catch {};
+            ctx.image().unload(result.handle) catch {};
             return;
         }
 
@@ -1773,7 +1773,7 @@ pub const App = struct {
 
     fn releaseListImageTerminalImage(self: *App, ctx: ?*chasen.Ctx(Msg)) void {
         if (self.list_image.terminal_image_handle) |handle| {
-            if (ctx) |ctx_ptr| ctx_ptr.unloadTerminalImage(handle) catch {};
+            if (ctx) |ctx_ptr| ctx_ptr.image().unload(handle) catch {};
             self.list_image.terminal_image_handle = null;
         }
         self.list_image.terminal_image_load_error = null;
@@ -1831,7 +1831,7 @@ pub const App = struct {
         errdefer ctx.allocator().destroy(task);
         task.* = .{ .url = url, .request_id = request_id, .target = .game_detail };
 
-        ctx.spawnWith(task, BrowserOpenTask.run) catch |err| {
+        ctx.task().spawnWith(task, BrowserOpenTask.run) catch |err| {
             ctx.allocator().free(url);
             return err;
         };
@@ -1862,7 +1862,7 @@ pub const App = struct {
         };
         errdefer ctx.allocator().free(task.token);
 
-        ctx.spawnWith(task, ForumListTask.run) catch |err| {
+        ctx.task().spawnWith(task, ForumListTask.run) catch |err| {
             self.forums.setFailed("Could not start forum loading task");
             return err;
         };
@@ -1922,7 +1922,7 @@ pub const App = struct {
         };
         errdefer ctx.allocator().free(task.token);
 
-        ctx.spawnWith(task, ForumThreadsTask.run) catch |err| {
+        ctx.task().spawnWith(task, ForumThreadsTask.run) catch |err| {
             self.forums.setFailed("Could not start thread list loading task");
             return err;
         };
@@ -1977,7 +1977,7 @@ pub const App = struct {
         };
         errdefer ctx.allocator().free(task.token);
 
-        ctx.spawnWith(task, ThreadTask.run) catch |err| {
+        ctx.task().spawnWith(task, ThreadTask.run) catch |err| {
             self.thread.setFailed("Could not start thread loading task");
             return err;
         };
@@ -2021,7 +2021,7 @@ pub const App = struct {
         errdefer ctx.allocator().destroy(task);
         task.* = .{ .url = url, .request_id = request_id, .target = .thread };
 
-        ctx.spawnWith(task, BrowserOpenTask.run) catch |err| {
+        ctx.task().spawnWith(task, BrowserOpenTask.run) catch |err| {
             ctx.allocator().free(url);
             return err;
         };
@@ -2249,21 +2249,21 @@ pub const App = struct {
 
     fn requestMotionFrameIfNeeded(self: *const App, ctx: *chasen.Ctx(Msg)) void {
         if (motion.selectionNeedsFrame(self.effectiveRenderConfig().interface.selection) or self.hasActiveLoadingScan() or self.hasActiveScreenTransition() or self.listImageCandidateWaiting()) {
-            ctx.requestFrame();
+            ctx.frame().request();
         }
     }
 
     fn requestPickerPreviewFrameIfNeeded(self: *const App, ctx: *chasen.Ctx(Msg)) void {
         if (self.screen != .settings) return;
         if (motion.selectionNeedsFrame(self.effectiveRenderConfig().interface.selection)) {
-            ctx.requestFrame();
+            ctx.frame().request();
             return;
         }
         const picker = self.settings.picker orelse return;
         if (picker.field == .transition) {
             const value = self.settings.pickerSelectedValue() orelse return;
             if (screenTransitionKindForConfig(value, transitionChoiceSeed(self.transition_choice_seed, self.animation_frame, self.screen, self.screen)) != .none) {
-                ctx.requestFrame();
+                ctx.frame().request();
             }
         }
     }
