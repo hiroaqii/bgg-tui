@@ -12,6 +12,24 @@ pub fn item(keys: []const u8, action: []const u8) Item {
     return chasen.key_hint.item(keys, action);
 }
 
+pub const common = struct {
+    pub const move = item("↑/↓/j/k", "move");
+    pub const move_vertical = item("↑/↓", "move");
+    pub const scroll = item("↑/↓/j/k", "scroll");
+
+    pub const open = item("Enter", "open");
+    pub const detail = item("Enter", "detail");
+    pub const save = item("Enter", "save");
+    pub const cancel = item("Esc", "cancel");
+    pub const clear = item("Esc", "clear");
+    pub const filter = item("/", "filter");
+    pub const sort = item("s", "sort");
+    pub const menu = item("m", "menu");
+    pub const menu_esc = item("Esc", "menu");
+    pub const quit = item("q", "quit");
+    pub const quit_esc = item("Esc/q", "quit");
+};
+
 pub fn draw(surface: *chasen.Surface, row: u16, items: []const Item, style: chasen.TextStyle, opts: DrawOptions) chasen.key_hint.DrawResult {
     return chasen.key_hint.draw(surface, 0, row, items, drawOptions(style, opts));
 }

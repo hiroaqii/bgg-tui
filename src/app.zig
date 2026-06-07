@@ -45,32 +45,33 @@ const menu_items = [_]ui.Menu.Item{
     .{ .label = "Settings", .shortcut = "s" },
 };
 
+const f = footer.common;
 const footer_setup_session = [_]footer.Item{ footer.item("Enter", "use token for this session"), footer.item("Esc", "quit") };
 const footer_setup_save = [_]footer.Item{ footer.item("Enter", "save token and continue"), footer.item("Esc", "quit") };
-const footer_main_menu = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "open"), footer.item("Esc/q", "quit") };
-const footer_hot_games = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "detail"), footer.item("/", "filter"), footer.item("s", "sort"), footer.item("m", "menu"), footer.item("Esc/q", "quit") };
-const footer_filter_detail = [_]footer.Item{ footer.item("Type", "filter"), footer.item("↑/↓", "move"), footer.item("Enter", "detail"), footer.item("Esc", "clear") };
-const footer_search = [_]footer.Item{ footer.item("Enter", "search"), footer.item("Esc", "menu") };
-const footer_search_results = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "detail"), footer.item("/", "filter"), footer.item("s", "sort"), footer.item("b/Esc", "search"), footer.item("m", "menu"), footer.item("q", "quit") };
-const footer_search_filter = [_]footer.Item{ footer.item("Type", "filter"), footer.item("↑/↓", "move"), footer.item("Enter", "detail"), footer.item("Esc", "clear"), footer.item("b", "search") };
-const footer_game_detail = [_]footer.Item{ footer.item("↑/↓/j/k", "scroll"), footer.item("o", "open BGG"), footer.item("f", "forums"), footer.item("b/Esc", "back"), footer.item("m", "menu"), footer.item("q", "quit") };
-const footer_forum_list = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "threads"), footer.item("b", "detail"), footer.item("Esc/m", "menu"), footer.item("q", "quit") };
-const footer_thread_list = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "read"), footer.item("n/p", "page"), footer.item("b", "forums"), footer.item("Esc/m", "menu"), footer.item("q", "quit") };
-const footer_thread = [_]footer.Item{ footer.item("↑/↓/j/k", "scroll"), footer.item("s", "sort"), footer.item("o", "open BGG"), footer.item("b", "back"), footer.item("Esc/m", "menu"), footer.item("q", "quit") };
-const footer_collection_load = [_]footer.Item{ footer.item("Enter", "load"), footer.item("Esc", "menu") };
-const footer_collection_loading = [_]footer.Item{footer.item("Esc", "menu")};
-const footer_collection_status = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "toggle"), footer.item("Esc", "close") };
-const footer_collection = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "detail"), footer.item("/", "filter"), footer.item("s", "status"), footer.item("r", "refresh"), footer.item("u", "user"), footer.item("Esc/m", "menu"), footer.item("q", "quit") };
-const footer_settings_editing = [_]footer.Item{ footer.item("Enter", "save"), footer.item("Esc", "cancel") };
-const footer_settings_picker = [_]footer.Item{ footer.item("Arrows/j/k/h/l", "choose"), footer.item("Enter", "save"), footer.item("Esc", "cancel") };
-const footer_settings_default = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("m", "menu"), footer.item("Esc/q", "quit") };
-const footer_settings_change = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "change setting"), footer.item("m", "menu"), footer.item("Esc/q", "quit") };
-const footer_settings_toggle_images = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "toggle images"), footer.item("m", "menu"), footer.item("Esc/q", "quit") };
-const footer_settings_edit_token = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "edit token"), footer.item("m", "menu"), footer.item("Esc/q", "quit") };
-const footer_settings_edit_username = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "edit username"), footer.item("m", "menu"), footer.item("Esc/q", "quit") };
-const footer_settings_edit_list_width = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "edit list width"), footer.item("m", "menu"), footer.item("Esc/q", "quit") };
-const footer_settings_edit_thread_width = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "edit thread width"), footer.item("m", "menu"), footer.item("Esc/q", "quit") };
-const footer_settings_edit_detail_width = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "edit detail width"), footer.item("m", "menu"), footer.item("Esc/q", "quit") };
+const footer_main_menu = [_]footer.Item{ f.move, f.open, f.quit_esc };
+const footer_hot_games = [_]footer.Item{ f.move, f.detail, f.filter, f.sort, f.menu, f.quit_esc };
+const footer_filter_detail = [_]footer.Item{ footer.item("Type", "filter"), f.move_vertical, f.detail, f.clear };
+const footer_search = [_]footer.Item{ footer.item("Enter", "search"), f.menu_esc };
+const footer_search_results = [_]footer.Item{ f.move, f.detail, f.filter, f.sort, footer.item("b/Esc", "search"), f.menu, f.quit };
+const footer_search_filter = [_]footer.Item{ footer.item("Type", "filter"), f.move_vertical, f.detail, f.clear, footer.item("b", "search") };
+const footer_game_detail = [_]footer.Item{ f.scroll, footer.item("o", "open BGG"), footer.item("f", "forums"), footer.item("b/Esc", "back"), f.menu, f.quit };
+const footer_forum_list = [_]footer.Item{ f.move, footer.item("Enter", "threads"), footer.item("b", "detail"), footer.item("Esc/m", "menu"), f.quit };
+const footer_thread_list = [_]footer.Item{ f.move, footer.item("Enter", "read"), footer.item("n/p", "page"), footer.item("b", "forums"), footer.item("Esc/m", "menu"), f.quit };
+const footer_thread = [_]footer.Item{ f.scroll, f.sort, footer.item("o", "open BGG"), footer.item("b", "back"), footer.item("Esc/m", "menu"), f.quit };
+const footer_collection_load = [_]footer.Item{ footer.item("Enter", "load"), f.menu_esc };
+const footer_collection_loading = [_]footer.Item{f.menu_esc};
+const footer_collection_status = [_]footer.Item{ f.move, footer.item("Enter", "toggle"), footer.item("Esc", "close") };
+const footer_collection = [_]footer.Item{ f.move, f.detail, f.filter, footer.item("s", "status"), footer.item("r", "refresh"), footer.item("u", "user"), footer.item("Esc/m", "menu"), f.quit };
+const footer_settings_editing = [_]footer.Item{ f.save, f.cancel };
+const footer_settings_picker = [_]footer.Item{ footer.item("Arrows/j/k/h/l", "choose"), f.save, f.cancel };
+const footer_settings_default = [_]footer.Item{ f.move, f.menu, f.quit_esc };
+const footer_settings_change = [_]footer.Item{ f.move, footer.item("Enter", "change setting"), f.menu, f.quit_esc };
+const footer_settings_toggle_images = [_]footer.Item{ f.move, footer.item("Enter", "toggle images"), f.menu, f.quit_esc };
+const footer_settings_edit_token = [_]footer.Item{ f.move, footer.item("Enter", "edit token"), f.menu, f.quit_esc };
+const footer_settings_edit_username = [_]footer.Item{ f.move, footer.item("Enter", "edit username"), f.menu, f.quit_esc };
+const footer_settings_edit_list_width = [_]footer.Item{ f.move, footer.item("Enter", "edit list width"), f.menu, f.quit_esc };
+const footer_settings_edit_thread_width = [_]footer.Item{ f.move, footer.item("Enter", "edit thread width"), f.menu, f.quit_esc };
+const footer_settings_edit_detail_width = [_]footer.Item{ f.move, footer.item("Enter", "edit detail width"), f.menu, f.quit_esc };
 
 pub const Screen = enum {
     setup_token,
