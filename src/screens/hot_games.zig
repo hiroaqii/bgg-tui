@@ -28,7 +28,7 @@ pub const ViewOptions = struct {
     focused_style: chasen.TextStyle,
     muted_style: chasen.TextStyle,
     subtle_style: chasen.TextStyle,
-    footer_hint: []const u8,
+    footer_items: []const chasen.key_hint.Item,
     list_density: list_view.Density,
     selection: []const u8,
     animation_frame: u64,
@@ -367,7 +367,7 @@ pub const State = struct {
             },
         };
 
-        _ = area.borrowTextAt(0, area.size().height -| 1, opts.footer_hint, opts.subtle_style);
+        _ = chasen.key_hint.draw(area, 0, area.size().height -| 1, opts.footer_items, .{ .style = opts.subtle_style });
         return image_rect;
     }
 

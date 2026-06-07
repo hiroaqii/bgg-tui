@@ -331,9 +331,9 @@ pub const State = struct {
             else if (self.focusedCycleField()) |field|
                 cycleHelp(field)
             else if (self.isShowImagesFocused())
-                "j/k ↑↓: Navigate  Enter: Toggle Images  m: Menu  Esc/q: Quit"
+                "j/k ↑/↓: Navigate  Enter: Toggle Images  m: Menu  Esc/q: Quit"
             else
-                "j/k ↑↓: Navigate  m: Menu  Esc/q: Quit";
+                "j/k ↑/↓: Navigate  m: Menu  Esc/q: Quit";
             _ = surface.borrowTextAt(0, row +| 1, help, theme.subtle);
         }
 
@@ -650,30 +650,30 @@ fn drawEditingInput(
 
 fn editHelp(field: EditField) []const u8 {
     return switch (field) {
-        .token => "j/k ↑↓: Navigate  Enter: Edit Token  m: Menu  Esc/q: Quit",
-        .username => "j/k ↑↓: Navigate  Enter: Edit Username  m: Menu  Esc/q: Quit",
-        .list_width => "j/k ↑↓: Navigate  Enter: Edit List Width  m: Menu  Esc/q: Quit",
-        .thread_width => "j/k ↑↓: Navigate  Enter: Edit Thread Width  m: Menu  Esc/q: Quit",
-        .detail_width => "j/k ↑↓: Navigate  Enter: Edit Detail Width  m: Menu  Esc/q: Quit",
+        .token => "j/k ↑/↓: Navigate  Enter: Edit Token  m: Menu  Esc/q: Quit",
+        .username => "j/k ↑/↓: Navigate  Enter: Edit Username  m: Menu  Esc/q: Quit",
+        .list_width => "j/k ↑/↓: Navigate  Enter: Edit List Width  m: Menu  Esc/q: Quit",
+        .thread_width => "j/k ↑/↓: Navigate  Enter: Edit Thread Width  m: Menu  Esc/q: Quit",
+        .detail_width => "j/k ↑/↓: Navigate  Enter: Edit Detail Width  m: Menu  Esc/q: Quit",
     };
 }
 
 fn cycleHelp(field: CycleField) []const u8 {
     return switch (field) {
-        .color_theme => "j/k ↑↓: Navigate  Enter: Change Color Theme  m: Menu  Esc/q: Quit",
-        .transition => "j/k ↑↓: Navigate  Enter: Change Transition  m: Menu  Esc/q: Quit",
-        .selection => "j/k ↑↓: Navigate  Enter: Change Selection  m: Menu  Esc/q: Quit",
-        .border_style => "j/k ↑↓: Navigate  Enter: Change Border Style  m: Menu  Esc/q: Quit",
-        .list_density => "j/k ↑↓: Navigate  Enter: Change List Density  m: Menu  Esc/q: Quit",
-        .date_format => "j/k ↑↓: Navigate  Enter: Change Date Format  m: Menu  Esc/q: Quit",
-        .image_protocol => "j/k ↑↓: Navigate  Enter: Change Image Protocol  m: Menu  Esc/q: Quit",
+        .color_theme => "j/k ↑/↓: Navigate  Enter: Change Color Theme  m: Menu  Esc/q: Quit",
+        .transition => "j/k ↑/↓: Navigate  Enter: Change Transition  m: Menu  Esc/q: Quit",
+        .selection => "j/k ↑/↓: Navigate  Enter: Change Selection  m: Menu  Esc/q: Quit",
+        .border_style => "j/k ↑/↓: Navigate  Enter: Change Border Style  m: Menu  Esc/q: Quit",
+        .list_density => "j/k ↑/↓: Navigate  Enter: Change List Density  m: Menu  Esc/q: Quit",
+        .date_format => "j/k ↑/↓: Navigate  Enter: Change Date Format  m: Menu  Esc/q: Quit",
+        .image_protocol => "j/k ↑/↓: Navigate  Enter: Change Image Protocol  m: Menu  Esc/q: Quit",
     };
 }
 
 fn pickerHelp(field: CycleField) []const u8 {
     return switch (field) {
-        .transition => "h/l ←→: Column  j/k ↑↓: Choose  Enter: Save  Esc: Cancel",
-        else => "j/k ↑↓: Choose  Enter: Save  Esc: Cancel",
+        .transition => "h/l ←/→: Column  j/k ↑/↓: Choose  Enter: Save  Esc: Cancel",
+        else => "j/k ↑/↓: Choose  Enter: Save  Esc: Cancel",
     };
 }
 

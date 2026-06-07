@@ -112,7 +112,9 @@ pub const ViewOptions = struct {
     muted_style: chasen.TextStyle,
     subtle_style: chasen.TextStyle,
     accent: chasen.Color,
-    footer_hint: []const u8,
+    footer_items: []const chasen.key_hint.Item,
+    footer_max_lines: u16 = 1,
+    footer_overflow: chasen.key_hint.Overflow = .ellipsis,
     list_density: list_view.Density,
     selection: []const u8,
     animation_frame: u64,
@@ -468,7 +470,12 @@ pub const State = struct {
             },
         }
 
-        _ = area.borrowTextAt(0, area.size().height -| 1, opts.footer_hint, opts.subtle_style);
+        const footer_lines = @min(opts.footer_max_lines, area.size().height);
+        _ = chasen.key_hint.draw(area, 0, area.size().height -| footer_lines, opts.footer_items, .{
+            .style = opts.subtle_style,
+            .max_lines = footer_lines,
+            .overflow = opts.footer_overflow,
+        });
         return if (self.shouldDrawImagePanel()) opts.image_panel_rect else null;
     }
 
@@ -493,7 +500,7 @@ pub const State = struct {
                 .col = 0,
                 .row = list_row,
                 .width = list_width,
-                .height = area.size().height -| (list_row + 1 + footer_gap + picker_height),
+                .height = area.size().height -| (list_row + opts.footer_max_lines + footer_gap + picker_height),
             });
             list_view.viewListWithDensitySelection(list, &list_area, .{
                 .focused_style = opts.focused_style,

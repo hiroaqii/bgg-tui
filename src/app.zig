@@ -8,6 +8,7 @@ const bgg_xml = @import("bgg/xml.zig");
 const browser = @import("browser.zig");
 const config_mod = @import("config.zig");
 const features = @import("features/root.zig");
+const footer = @import("footer.zig");
 const format = @import("format.zig");
 const image_mod = @import("image.zig");
 const layout_mod = @import("layout.zig");
@@ -43,6 +44,33 @@ const menu_items = [_]ui.Menu.Item{
     .{ .label = "Collection", .shortcut = "c" },
     .{ .label = "Settings", .shortcut = "s" },
 };
+
+const footer_setup_session = [_]footer.Item{ footer.item("Enter", "use token for this session"), footer.item("Esc", "quit") };
+const footer_setup_save = [_]footer.Item{ footer.item("Enter", "save token and continue"), footer.item("Esc", "quit") };
+const footer_main_menu = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "open"), footer.item("Esc/q", "quit") };
+const footer_hot_games = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "detail"), footer.item("/", "filter"), footer.item("s", "sort"), footer.item("m", "menu"), footer.item("Esc/q", "quit") };
+const footer_filter_detail = [_]footer.Item{ footer.item("Type", "filter"), footer.item("↑/↓", "move"), footer.item("Enter", "detail"), footer.item("Esc", "clear") };
+const footer_search = [_]footer.Item{ footer.item("Enter", "search"), footer.item("Esc", "menu") };
+const footer_search_results = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "detail"), footer.item("/", "filter"), footer.item("s", "sort"), footer.item("b/Esc", "search"), footer.item("m", "menu"), footer.item("q", "quit") };
+const footer_search_filter = [_]footer.Item{ footer.item("Type", "filter"), footer.item("↑/↓", "move"), footer.item("Enter", "detail"), footer.item("Esc", "clear"), footer.item("b", "search") };
+const footer_game_detail = [_]footer.Item{ footer.item("↑/↓/j/k", "scroll"), footer.item("o", "open BGG"), footer.item("f", "forums"), footer.item("b/Esc", "back"), footer.item("m", "menu"), footer.item("q", "quit") };
+const footer_forum_list = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "threads"), footer.item("b", "detail"), footer.item("Esc/m", "menu"), footer.item("q", "quit") };
+const footer_thread_list = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "read"), footer.item("n/p", "page"), footer.item("b", "forums"), footer.item("Esc/m", "menu"), footer.item("q", "quit") };
+const footer_thread = [_]footer.Item{ footer.item("↑/↓/j/k", "scroll"), footer.item("s", "sort"), footer.item("o", "open BGG"), footer.item("b", "back"), footer.item("Esc/m", "menu"), footer.item("q", "quit") };
+const footer_collection_load = [_]footer.Item{ footer.item("Enter", "load"), footer.item("Esc", "menu") };
+const footer_collection_loading = [_]footer.Item{footer.item("Esc", "menu")};
+const footer_collection_status = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "toggle"), footer.item("Esc", "close") };
+const footer_collection = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "detail"), footer.item("/", "filter"), footer.item("s", "status"), footer.item("r", "refresh"), footer.item("u", "user"), footer.item("Esc/m", "menu"), footer.item("q", "quit") };
+const footer_settings_editing = [_]footer.Item{ footer.item("Enter", "save"), footer.item("Esc", "cancel") };
+const footer_settings_picker = [_]footer.Item{ footer.item("Arrows/j/k/h/l", "choose"), footer.item("Enter", "save"), footer.item("Esc", "cancel") };
+const footer_settings_default = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("m", "menu"), footer.item("Esc/q", "quit") };
+const footer_settings_change = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "change setting"), footer.item("m", "menu"), footer.item("Esc/q", "quit") };
+const footer_settings_toggle_images = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "toggle images"), footer.item("m", "menu"), footer.item("Esc/q", "quit") };
+const footer_settings_edit_token = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "edit token"), footer.item("m", "menu"), footer.item("Esc/q", "quit") };
+const footer_settings_edit_username = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "edit username"), footer.item("m", "menu"), footer.item("Esc/q", "quit") };
+const footer_settings_edit_list_width = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "edit list width"), footer.item("m", "menu"), footer.item("Esc/q", "quit") };
+const footer_settings_edit_thread_width = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "edit thread width"), footer.item("m", "menu"), footer.item("Esc/q", "quit") };
+const footer_settings_edit_detail_width = [_]footer.Item{ footer.item("↑/↓/j/k", "move"), footer.item("Enter", "edit detail width"), footer.item("m", "menu"), footer.item("Esc/q", "quit") };
 
 pub const Screen = enum {
     setup_token,
@@ -210,10 +238,11 @@ pub const App = struct {
             .width = size.width,
             .height = 1,
         });
+        const status_footer = try footer.allocText(sfc.frameAllocator(), self.statusItems(), footer.drawOptions(self.subtleStyle(), .{}));
         const status = ui.StatusLine.init(.{
             .left = "bgg-tui",
             .center = screenTitle(self.screen),
-            .right = self.footerHint(),
+            .right = status_footer,
         });
         status.view(&status_area, .{});
 
@@ -445,7 +474,7 @@ pub const App = struct {
             input.view(&input_area, .{});
         }
 
-        _ = area.borrowTextAt(0, 7, setupTokenSubmitHint(self.config_path), self.subtleStyle());
+        _ = self.drawFooter(&area, 7);
     }
 
     fn viewMainMenu(self: *const App, sfc: *chasen.Surface) !void {
@@ -473,14 +502,14 @@ pub const App = struct {
             motion.drawFocusedText(&menu_area, 2, row, item.label, self.theme().focused, self.config.interface.selection, self.animation_frame);
         }
 
-        ui.message_block.drawCenteredText(&area, 10, self.footerHint(), self.subtleStyle());
+        _ = self.drawCenteredFooter(&area, 10);
     }
 
     fn viewPlaceholder(self: *const App, sfc: *chasen.Surface, title: []const u8, message: []const u8) void {
         var area = layout_mod.centeredSurface(sfc, placeholder_size);
         _ = area.borrowTextAt(0, 0, title, self.titleStyle());
         _ = area.borrowTextAt(0, 2, message, self.mutedStyle());
-        _ = area.borrowTextAt(0, 4, self.footerHint(), self.subtleStyle());
+        _ = self.drawFooter(&area, 4);
     }
 
     fn viewSettings(self: *const App, sfc: *chasen.Surface) !void {
@@ -497,7 +526,7 @@ pub const App = struct {
             .focused_style = self.focusedStyle(),
             .muted_style = self.mutedStyle(),
             .subtle_style = self.subtleStyle(),
-            .footer_hint = self.footerHint(),
+            .footer_items = self.footerItems(),
             .list_density = self.listDensity(),
             .selection = self.config.interface.selection,
             .animation_frame = self.animation_frame,
@@ -517,7 +546,7 @@ pub const App = struct {
             .muted_title_style = self.mutedTitleStyle(),
             .muted_style = self.mutedStyle(),
             .subtle_style = self.subtleStyle(),
-            .footer_hint = self.footerHint(),
+            .footer_items = self.footerItems(),
             .loading_scan_frame = self.loadingScanFrame(),
         });
     }
@@ -529,7 +558,7 @@ pub const App = struct {
             .focused_style = self.focusedStyle(),
             .muted_style = self.mutedStyle(),
             .subtle_style = self.subtleStyle(),
-            .footer_hint = self.footerHint(),
+            .footer_items = self.footerItems(),
             .list_density = self.listDensity(),
             .selection = self.config.interface.selection,
             .animation_frame = self.animation_frame,
@@ -549,7 +578,9 @@ pub const App = struct {
             .muted_style = self.mutedStyle(),
             .subtle_style = self.subtleStyle(),
             .accent = self.theme().accent,
-            .footer_hint = self.footerHint(),
+            .footer_items = self.footerItems(),
+            .footer_max_lines = self.footerMaxLines(),
+            .footer_overflow = self.footerOverflow(),
             .list_density = self.listDensity(),
             .selection = self.config.interface.selection,
             .animation_frame = self.animation_frame,
@@ -611,7 +642,7 @@ pub const App = struct {
         }
 
         const detail_layout = layout_mod.detailLayout(area.size().height, self.config.interface.list_density);
-        _ = area.borrowTextAt(0, detail_layout.footer_row, self.footerHint(), self.subtleStyle());
+        _ = self.drawFooter(&area, detail_layout.footer_row);
     }
 
     fn viewForums(self: *const App, sfc: *chasen.Surface) !void {
@@ -631,7 +662,7 @@ pub const App = struct {
                     ui.message_block.drawCenteredText(&forum_area, 0, title, self.titleStyle());
                     try self.drawCenteredListPosition(&forum_area, &self.forums.forum_list);
                     try self.drawCenteredForumList(&forum_area);
-                    ui.message_block.drawCenteredText(&forum_area, forum_area.size().height -| 1, self.footerHint(), self.subtleStyle());
+                    _ = self.drawCenteredFooter(&forum_area, forum_area.size().height -| 1);
                 }
             },
             .loading_threads => {
@@ -658,7 +689,7 @@ pub const App = struct {
         }
 
         if (self.forums.load_state != .forums_loaded or self.forums.forum_list.items.len == 0) {
-            _ = area.borrowTextAt(0, area.size().height -| 1, self.footerHint(), self.subtleStyle());
+            _ = self.drawFooter(&area, area.size().height -| 1);
         }
     }
 
@@ -809,7 +840,7 @@ pub const App = struct {
         }
 
         const thread_layout = layout_mod.threadLayout(area.size().height, self.config.interface.list_density);
-        _ = area.borrowTextAt(0, thread_layout.footer_row, self.footerHint(), self.subtleStyle());
+        _ = self.drawFooter(&area, thread_layout.footer_row);
     }
 
     fn submitToken(self: *App, ctx: *chasen.Ctx(Msg)) !void {
@@ -2338,52 +2369,80 @@ pub const App = struct {
             self.thread.load_state == .loading;
     }
 
-    fn footerHint(self: *const App) []const u8 {
+    fn footerItems(self: *const App) []const footer.Item {
         return switch (self.screen) {
-            .setup_token => setupTokenSubmitHint(self.config_path),
-            .main_menu => "Up/Down/j/k: move  Enter: open  h, /, c, s: shortcuts  Esc/q: quit",
+            .setup_token => if (self.config_path == null) &footer_setup_session else &footer_setup_save,
+            .main_menu => &footer_main_menu,
             .hot_games => if (self.hot_games.filter_active)
-                "Type: filter  Up/Down: move  Enter: detail  Esc: clear"
+                &footer_filter_detail
             else
-                "Up/Down/j/k: move  Enter: detail  /: filter  s: sort  m: menu  Esc/q: quit",
-            .search => "Enter: search  Esc: menu",
+                &footer_hot_games,
+            .search => &footer_search,
             .search_results => if (self.search.filter_active)
-                "Type: filter  Up/Down: move  Enter: detail  Esc: clear  b: search"
+                &footer_search_filter
             else
-                "Up/Down/j/k: move  Enter: detail  /: filter  s: sort  b/Esc: search  m: menu  q: quit",
-            .game_detail => "Up/Down/j/k: scroll  o: open BGG  f: forums  b/Esc: back  m: menu  q: quit",
+                &footer_search_results,
+            .game_detail => &footer_game_detail,
             .forums => switch (self.forums.mode) {
-                .forum_list => "Up/Down/j/k: move  Enter: threads  b: detail  Esc/m: menu  q: quit",
-                .thread_list => "Up/Down/j/k: move  Enter: read  n/p: page  b: forums  Esc/m: menu  q: quit",
+                .forum_list => &footer_forum_list,
+                .thread_list => &footer_thread_list,
             },
-            .thread => "Up/Down/j/k: scroll  s: sort  o: open BGG  b: back  Esc/m: menu  q: quit",
+            .thread => &footer_thread,
             .collection => switch (self.collection.load_state) {
-                .idle, .failed => "Enter: load  Esc: menu",
-                .loading => "Esc: menu",
+                .idle, .failed => &footer_collection_load,
+                .loading => &footer_collection_loading,
                 .loaded => if (self.collection.status_picker)
-                    "Up/Down/j/k: move  Enter: toggle  Esc: close"
+                    &footer_collection_status
                 else if (self.collection.filter_active)
-                    "Type: filter  Up/Down: move  Enter: detail  Esc: clear"
+                    &footer_filter_detail
                 else
-                    "Up/Down/j/k: move  Enter: detail  /: filter  s: status  r: refresh  u: user  Esc/m: menu  q: quit",
+                    &footer_collection,
             },
             .settings => if (self.settings.editing != null)
-                "Enter: save  Esc: cancel"
+                &footer_settings_editing
             else if (self.settings.pickerOpen())
-                "Arrows/j/k/h/l: choose  Enter: save  Esc: cancel"
+                &footer_settings_picker
             else if (self.settings.focusedEditField()) |field|
                 switch (field) {
-                    .token => "Up/Down/j/k: move  Enter: edit token  m: menu  Esc/q: quit",
-                    .username => "Up/Down/j/k: move  Enter: edit username  m: menu  Esc/q: quit",
-                    .list_width => "Up/Down/j/k: move  Enter: edit list width  m: menu  Esc/q: quit",
-                    .thread_width => "Up/Down/j/k: move  Enter: edit thread width  m: menu  Esc/q: quit",
-                    .detail_width => "Up/Down/j/k: move  Enter: edit detail width  m: menu  Esc/q: quit",
+                    .token => &footer_settings_edit_token,
+                    .username => &footer_settings_edit_username,
+                    .list_width => &footer_settings_edit_list_width,
+                    .thread_width => &footer_settings_edit_thread_width,
+                    .detail_width => &footer_settings_edit_detail_width,
                 }
             else if (self.settings.focusedCycleField() != null)
-                "Up/Down/j/k: move  Enter: change setting  m: menu  Esc/q: quit"
+                &footer_settings_change
+            else if (self.settings.isShowImagesFocused())
+                &footer_settings_toggle_images
             else
-                "Up/Down/j/k: move  m: menu  Esc/q: quit",
+                &footer_settings_default,
         };
+    }
+
+    fn statusItems(self: *const App) []const footer.Item {
+        return self.footerItems();
+    }
+
+    fn footerMaxLines(self: *const App) u16 {
+        return if (self.screen == .collection and self.collection.load_state == .loaded and !self.collection.status_picker and !self.collection.filter_active) 2 else 1;
+    }
+
+    fn footerOverflow(self: *const App) chasen.key_hint.Overflow {
+        return if (self.footerMaxLines() > 1) .wrap else .ellipsis;
+    }
+
+    fn drawFooter(self: *const App, area: *chasen.Surface, row: u16) chasen.key_hint.DrawResult {
+        return footer.draw(area, row, self.footerItems(), self.subtleStyle(), .{
+            .max_lines = self.footerMaxLines(),
+            .overflow = self.footerOverflow(),
+        });
+    }
+
+    fn drawCenteredFooter(self: *const App, area: *chasen.Surface, row: u16) chasen.key_hint.DrawResult {
+        return footer.drawCentered(area, row, self.footerItems(), self.subtleStyle(), .{
+            .max_lines = self.footerMaxLines(),
+            .overflow = self.footerOverflow(),
+        });
     }
 };
 
@@ -2986,13 +3045,6 @@ fn screenTransitionFrames(kind: anim.TransitionKind) u64 {
     return transitions.framesForKind(kind);
 }
 
-fn setupTokenSubmitHint(config_path: ?[]const u8) []const u8 {
-    return if (config_path == null)
-        "Enter: use token for this session  Esc: quit"
-    else
-        "Enter: save token and continue  Esc: quit";
-}
-
 fn inputWidthValue(input: anytype, config: config_mod.Config, field: screens.settings.EditField) !void {
     const value: u16 = switch (field) {
         .list_width => config.display.list_width,
@@ -3151,69 +3203,109 @@ test "screen titles match status labels" {
     try std.testing.expectEqualStrings("settings", screenTitle(.settings));
 }
 
+fn expectFooterText(app: *const App, expected: []const u8) !void {
+    const actual = try footer.allocText(std.testing.allocator, app.footerItems(), footer.drawOptions(.{}, .{}));
+    defer std.testing.allocator.free(actual);
+    try std.testing.expectEqualStrings(expected, actual);
+}
+
+fn expectStatusText(app: *const App, expected: []const u8) !void {
+    const actual = try footer.allocText(std.testing.allocator, app.statusItems(), footer.drawOptions(.{}, .{}));
+    defer std.testing.allocator.free(actual);
+    try std.testing.expectEqualStrings(expected, actual);
+}
+
 test "footer hint matches screen key handling" {
     var app = App.create(.{ .api = .{ .token = "token" } }, .{});
 
     app.screen = .main_menu;
-    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: open  h, /, c, s: shortcuts  Esc/q: quit", app.footerHint());
+    try expectFooterText(&app, "↑/↓/j/k: move  Enter: open  Esc/q: quit");
 
     app.screen = .hot_games;
-    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: detail  /: filter  s: sort  m: menu  Esc/q: quit", app.footerHint());
+    try expectFooterText(&app, "↑/↓/j/k: move  Enter: detail  /: filter  s: sort  m: menu  Esc/q: quit");
     app.hot_games.filter_active = true;
-    try std.testing.expectEqualStrings("Type: filter  Up/Down: move  Enter: detail  Esc: clear", app.footerHint());
+    try expectFooterText(&app, "Type: filter  ↑/↓: move  Enter: detail  Esc: clear");
     app.hot_games.filter_active = false;
 
     app.screen = .search;
-    try std.testing.expectEqualStrings("Enter: search  Esc: menu", app.footerHint());
+    try expectFooterText(&app, "Enter: search  Esc: menu");
 
     app.screen = .search_results;
-    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: detail  /: filter  s: sort  b/Esc: search  m: menu  q: quit", app.footerHint());
+    try expectFooterText(&app, "↑/↓/j/k: move  Enter: detail  /: filter  s: sort  b/Esc: search  m: menu  q: quit");
     app.search.filter_active = true;
-    try std.testing.expectEqualStrings("Type: filter  Up/Down: move  Enter: detail  Esc: clear  b: search", app.footerHint());
+    try expectFooterText(&app, "Type: filter  ↑/↓: move  Enter: detail  Esc: clear  b: search");
     app.search.filter_active = false;
 
     app.screen = .game_detail;
-    try std.testing.expectEqualStrings("Up/Down/j/k: scroll  o: open BGG  f: forums  b/Esc: back  m: menu  q: quit", app.footerHint());
+    try expectFooterText(&app, "↑/↓/j/k: scroll  o: open BGG  f: forums  b/Esc: back  m: menu  q: quit");
 
     app.screen = .forums;
     app.forums.mode = .forum_list;
-    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: threads  b: detail  Esc/m: menu  q: quit", app.footerHint());
+    try expectFooterText(&app, "↑/↓/j/k: move  Enter: threads  b: detail  Esc/m: menu  q: quit");
     app.forums.mode = .thread_list;
-    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: read  n/p: page  b: forums  Esc/m: menu  q: quit", app.footerHint());
+    try expectFooterText(&app, "↑/↓/j/k: move  Enter: read  n/p: page  b: forums  Esc/m: menu  q: quit");
 
     app.screen = .thread;
-    try std.testing.expectEqualStrings("Up/Down/j/k: scroll  s: sort  o: open BGG  b: back  Esc/m: menu  q: quit", app.footerHint());
+    try expectFooterText(&app, "↑/↓/j/k: scroll  s: sort  o: open BGG  b: back  Esc/m: menu  q: quit");
 
     app.screen = .collection;
-    try std.testing.expectEqualStrings("Enter: load  Esc: menu", app.footerHint());
+    try expectFooterText(&app, "Enter: load  Esc: menu");
     app.collection.load_state = .loading;
-    try std.testing.expectEqualStrings("Esc: menu", app.footerHint());
+    try expectFooterText(&app, "Esc: menu");
     app.collection.load_state = .loaded;
-    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: detail  /: filter  s: status  r: refresh  u: user  Esc/m: menu  q: quit", app.footerHint());
+    try expectFooterText(&app, "↑/↓/j/k: move  Enter: detail  /: filter  s: status  r: refresh  u: user  Esc/m: menu  q: quit");
     app.collection.status_picker = true;
-    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: toggle  Esc: close", app.footerHint());
+    try expectFooterText(&app, "↑/↓/j/k: move  Enter: toggle  Esc: close");
     app.collection.status_picker = false;
     app.collection.filter_active = true;
-    try std.testing.expectEqualStrings("Type: filter  Up/Down: move  Enter: detail  Esc: clear", app.footerHint());
+    try expectFooterText(&app, "Type: filter  ↑/↓: move  Enter: detail  Esc: clear");
     app.collection.filter_active = false;
 
     app.screen = .settings;
-    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: change setting  m: menu  Esc/q: quit", app.footerHint());
+    try expectFooterText(&app, "↑/↓/j/k: move  Enter: change setting  m: menu  Esc/q: quit");
     for (0..8) |_| app.settings.updateList(.move_next);
-    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: edit list width  m: menu  Esc/q: quit", app.footerHint());
+    try expectFooterText(&app, "↑/↓/j/k: move  Enter: edit list width  m: menu  Esc/q: quit");
     app.settings.updateList(.move_next);
-    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: edit thread width  m: menu  Esc/q: quit", app.footerHint());
+    try expectFooterText(&app, "↑/↓/j/k: move  Enter: edit thread width  m: menu  Esc/q: quit");
     app.settings.updateList(.move_next);
-    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: edit detail width  m: menu  Esc/q: quit", app.footerHint());
+    try expectFooterText(&app, "↑/↓/j/k: move  Enter: edit detail width  m: menu  Esc/q: quit");
     app.settings.updateList(.move_next);
-    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: edit username  m: menu  Esc/q: quit", app.footerHint());
+    try expectFooterText(&app, "↑/↓/j/k: move  Enter: edit username  m: menu  Esc/q: quit");
     app.settings.updateList(.move_next);
-    try std.testing.expectEqualStrings("Up/Down/j/k: move  Enter: edit token  m: menu  Esc/q: quit", app.footerHint());
+    try expectFooterText(&app, "↑/↓/j/k: move  Enter: edit token  m: menu  Esc/q: quit");
     app.settings.startEdit(.token);
-    try std.testing.expectEqualStrings("Enter: save  Esc: cancel", app.footerHint());
+    try expectFooterText(&app, "Enter: save  Esc: cancel");
     app.settings.stopEditing();
     app.settings.openPicker(.transition, app.config, app.animation_frame);
-    try std.testing.expectEqualStrings("Arrows/j/k/h/l: choose  Enter: save  Esc: cancel", app.footerHint());
+    try expectFooterText(&app, "Arrows/j/k/h/l: choose  Enter: save  Esc: cancel");
+}
+
+test "main menu status hint matches footer hint" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.screen = .main_menu;
+
+    try expectFooterText(&app, "↑/↓/j/k: move  Enter: open  Esc/q: quit");
+    try expectStatusText(&app, "↑/↓/j/k: move  Enter: open  Esc/q: quit");
+}
+
+test "collection footer wraps to two lines at item boundaries" {
+    var app = App.create(.{ .api = .{ .token = "token" } }, .{});
+    app.screen = .collection;
+    app.collection.load_state = .loaded;
+
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(64, 2);
+    defer ts.deinit();
+
+    const result = footer.draw(&ts.surface, 0, app.footerItems(), app.subtleStyle(), .{
+        .max_lines = app.footerMaxLines(),
+        .overflow = app.footerOverflow(),
+    });
+
+    try std.testing.expectEqual(@as(u16, 2), result.lines_used);
+    try std.testing.expectEqual(app.footerItems().len, result.items_drawn);
+    try std.testing.expect(!result.overflow);
+    try ts.expectCellText(0, 1, "u");
 }
 
 test "main menu accepts vim-style movement" {
@@ -3228,15 +3320,14 @@ test "main menu accepts vim-style movement" {
     }).?);
 }
 
-test "setup token submit hint reflects save availability" {
-    try std.testing.expectEqualStrings(
-        "Enter: use token for this session  Esc: quit",
-        setupTokenSubmitHint(null),
-    );
-    try std.testing.expectEqualStrings(
-        "Enter: save token and continue  Esc: quit",
-        setupTokenSubmitHint("/tmp/bgg-tui/config.toml"),
-    );
+test "setup token footer reflects save availability" {
+    var app = App.create(.{}, .{});
+    app.screen = .setup_token;
+    try expectFooterText(&app, "Enter: use token for this session  Esc: quit");
+
+    app = App.create(.{}, .{ .config_path = "/tmp/bgg-tui/config.toml" });
+    app.screen = .setup_token;
+    try expectFooterText(&app, "Enter: save token and continue  Esc: quit");
 }
 
 test "setup token paste inserts printable token text" {
