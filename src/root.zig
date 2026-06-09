@@ -13,6 +13,7 @@ pub const format = @import("format.zig");
 pub const image = @import("image.zig");
 pub const labels = @import("labels.zig");
 pub const layout = @import("layout.zig");
+pub const line_blocks = @import("line_blocks.zig");
 pub const list_filter = @import("list_filter.zig");
 pub const list_sort = @import("list_sort.zig");
 pub const list_view = @import("list_view.zig");
@@ -33,6 +34,7 @@ test {
     _ = image;
     _ = labels;
     _ = layout;
+    _ = line_blocks;
     _ = list_filter;
     _ = list_sort;
     _ = list_view;

@@ -14,6 +14,7 @@ const format = @import("format.zig");
 const help_overlay = @import("help_overlay.zig");
 const image_mod = @import("image.zig");
 const layout_mod = @import("layout.zig");
+const line_blocks = @import("line_blocks.zig");
 const list_view = @import("list_view.zig");
 const motion = @import("motion.zig");
 const paste = @import("paste.zig");
@@ -654,7 +655,7 @@ pub const App = struct {
                         try self.drawManualOpenHint(&text_area, detail_layout.scroll_row, self.game_detail.browser_error_url);
                     } else if (self.game_detail.maxScroll(detail_layout.content_height) > 0 and text_area.size().height >= 3) {
                         _ = try text_area.printAt(0, detail_layout.scroll_row, .{ .dim = true }, "({d}/{d})", .{
-                            self.game_detail.scroll + 1,
+                            self.game_detail.scrollOffset() + 1,
                             self.game_detail.maxScroll(detail_layout.content_height) + 1,
                         });
                     }
@@ -857,7 +858,7 @@ pub const App = struct {
                     try self.drawManualOpenHint(&area, thread_layout.scroll_row, self.thread.browser_error_url);
                 } else if (self.thread.maxScroll(thread_layout.content_height) > 0 and area.size().height >= 3) {
                     _ = try area.printAt(0, thread_layout.scroll_row, self.subtleStyle(), "({d}/{d})", .{
-                        self.thread.scroll + 1,
+                        self.thread.scrollOffset() + 1,
                         self.thread.maxScroll(thread_layout.content_height) + 1,
                     });
                 }
@@ -3728,10 +3729,11 @@ test "thread scroll uses resized body height" {
         line.* = text[index * 2 .. index * 2 + 1];
     }
     app.thread.lines = lines;
+    app.thread.line_blocks = try line_blocks.oneRowBlocks(std.testing.allocator, lines.len);
     app.thread.load_state = .loaded;
 
     for (0..10) |_| app.thread.moveDown(threadLayoutForTerminal(&app).content_height);
-    try std.testing.expectEqual(app.thread.maxScroll(threadLayoutForTerminal(&app).content_height), app.thread.scroll);
+    try std.testing.expectEqual(app.thread.maxScroll(threadLayoutForTerminal(&app).content_height), app.thread.scrollOffset());
 }
 
 test "detail scroll uses resized body height" {
@@ -3750,11 +3752,12 @@ test "detail scroll uses resized body height" {
         line.* = text[index * 2 .. index * 2 + 1];
     }
     app.game_detail.lines = lines;
+    app.game_detail.line_blocks = try line_blocks.oneRowBlocks(std.testing.allocator, lines.len);
     app.game_detail.load_state = .loaded;
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
     for (0..10) |_| try app.update(.{ .game_detail = .move_next }, &tc.ctx);
-    try std.testing.expectEqual(app.game_detail.maxScroll(detailLayoutForTerminal(&app).content_height), app.game_detail.scroll);
+    try std.testing.expectEqual(app.game_detail.maxScroll(detailLayoutForTerminal(&app).content_height), app.game_detail.scrollOffset());
 }
 
 test "loaded thread o opens browser" {

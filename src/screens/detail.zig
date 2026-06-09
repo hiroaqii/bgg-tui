@@ -6,6 +6,7 @@ const bgg_html = @import("../bgg/html.zig");
 const bgg_model = @import("../bgg/model.zig");
 const bgg_xml = @import("../bgg/xml.zig");
 const format = @import("../format.zig");
+const line_blocks = @import("../line_blocks.zig");
 
 pub const LoadState = union(enum) {
     idle,
@@ -34,7 +35,8 @@ pub const State = struct {
     games: []bgg_model.Game = &.{},
     rendered_text: []u8 = "",
     lines: []const []const u8 = &.{},
-    scroll: usize = 0,
+    line_blocks: []const ui.BlockViewport.Block = &.{},
+    viewport: ui.BlockViewport.State = .{},
     visible_height: usize = 1,
     browser_error_url: []u8 = "",
 
@@ -51,7 +53,7 @@ pub const State = struct {
         self.deinit(allocator);
         self.games = games;
         try self.rebuildLines(allocator, detail_width);
-        self.scroll = 0;
+        self.viewport.offset = 0;
         self.load_state = .loaded;
     }
 
@@ -104,39 +106,37 @@ pub const State = struct {
     }
 
     pub fn moveUp(self: *State) void {
-        if (self.scroll > 0) self.scroll -= 1;
+        self.viewport.scrollBy(self.line_blocks, self.visible_height, -1);
     }
 
     pub fn moveDown(self: *State, visible_height: usize) void {
-        const max = self.maxScroll(visible_height);
-        if (self.scroll < max) self.scroll += 1;
+        self.viewport.scrollBy(self.line_blocks, visible_height, 1);
     }
 
     pub fn setVisibleHeight(self: *State, visible_height: usize) void {
         self.visible_height = @max(visible_height, 1);
-        self.scroll = @min(self.scroll, self.maxScroll(self.visible_height));
+        self.viewport.clamp(self.line_blocks, self.visible_height);
     }
 
     pub fn rewrap(self: *State, allocator: std.mem.Allocator, detail_width: usize) !void {
         if (self.load_state != .loaded or self.games.len == 0) return;
         try self.rebuildLines(allocator, detail_width);
-        self.scroll = @min(self.scroll, self.maxScroll(self.visible_height));
+        self.viewport.clamp(self.line_blocks, self.visible_height);
     }
 
     pub fn visibleRange(self: *const State, visible_height: usize) ui.Viewport.Range {
-        return ui.Viewport.init(.{
-            .total = self.lines.len,
-            .height = visible_height,
-            .offset = self.scroll,
-        }).visibleRange();
+        const range = self.viewport.range(self.line_blocks, visible_height);
+        const start = @min(range.clamped_offset, self.lines.len);
+        const end = @min(self.lines.len, start +| visible_height);
+        return .{ .start = start, .end = end };
     }
 
     pub fn maxScroll(self: *const State, visible_height: usize) usize {
-        return ui.Viewport.init(.{
-            .total = self.lines.len,
-            .height = visible_height,
-            .offset = self.scroll,
-        }).maxOffset();
+        return ui.BlockViewport.maxOffset(self.line_blocks, visible_height);
+    }
+
+    pub fn scrollOffset(self: *const State) usize {
+        return self.viewport.offset;
     }
 
     pub fn setBrowserErrorUrl(self: *State, allocator: std.mem.Allocator, url: []const u8) !void {
@@ -153,12 +153,14 @@ pub const State = struct {
         bgg_xml.freeGames(allocator, self.games);
         self.clearImage(allocator);
         allocator.free(self.lines);
+        allocator.free(self.line_blocks);
         allocator.free(self.rendered_text);
         self.clearBrowserErrorUrl(allocator);
         self.games = &.{};
         self.lines = &.{};
+        self.line_blocks = &.{};
         self.rendered_text = "";
-        self.scroll = 0;
+        self.viewport = .{};
         self.visible_height = 1;
         self.load_state = .idle;
     }
@@ -176,13 +178,16 @@ pub const State = struct {
 
     fn rebuildLines(self: *State, allocator: std.mem.Allocator, detail_width: usize) !void {
         allocator.free(self.lines);
+        allocator.free(self.line_blocks);
         allocator.free(self.rendered_text);
         self.lines = &.{};
+        self.line_blocks = &.{};
         self.rendered_text = "";
 
         if (self.games.len == 0) return;
         self.rendered_text = try buildGameDetailContent(allocator, self.games[0], detail_width);
         self.lines = try splitOwnedLines(allocator, self.rendered_text);
+        self.line_blocks = try line_blocks.oneRowBlocks(allocator, self.lines.len);
     }
 };
 

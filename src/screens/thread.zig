@@ -4,6 +4,7 @@ const bgg_html = @import("../bgg/html.zig");
 const bgg_model = @import("../bgg/model.zig");
 const bgg_xml = @import("../bgg/xml.zig");
 const format = @import("../format.zig");
+const line_blocks = @import("../line_blocks.zig");
 const ui = @import("chasen_ui");
 
 pub const LoadState = union(enum) {
@@ -20,7 +21,8 @@ pub const State = struct {
     thread: ?bgg_model.Thread = null,
     rendered_text: []u8 = "",
     lines: []const []const u8 = &.{},
-    scroll: usize = 0,
+    line_blocks: []const ui.BlockViewport.Block = &.{},
+    viewport: ui.BlockViewport.State = .{},
     sort_newest: bool = false,
     wrap_width: usize = 90,
     visible_height: usize = 1,
@@ -41,22 +43,21 @@ pub const State = struct {
         self.clearThread(allocator);
         self.thread = thread;
         try self.rebuildLines(allocator);
-        self.scroll = 0;
+        self.viewport.offset = 0;
         self.load_state = .loaded;
     }
 
     pub fn moveUp(self: *State) void {
-        if (self.scroll > 0) self.scroll -= 1;
+        self.viewport.scrollBy(self.line_blocks, self.visible_height, -1);
     }
 
     pub fn moveDown(self: *State, visible_height: usize) void {
-        const max = self.maxScroll(visible_height);
-        if (self.scroll < max) self.scroll += 1;
+        self.viewport.scrollBy(self.line_blocks, visible_height, 1);
     }
 
     pub fn setVisibleHeight(self: *State, visible_height: usize) void {
         self.visible_height = @max(visible_height, 1);
-        self.scroll = @min(self.scroll, self.maxScroll(self.visible_height));
+        self.viewport.clamp(self.line_blocks, self.visible_height);
     }
 
     pub fn toggleSort(self: *State, allocator: std.mem.Allocator) !void {
@@ -64,7 +65,7 @@ pub const State = struct {
         self.sort_newest = !self.sort_newest;
         self.sortArticles();
         try self.rebuildLines(allocator);
-        self.scroll = 0;
+        self.viewport.offset = 0;
     }
 
     pub fn setBrowserErrorUrl(self: *State, allocator: std.mem.Allocator, url: []const u8) !void {
@@ -78,19 +79,18 @@ pub const State = struct {
     }
 
     pub fn visibleRange(self: *const State, visible_height: usize) ui.Viewport.Range {
-        return ui.Viewport.init(.{
-            .total = self.lines.len,
-            .height = visible_height,
-            .offset = self.scroll,
-        }).visibleRange();
+        const range = self.viewport.range(self.line_blocks, visible_height);
+        const start = @min(range.clamped_offset, self.lines.len);
+        const end = @min(self.lines.len, start +| visible_height);
+        return .{ .start = start, .end = end };
     }
 
     pub fn maxScroll(self: *const State, visible_height: usize) usize {
-        return ui.Viewport.init(.{
-            .total = self.lines.len,
-            .height = visible_height,
-            .offset = self.scroll,
-        }).maxOffset();
+        return ui.BlockViewport.maxOffset(self.line_blocks, visible_height);
+    }
+
+    pub fn scrollOffset(self: *const State) usize {
+        return self.viewport.offset;
     }
 
     pub fn postCount(self: *const State) usize {
@@ -110,7 +110,7 @@ pub const State = struct {
     pub fn deinit(self: *State, allocator: std.mem.Allocator) void {
         self.clearThread(allocator);
         self.thread_id = 0;
-        self.scroll = 0;
+        self.viewport = .{};
         self.sort_newest = false;
         self.visible_height = 1;
         self.load_state = .idle;
@@ -119,22 +119,27 @@ pub const State = struct {
     fn clearThread(self: *State, allocator: std.mem.Allocator) void {
         self.clearBrowserErrorUrl(allocator);
         allocator.free(self.lines);
+        allocator.free(self.line_blocks);
         allocator.free(self.rendered_text);
         if (self.thread) |thread| bgg_xml.freeThread(allocator, thread);
         self.thread = null;
         self.rendered_text = "";
         self.lines = &.{};
+        self.line_blocks = &.{};
     }
 
     fn rebuildLines(self: *State, allocator: std.mem.Allocator) !void {
         allocator.free(self.lines);
+        allocator.free(self.line_blocks);
         allocator.free(self.rendered_text);
         self.lines = &.{};
+        self.line_blocks = &.{};
         self.rendered_text = "";
 
         const thread = self.thread orelse return;
         self.rendered_text = try renderArticles(allocator, thread.articles, self.wrap_width);
         self.lines = try splitLines(allocator, self.rendered_text);
+        self.line_blocks = try line_blocks.oneRowBlocks(allocator, self.lines.len);
     }
 
     fn sortArticles(self: *State) void {
@@ -335,11 +340,11 @@ test "thread sort toggles newest first and resets scroll" {
     };
 
     try state.setLoaded(std.testing.allocator, thread);
-    state.scroll = 1;
+    state.viewport.offset = 1;
     try state.toggleSort(std.testing.allocator);
 
     try std.testing.expect(state.sort_newest);
-    try std.testing.expectEqual(@as(usize, 0), state.scroll);
+    try std.testing.expectEqual(@as(usize, 0), state.scrollOffset());
     try std.testing.expectEqual(@as(u32, 2), state.thread.?.articles[0].id);
 }
 
