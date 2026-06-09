@@ -474,16 +474,71 @@ fn splitOwnedLines(allocator: std.mem.Allocator, text: []const u8) ![]const []co
     return try lines.toOwnedSlice(allocator);
 }
 
+pub const LineStyles = struct {
+    title: chasen.TextStyle,
+    label: chasen.TextStyle,
+};
+
+pub fn drawLine(surface: *chasen.Surface, row: u16, absolute_line_index: usize, line: []const u8, styles: LineStyles) void {
+    if (absolute_line_index == 0) {
+        _ = surface.borrowTextAt(0, row, line, styles.title);
+        return;
+    }
+
+    if (std.mem.eql(u8, line, "Description")) {
+        _ = surface.borrowTextAt(0, row, line, styles.label);
+        return;
+    }
+
+    if (isPollTableLine(line)) {
+        _ = surface.borrowTextAt(0, row, line, .{});
+        return;
+    }
+
+    if (detailLabelLength(line)) |label_len| {
+        const label = line[0..label_len];
+        _ = surface.borrowTextAt(0, row, label, styles.label);
+        _ = surface.borrowTextAt(chasen.text.displayWidth(label), row, line[label_len..], .{});
+        return;
+    }
+
+    _ = surface.borrowTextAt(0, row, line, .{});
+}
+
 pub fn lineStyle(line: []const u8) chasen.TextStyle {
     if (std.mem.eql(u8, line, "Description")) return .{ .dim = true };
-    if (std.mem.startsWith(u8, line, "  ┌") or
+    return .{};
+}
+
+fn isPollTableLine(line: []const u8) bool {
+    return std.mem.startsWith(u8, line, "  ┌") or
         std.mem.startsWith(u8, line, "  │") or
         std.mem.startsWith(u8, line, "  ├") or
-        std.mem.startsWith(u8, line, "  └"))
-    {
-        return .{ .dim = true };
+        std.mem.startsWith(u8, line, "  └");
+}
+
+fn detailLabelLength(line: []const u8) ?usize {
+    const labels = [_][]const u8{
+        "Year",
+        "Rating",
+        "Geek Rating",
+        "Rank",
+        "Players",
+        "Time",
+        "Weight",
+        "Age",
+        "Owned",
+        "Comments",
+        "Designer",
+        "Artist",
+        "Categories",
+        "Mechanics",
+    };
+
+    for (labels) |label| {
+        if (std.mem.startsWith(u8, line, label)) return label.len;
     }
-    return .{};
+    return null;
 }
 
 pub const Layout = struct {
@@ -626,8 +681,32 @@ test "detail layout keeps content and footer positions consistent" {
 
 test "detail line style does not dim wrapped metadata lines" {
     try std.testing.expect(!lineStyle("             Deck Building, Hand Management").dim);
-    try std.testing.expect(lineStyle("  │ 5+ │ 1 (50%) │  0 (0%) │  1 (50%) │").dim);
+    try std.testing.expect(!lineStyle("  │ 5+ │ 1 (50%) │  0 (0%) │  1 (50%) │").dim);
     try std.testing.expect(lineStyle("Description").dim);
+}
+
+test "detail draw line colors title labels and tables" {
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(40, 4);
+    defer ts.deinit();
+
+    const accent = chasen.Color{ .rgb = .{ 203, 166, 247 } };
+    const styles = LineStyles{
+        .title = .{ .fg = accent, .bold = true },
+        .label = .{ .fg = accent, .bold = true },
+    };
+
+    drawLine(&ts.surface, 0, 0, "CATAN", styles);
+    drawLine(&ts.surface, 1, 2, "Rating       7.14", styles);
+    drawLine(&ts.surface, 2, 4, "  │    │ Best │", styles);
+    drawLine(&ts.surface, 3, 5, "Trade resources", styles);
+
+    try std.testing.expect(ts.surface.readCell(0, 0).?.style.fg.eql(accent.toVaxis()));
+    try std.testing.expect(ts.surface.readCell(0, 1).?.style.fg.eql(accent.toVaxis()));
+    try std.testing.expect(!ts.surface.readCell(13, 1).?.style.fg.eql(accent.toVaxis()));
+    try std.testing.expect(!ts.surface.readCell(2, 2).?.style.fg.eql(accent.toVaxis()));
+    try std.testing.expect(!ts.surface.readCell(2, 2).?.style.dim);
+    try std.testing.expect(!ts.surface.readCell(0, 3).?.style.fg.eql(accent.toVaxis()));
 }
 
 test "player count poll table skips polls without vote rows" {

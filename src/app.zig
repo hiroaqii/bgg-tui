@@ -643,7 +643,10 @@ pub const App = struct {
                     for (self.game_detail.lines[range.start..range.end], 0..) |line, index| {
                         const row = detail_layout.content_row + @as(u16, @intCast(index));
                         if (index >= detail_layout.content_height or row >= text_area.size().height) break;
-                        _ = text_area.borrowTextAt(0, row, line, screens.detail.lineStyle(line));
+                        screens.detail.drawLine(&text_area, row, range.start + index, line, .{
+                            .title = self.titleStyle(),
+                            .label = self.titleStyle(),
+                        });
                     }
 
                     if (self.game_detail.browser_error_url.len > 0) {
