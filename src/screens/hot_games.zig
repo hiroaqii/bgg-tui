@@ -4,6 +4,7 @@ const ui = @import("chasen_ui");
 
 const bgg_model = @import("../bgg/model.zig");
 const bgg_xml = @import("../bgg/xml.zig");
+const column_list_view = @import("../column_list_view.zig");
 const labels_mod = @import("../labels.zig");
 const list_filter = @import("../list_filter.zig");
 const list_view = @import("../list_view.zig");
@@ -19,6 +20,13 @@ const body_row: u16 = 4;
 const filtered_body_row: u16 = 6;
 const footer_gap: u16 = 1;
 const stats_legend = "trending games  ★ Rating  ⚖ Weight  #Rank";
+const hot_columns = [_]ui.ColumnList.Column{
+    .{ .width = .{ .fixed = 4 } },
+    .{ .width = .flex },
+    .{ .width = .{ .fixed = 7 }, .alignment = .right },
+    .{ .width = .{ .fixed = 7 }, .alignment = .right },
+    .{ .width = .{ .fixed = 6 }, .alignment = .right },
+};
 
 pub const Result = task_bgg.HotGamesResult;
 pub const StatsResult = task_bgg.HotGameStatsResult;
@@ -358,10 +366,7 @@ pub const State = struct {
                     .width = list_width,
                     .height = area.size().height -| (current_body_row + 1 + footer_gap),
                 });
-                list_view.viewListWithDensitySelection(list, &list_area, .{
-                    .focused_style = opts.focused_style,
-                    .show_cursor = false,
-                }, opts.list_density, opts.selection, opts.animation_frame);
+                try self.drawHotColumnList(list, &list_area, opts);
 
                 try drawListPositionWithLegend(area, list, stats_legend, opts.subtle_style);
                 drawSortMode(area, self.sort_mode.label(.hot_games), opts.subtle_style);
@@ -371,6 +376,15 @@ pub const State = struct {
 
         _ = chasen.key_hint.draw(area, 0, area.size().height -| 1, opts.footer_items, .{ .style = opts.subtle_style });
         return image_rect;
+    }
+
+    fn drawHotColumnList(self: *const State, list: *const ui.List, surface: *chasen.Surface, opts: ViewOptions) !void {
+        try column_list_view.viewVisibleRows(list, surface, &hot_columns, self, buildHotColumnRow, .{
+            .focused_style = opts.focused_style,
+            .selection = opts.selection,
+            .animation_frame = opts.animation_frame,
+            .show_cursor = false,
+        });
     }
 
     pub fn deinit(self: *State, allocator: std.mem.Allocator) void {
@@ -418,6 +432,52 @@ pub const State = struct {
         self.sorted_list = ui.List.init(.{});
     }
 };
+
+fn buildHotColumnRow(context: *const anyopaque, allocator: std.mem.Allocator, visible_index: usize) !ui.ColumnList.Row {
+    const state: *const State = @ptrCast(@alignCast(context));
+    const source_index = state.sourceIndex(visible_index) orelse return &.{};
+    return hotColumnRow(allocator, state.games[source_index], hotStatsFor(state.stats, state.games[source_index].id));
+}
+
+fn hotColumnRow(allocator: std.mem.Allocator, game: bgg_model.HotGame, stats: ?bgg_model.Game) !ui.ColumnList.Row {
+    const row = try allocator.alloc(ui.ColumnList.Cell, hot_columns.len);
+    row[0] = .{ .text = try std.fmt.allocPrint(allocator, "#{d}", .{game.rank}) };
+    row[1] = .{ .text = try hotGameName(allocator, game) };
+    if (stats) |game_stats| {
+        row[2] = .{ .text = try gameRatingText(allocator, "★", game_stats.rating) };
+        row[3] = .{ .text = try gameRatingText(allocator, "⚖", game_stats.weight) };
+        row[4] = .{ .text = try gameRankText(allocator, game_stats.rank) };
+    } else {
+        row[2] = .{ .text = "" };
+        row[3] = .{ .text = "" };
+        row[4] = .{ .text = "" };
+    }
+    return row;
+}
+
+fn hotGameName(allocator: std.mem.Allocator, game: bgg_model.HotGame) ![]const u8 {
+    if (game.year_published) |year| {
+        return try std.fmt.allocPrint(allocator, "{s} ({d})", .{ game.name, year });
+    }
+    return game.name;
+}
+
+fn gameRatingText(allocator: std.mem.Allocator, label: []const u8, rating: f64) ![]const u8 {
+    if (rating <= 0) return try std.fmt.allocPrint(allocator, "{s}     -", .{label});
+    return try std.fmt.allocPrint(allocator, "{s} {d: >5.2}", .{ label, rating });
+}
+
+fn gameRankText(allocator: std.mem.Allocator, rank: u32) ![]const u8 {
+    if (rank == 0) return "    -";
+    return try std.fmt.allocPrint(allocator, "#{d}", .{rank});
+}
+
+fn hotStatsFor(stats: []const bgg_model.Game, id: u32) ?bgg_model.Game {
+    for (stats) |game| {
+        if (game.id == id) return game;
+    }
+    return null;
+}
 
 fn drawListPositionWithLegend(surface: *chasen.Surface, list: *const ui.List, legend: []const u8, style: chasen.TextStyle) !void {
     const item_count = list.items.len;

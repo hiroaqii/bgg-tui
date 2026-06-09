@@ -4,6 +4,7 @@ const ui = @import("chasen_ui");
 
 const bgg_model = @import("../bgg/model.zig");
 const bgg_xml = @import("../bgg/xml.zig");
+const column_list_view = @import("../column_list_view.zig");
 const labels_mod = @import("../labels.zig");
 const list_filter = @import("../list_filter.zig");
 const list_view = @import("../list_view.zig");
@@ -22,6 +23,13 @@ pub const status_picker_lines: u16 = 10;
 const filtered_body_row: u16 = 6;
 const footer_gap: u16 = 1;
 const stats_legend = "games  ♥ User Rating  ★ Rating  #Rank";
+const collection_columns = [_]ui.ColumnList.Column{
+    .{ .width = .flex },
+    .{ .width = .{ .fixed = 7 }, .alignment = .right },
+    .{ .width = .{ .fixed = 7 }, .alignment = .right },
+    .{ .width = .{ .fixed = 6 }, .alignment = .right },
+    .{ .width = .{ .fixed = 8 }, .alignment = .right },
+};
 
 pub const Result = task_bgg.CollectionResult;
 pub const TaskResult = task_bgg.CollectionTaskResult;
@@ -504,16 +512,22 @@ pub const State = struct {
                 .width = list_width,
                 .height = area.size().height -| (list_row + opts.footer_max_lines + footer_gap + picker_height),
             });
-            list_view.viewListWithDensitySelection(list, &list_area, .{
-                .focused_style = opts.focused_style,
-                .show_cursor = false,
-            }, opts.list_density, opts.selection, opts.animation_frame);
+            try self.drawCollectionColumnList(list, &list_area, opts);
             try drawListPositionWithLegend(area, list, stats_legend, opts.subtle_style);
         }
         if (self.status_picker) {
             const picker_row = area.size().height -| (status_picker_lines + 1);
             self.drawStatusPicker(area, @max(body_row, picker_row), opts.muted_title_style, opts.muted_style, opts.accent);
         }
+    }
+
+    fn drawCollectionColumnList(self: *const State, list: *const ui.List, surface: *chasen.Surface, opts: ViewOptions) !void {
+        try column_list_view.viewVisibleRows(list, surface, &collection_columns, self, buildCollectionColumnRow, .{
+            .focused_style = opts.focused_style,
+            .selection = opts.selection,
+            .animation_frame = opts.animation_frame,
+            .show_cursor = false,
+        });
     }
 
     fn shouldDrawImagePanel(self: *const State) bool {
@@ -562,6 +576,44 @@ pub const State = struct {
         self.filter_active = false;
     }
 };
+
+fn buildCollectionColumnRow(context: *const anyopaque, allocator: std.mem.Allocator, visible_index: usize) !ui.ColumnList.Row {
+    const state: *const State = @ptrCast(@alignCast(context));
+    const source_index = state.sourceIndex(visible_index) orelse return &.{};
+    return collectionColumnRow(allocator, state.items[source_index]);
+}
+
+fn collectionColumnRow(allocator: std.mem.Allocator, item: bgg_model.CollectionItem) !ui.ColumnList.Row {
+    const row = try allocator.alloc(ui.ColumnList.Cell, collection_columns.len);
+    row[0] = .{ .text = try collectionItemName(allocator, item) };
+    row[1] = .{ .text = try collectionRatingText(allocator, "♥", item.rating) };
+    row[2] = .{ .text = try collectionRatingText(allocator, "★", item.bgg_rating) };
+    row[3] = .{ .text = try collectionRankText(allocator, item.rank) };
+    row[4] = .{ .text = try collectionPlaysText(allocator, item.num_plays) };
+    return row;
+}
+
+fn collectionItemName(allocator: std.mem.Allocator, item: bgg_model.CollectionItem) ![]const u8 {
+    if (item.year_published) |year| {
+        return try std.fmt.allocPrint(allocator, "{s} ({d})", .{ item.name, year });
+    }
+    return item.name;
+}
+
+fn collectionRatingText(allocator: std.mem.Allocator, label: []const u8, rating: f64) ![]const u8 {
+    if (rating <= 0) return try std.fmt.allocPrint(allocator, "{s}     -", .{label});
+    return try std.fmt.allocPrint(allocator, "{s} {d: >5.2}", .{ label, rating });
+}
+
+fn collectionRankText(allocator: std.mem.Allocator, rank: u32) ![]const u8 {
+    if (rank == 0) return "    -";
+    return try std.fmt.allocPrint(allocator, "#{d}", .{rank});
+}
+
+fn collectionPlaysText(allocator: std.mem.Allocator, num_plays: u32) ![]const u8 {
+    if (num_plays == 0) return "";
+    return try std.fmt.allocPrint(allocator, "plays {d}", .{num_plays});
+}
 
 fn drawStatusBar(surface: *chasen.Surface, status_mask: u8, style: chasen.TextStyle) void {
     if (surface.size().height <= status_bar_row) return;

@@ -7,6 +7,7 @@ pub const app = @import("app.zig");
 pub const bgg = @import("bgg/root.zig");
 pub const browser = @import("browser.zig");
 pub const config = @import("config.zig");
+pub const column_list_view = @import("column_list_view.zig");
 pub const features = @import("features/root.zig");
 pub const format = @import("format.zig");
 pub const image = @import("image.zig");
@@ -26,6 +27,7 @@ test {
     _ = bgg;
     _ = browser;
     _ = config;
+    _ = column_list_view;
     _ = features;
     _ = format;
     _ = image;
