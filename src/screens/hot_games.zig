@@ -23,9 +23,16 @@ const stats_legend = "trending games  ★ Rating  ⚖ Weight  #Rank";
 const hot_columns = [_]ui.ColumnList.Column{
     .{ .width = .{ .fixed = 4 } },
     .{ .width = .flex },
-    .{ .width = .{ .fixed = 7 }, .alignment = .right },
-    .{ .width = .{ .fixed = 7 }, .alignment = .right },
+    .{ .width = .{ .fixed = 1 }, .alignment = .right },
+    .{ .width = .{ .fixed = 5 } },
+    .{ .width = .{ .fixed = 1 }, .alignment = .right },
+    .{ .width = .{ .fixed = 5 } },
     .{ .width = .{ .fixed = 6 }, .alignment = .right },
+};
+
+const HotColumnContext = struct {
+    state: *const State,
+    accent: chasen.Color,
 };
 
 pub const Result = task_bgg.HotGamesResult;
@@ -36,6 +43,7 @@ pub const ViewOptions = struct {
     focused_style: chasen.TextStyle,
     muted_style: chasen.TextStyle,
     subtle_style: chasen.TextStyle,
+    accent: chasen.Color,
     footer_items: []const chasen.key_hint.Item,
     list_density: list_view.Density,
     selection: []const u8,
@@ -379,10 +387,15 @@ pub const State = struct {
     }
 
     fn drawHotColumnList(self: *const State, list: *const ui.List, surface: *chasen.Surface, opts: ViewOptions) !void {
-        try column_list_view.viewVisibleRows(list, surface, &hot_columns, self, buildHotColumnRow, .{
+        const column_context: HotColumnContext = .{
+            .state = self,
+            .accent = opts.accent,
+        };
+        try column_list_view.viewVisibleRows(list, surface, &hot_columns, &column_context, buildHotColumnRow, .{
             .focused_style = opts.focused_style,
             .selection = opts.selection,
             .animation_frame = opts.animation_frame,
+            .column_gap = 1,
             .show_cursor = false,
         });
     }
@@ -434,23 +447,28 @@ pub const State = struct {
 };
 
 fn buildHotColumnRow(context: *const anyopaque, allocator: std.mem.Allocator, visible_index: usize) !ui.ColumnList.Row {
-    const state: *const State = @ptrCast(@alignCast(context));
+    const column_context: *const HotColumnContext = @ptrCast(@alignCast(context));
+    const state = column_context.state;
     const source_index = state.sourceIndex(visible_index) orelse return &.{};
-    return hotColumnRow(allocator, state.games[source_index], hotStatsFor(state.stats, state.games[source_index].id));
+    return hotColumnRow(allocator, state.games[source_index], hotStatsFor(state.stats, state.games[source_index].id), column_context.accent);
 }
 
-fn hotColumnRow(allocator: std.mem.Allocator, game: bgg_model.HotGame, stats: ?bgg_model.Game) !ui.ColumnList.Row {
+fn hotColumnRow(allocator: std.mem.Allocator, game: bgg_model.HotGame, stats: ?bgg_model.Game, accent: chasen.Color) !ui.ColumnList.Row {
     const row = try allocator.alloc(ui.ColumnList.Cell, hot_columns.len);
-    row[0] = .{ .text = try std.fmt.allocPrint(allocator, "#{d}", .{game.rank}) };
+    row[0] = .{ .text = try std.fmt.allocPrint(allocator, "#{d}", .{game.rank}), .style = .{ .fg = accent } };
     row[1] = .{ .text = try hotGameName(allocator, game) };
     if (stats) |game_stats| {
-        row[2] = .{ .text = try gameRatingText(allocator, "★", game_stats.rating) };
-        row[3] = .{ .text = try gameRatingText(allocator, "⚖", game_stats.weight) };
-        row[4] = .{ .text = try gameRankText(allocator, game_stats.rank) };
+        row[2] = .{ .text = "★", .style = .{ .fg = accent } };
+        row[3] = .{ .text = try gameRatingText(allocator, game_stats.rating) };
+        row[4] = .{ .text = "⚖", .style = .{ .fg = accent } };
+        row[5] = .{ .text = try gameRatingText(allocator, game_stats.weight) };
+        row[6] = .{ .text = try gameRankText(allocator, game_stats.rank) };
     } else {
         row[2] = .{ .text = "" };
         row[3] = .{ .text = "" };
         row[4] = .{ .text = "" };
+        row[5] = .{ .text = "" };
+        row[6] = .{ .text = "" };
     }
     return row;
 }
@@ -462,9 +480,9 @@ fn hotGameName(allocator: std.mem.Allocator, game: bgg_model.HotGame) ![]const u
     return game.name;
 }
 
-fn gameRatingText(allocator: std.mem.Allocator, label: []const u8, rating: f64) ![]const u8 {
-    if (rating <= 0) return try std.fmt.allocPrint(allocator, "{s}     -", .{label});
-    return try std.fmt.allocPrint(allocator, "{s} {d: >5.2}", .{ label, rating });
+fn gameRatingText(allocator: std.mem.Allocator, rating: f64) ![]const u8 {
+    if (rating <= 0) return "-";
+    return try std.fmt.allocPrint(allocator, "{d:.2}", .{rating});
 }
 
 fn gameRankText(allocator: std.mem.Allocator, rank: u32) ![]const u8 {

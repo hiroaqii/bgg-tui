@@ -547,6 +547,7 @@ pub const App = struct {
             .focused_style = self.focusedStyle(),
             .muted_style = self.mutedStyle(),
             .subtle_style = self.subtleStyle(),
+            .accent = self.theme().accent,
             .footer_items = self.footerItems(),
             .list_density = self.listDensity(),
             .selection = self.config.interface.selection,
