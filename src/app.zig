@@ -641,11 +641,21 @@ pub const App = struct {
                 if (self.game_detail.games.len == 0) {
                     self.drawEmptyState(&text_area, detail_layout.content_row, "No detail", "BGG did not return game detail.");
                 } else {
-                    const range = self.game_detail.visibleRange(detail_layout.content_height);
-                    for (self.game_detail.lines[range.start..range.end], 0..) |line, index| {
-                        const row = detail_layout.content_row + @as(u16, @intCast(index));
-                        if (index >= detail_layout.content_height or row >= text_area.size().height) break;
-                        screens.detail.drawLine(&text_area, row, range.start + index, line, .{
+                    var body_area = text_area.child(.{
+                        .col = 0,
+                        .row = detail_layout.content_row,
+                        .width = text_area.size().width,
+                        .height = @intCast(@min(detail_layout.content_height, @as(usize, text_area.size().height -| detail_layout.content_row))),
+                    });
+                    var it = self.game_detail.visibleBlocks(detail_layout.content_height);
+                    while (it.next()) |visible| {
+                        var block_area = body_area.child(.{
+                            .col = 0,
+                            .row = visible.row,
+                            .width = body_area.size().width,
+                            .height = @intCast(visible.max_rows),
+                        });
+                        try screens.detail.drawBlock(&block_area, &self.game_detail, visible, .{
                             .title = self.titleStyle(),
                             .label = self.titleStyle(),
                         });
@@ -3752,7 +3762,8 @@ test "detail scroll uses resized body height" {
         line.* = text[index * 2 .. index * 2 + 1];
     }
     app.game_detail.lines = lines;
-    app.game_detail.line_blocks = try line_blocks.oneRowBlocks(std.testing.allocator, lines.len);
+    app.game_detail.blocks = try screens.detail.buildBlocks(std.testing.allocator, lines);
+    app.game_detail.viewport_blocks = try screens.detail.buildViewportBlocks(std.testing.allocator, app.game_detail.blocks);
     app.game_detail.load_state = .loaded;
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};

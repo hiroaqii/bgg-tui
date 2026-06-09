@@ -6,7 +6,6 @@ const bgg_html = @import("../bgg/html.zig");
 const bgg_model = @import("../bgg/model.zig");
 const bgg_xml = @import("../bgg/xml.zig");
 const format = @import("../format.zig");
-const line_blocks = @import("../line_blocks.zig");
 
 pub const LoadState = union(enum) {
     idle,
@@ -35,7 +34,8 @@ pub const State = struct {
     games: []bgg_model.Game = &.{},
     rendered_text: []u8 = "",
     lines: []const []const u8 = &.{},
-    line_blocks: []const ui.BlockViewport.Block = &.{},
+    blocks: []const Block = &.{},
+    viewport_blocks: []const ui.BlockViewport.Block = &.{},
     viewport: ui.BlockViewport.State = .{},
     visible_height: usize = 1,
     browser_error_url: []u8 = "",
@@ -106,37 +106,52 @@ pub const State = struct {
     }
 
     pub fn moveUp(self: *State) void {
-        self.viewport.scrollBy(self.line_blocks, self.visible_height, -1);
+        self.viewport.scrollBy(self.viewport_blocks, self.visible_height, -1);
     }
 
     pub fn moveDown(self: *State, visible_height: usize) void {
-        self.viewport.scrollBy(self.line_blocks, visible_height, 1);
+        self.viewport.scrollBy(self.viewport_blocks, visible_height, 1);
     }
 
     pub fn setVisibleHeight(self: *State, visible_height: usize) void {
         self.visible_height = @max(visible_height, 1);
-        self.viewport.clamp(self.line_blocks, self.visible_height);
+        self.viewport.clamp(self.viewport_blocks, self.visible_height);
     }
 
     pub fn rewrap(self: *State, allocator: std.mem.Allocator, detail_width: usize) !void {
         if (self.load_state != .loaded or self.games.len == 0) return;
         try self.rebuildLines(allocator, detail_width);
-        self.viewport.clamp(self.line_blocks, self.visible_height);
+        self.viewport.clamp(self.viewport_blocks, self.visible_height);
     }
 
     pub fn visibleRange(self: *const State, visible_height: usize) ui.Viewport.Range {
-        const range = self.viewport.range(self.line_blocks, visible_height);
-        const start = @min(range.clamped_offset, self.lines.len);
-        const end = @min(self.lines.len, start +| visible_height);
+        var start = self.lines.len;
+        var end: usize = 0;
+
+        var it = self.visibleBlocks(visible_height);
+        while (it.next()) |visible| {
+            if (visible.index >= self.blocks.len) continue;
+            const block = self.blocks[visible.index];
+            const block_start = @min(self.lines.len, block.line_start +| visible.skip_rows);
+            const block_end = @min(self.lines.len, block_start +| visible.max_rows);
+            start = @min(start, block_start);
+            end = @max(end, block_end);
+        }
+
+        if (start == self.lines.len and end == 0) return .{ .start = 0, .end = 0 };
         return .{ .start = start, .end = end };
     }
 
     pub fn maxScroll(self: *const State, visible_height: usize) usize {
-        return ui.BlockViewport.maxOffset(self.line_blocks, visible_height);
+        return ui.BlockViewport.maxOffset(self.viewport_blocks, visible_height);
     }
 
     pub fn scrollOffset(self: *const State) usize {
         return self.viewport.offset;
+    }
+
+    pub fn visibleBlocks(self: *const State, visible_height: usize) ui.BlockViewport.Iterator {
+        return self.viewport.iterator(self.viewport_blocks, visible_height);
     }
 
     pub fn setBrowserErrorUrl(self: *State, allocator: std.mem.Allocator, url: []const u8) !void {
@@ -153,12 +168,14 @@ pub const State = struct {
         bgg_xml.freeGames(allocator, self.games);
         self.clearImage(allocator);
         allocator.free(self.lines);
-        allocator.free(self.line_blocks);
+        allocator.free(self.blocks);
+        allocator.free(self.viewport_blocks);
         allocator.free(self.rendered_text);
         self.clearBrowserErrorUrl(allocator);
         self.games = &.{};
         self.lines = &.{};
-        self.line_blocks = &.{};
+        self.blocks = &.{};
+        self.viewport_blocks = &.{};
         self.rendered_text = "";
         self.viewport = .{};
         self.visible_height = 1;
@@ -178,16 +195,37 @@ pub const State = struct {
 
     fn rebuildLines(self: *State, allocator: std.mem.Allocator, detail_width: usize) !void {
         allocator.free(self.lines);
-        allocator.free(self.line_blocks);
+        allocator.free(self.blocks);
+        allocator.free(self.viewport_blocks);
         allocator.free(self.rendered_text);
         self.lines = &.{};
-        self.line_blocks = &.{};
+        self.blocks = &.{};
+        self.viewport_blocks = &.{};
         self.rendered_text = "";
 
         if (self.games.len == 0) return;
         self.rendered_text = try buildGameDetailContent(allocator, self.games[0], detail_width);
         self.lines = try splitOwnedLines(allocator, self.rendered_text);
-        self.line_blocks = try line_blocks.oneRowBlocks(allocator, self.lines.len);
+        self.blocks = try buildBlocks(allocator, self.lines);
+        self.viewport_blocks = try buildViewportBlocks(allocator, self.blocks);
+    }
+};
+
+pub const Block = struct {
+    kind: Kind,
+    line_start: usize,
+    line_count: usize,
+
+    pub const Kind = enum {
+        lines,
+        player_poll_table,
+    };
+
+    pub fn height(self: Block) usize {
+        return switch (self.kind) {
+            .lines => self.line_count,
+            .player_poll_table => self.line_count,
+        };
     }
 };
 
@@ -398,6 +436,83 @@ fn writePlayerCountPollTable(writer: *std.Io.Writer, poll: bgg_model.PlayerCount
     try writePollBorder(writer, "└", "┴", "┘", players_width, best_width, recommended_width, not_recommended_width);
 }
 
+const PlayerPollTableData = struct {
+    table: ui.Table,
+    rows: []ui.Table.Row,
+};
+
+fn playerPollTableData(allocator: std.mem.Allocator, poll: bgg_model.PlayerCountPoll, marker_style: chasen.TextStyle) !PlayerPollTableData {
+    var players_width: usize = 2;
+    var best_width: usize = 4;
+    var recommended_width: usize = 3;
+    var not_recommended_width: usize = 7;
+    var marker_width: usize = 0;
+    var valid_rows: usize = 0;
+    for (poll.results) |result| {
+        const total = pollVoteTotal(result);
+        if (total == 0) continue;
+        valid_rows += 1;
+        players_width = @max(players_width, format.displayWidth(result.num_players));
+        best_width = @max(best_width, pollVoteWidth(result.best, total));
+        recommended_width = @max(recommended_width, pollVoteWidth(result.recommended, total));
+        not_recommended_width = @max(not_recommended_width, pollVoteWidth(result.not_recommended, total));
+        marker_width = @max(marker_width, format.displayWidth(pollRecommendationMarker(result)));
+    }
+
+    const columns = try allocator.alloc(ui.Table.Column, 5);
+    columns[0] = .{ .header = "  ", .width = clampU16(players_width + 2), .alignment = .right };
+    columns[1] = .{ .header = " Best ", .width = clampU16(best_width + 2), .alignment = .right };
+    columns[2] = .{ .header = " Rec ", .width = clampU16(recommended_width + 2), .alignment = .right };
+    columns[3] = .{ .header = " Not Rec ", .width = clampU16(not_recommended_width + 2), .alignment = .right };
+    columns[4] = .{ .header = "  ", .width = clampU16(marker_width + 2), .alignment = .left, .cell_style = marker_style };
+
+    const rows = try allocator.alloc(ui.Table.Row, valid_rows);
+
+    var row_index: usize = 0;
+    for (poll.results) |result| {
+        const total = pollVoteTotal(result);
+        if (total == 0) continue;
+
+        const cells = try allocator.alloc([]const u8, 5);
+        cells[0] = try paddedText(allocator, result.num_players);
+        cells[1] = try paddedPollVoteText(allocator, result.best, total);
+        cells[2] = try paddedPollVoteText(allocator, result.recommended, total);
+        cells[3] = try paddedPollVoteText(allocator, result.not_recommended, total);
+        cells[4] = try paddedText(allocator, pollRecommendationMarker(result));
+
+        rows[row_index] = cells;
+        row_index += 1;
+    }
+
+    return .{
+        .table = ui.Table.init(.{ .columns = columns, .rows = rows }),
+        .rows = rows,
+    };
+}
+
+fn paddedText(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
+    return try std.fmt.allocPrint(allocator, " {s} ", .{text});
+}
+
+fn paddedPollVoteText(allocator: std.mem.Allocator, value: u32, total: u32) ![]const u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    try out.writer.writeByte(' ');
+    try format.writeUnsignedGrouped(&out.writer, value);
+    try out.writer.print(" ({d}%)", .{pollVotePercent(value, total)});
+    try out.writer.writeByte(' ');
+    return try out.toOwnedSlice();
+}
+
+fn pollRecommendationMarker(result: bgg_model.PlayerCountVotes) []const u8 {
+    if (result.best > result.recommended and result.best > result.not_recommended) return "★ Best";
+    if (result.recommended > result.best and result.recommended > result.not_recommended) return "★";
+    return "";
+}
+
+fn pollVoteTotal(result: bgg_model.PlayerCountVotes) u32 {
+    return result.best + result.recommended + result.not_recommended;
+}
+
 fn writePollBorder(writer: *std.Io.Writer, left: []const u8, middle: []const u8, right: []const u8, players_width: usize, best_width: usize, recommended_width: usize, not_recommended_width: usize) !void {
     try writer.writeAll("  ");
     try writer.writeAll(left);
@@ -431,6 +546,10 @@ fn pollVoteWidth(value: u32, total: u32) usize {
 fn pollVotePercent(value: u32, total: u32) u32 {
     if (total == 0) return 0;
     return @intCast((@as(u64, value) * 100) / @as(u64, total));
+}
+
+fn clampU16(value: usize) u16 {
+    return @intCast(@min(value, std.math.maxInt(u16)));
 }
 
 fn unsignedGroupedWidth(value: u32) usize {
@@ -479,10 +598,101 @@ fn splitOwnedLines(allocator: std.mem.Allocator, text: []const u8) ![]const []co
     return try lines.toOwnedSlice(allocator);
 }
 
+pub fn buildBlocks(allocator: std.mem.Allocator, lines: []const []const u8) ![]const Block {
+    var blocks: std.ArrayList(Block) = .empty;
+    errdefer blocks.deinit(allocator);
+
+    var index: usize = 0;
+    while (index < lines.len) {
+        if (isPollTableLine(lines[index])) {
+            const start = index;
+            while (index < lines.len and isPollTableLine(lines[index])) : (index += 1) {}
+            try blocks.append(allocator, .{
+                .kind = .player_poll_table,
+                .line_start = start,
+                .line_count = index - start,
+            });
+            continue;
+        }
+
+        const start = index;
+        while (index < lines.len and !isPollTableLine(lines[index])) : (index += 1) {}
+        try blocks.append(allocator, .{
+            .kind = .lines,
+            .line_start = start,
+            .line_count = index - start,
+        });
+    }
+
+    return try blocks.toOwnedSlice(allocator);
+}
+
+pub fn buildViewportBlocks(allocator: std.mem.Allocator, blocks: []const Block) ![]const ui.BlockViewport.Block {
+    const viewport_blocks = try allocator.alloc(ui.BlockViewport.Block, blocks.len);
+    for (viewport_blocks, blocks) |*viewport_block, block| {
+        viewport_block.* = .{ .height = block.height() };
+    }
+    return viewport_blocks;
+}
+
 pub const LineStyles = struct {
     title: chasen.TextStyle,
     label: chasen.TextStyle,
 };
+
+pub fn drawBlock(surface: *chasen.Surface, state: *const State, visible: ui.BlockViewport.VisibleBlock, styles: LineStyles) !void {
+    if (visible.index >= state.blocks.len) return;
+    const block = state.blocks[visible.index];
+
+    switch (block.kind) {
+        .lines => drawLineBlock(surface, state, block, visible.skip_rows, visible.max_rows, styles),
+        .player_poll_table => {
+            if (visible.skip_rows == 0) {
+                try drawPlayerPollTableBlock(surface, state, visible.max_rows, styles);
+            } else {
+                // chasen-ui.Table currently draws from row zero. Preserve sane
+                // partial-scroll behavior until Table grows a partial view API.
+                drawLineBlock(surface, state, block, visible.skip_rows, visible.max_rows, styles);
+            }
+        },
+    }
+}
+
+fn drawLineBlock(surface: *chasen.Surface, state: *const State, block: Block, skip_rows: usize, max_rows: usize, styles: LineStyles) void {
+    for (0..max_rows) |local_row| {
+        const line_index = block.line_start + skip_rows + local_row;
+        if (line_index >= state.lines.len) break;
+        const row: u16 = @intCast(local_row);
+        if (row >= surface.size().height) break;
+        drawLine(surface, row, line_index, state.lines[line_index], styles);
+    }
+}
+
+fn drawPlayerPollTableBlock(surface: *chasen.Surface, state: *const State, max_rows: usize, styles: LineStyles) !void {
+    const game = if (state.games.len > 0) state.games[0] else return;
+    const poll = game.player_count_poll orelse return;
+    if (poll.results.len == 0 or max_rows == 0) return;
+
+    const allocator = surface.frameAllocator();
+    var table_data = try playerPollTableData(allocator, poll, styles.label);
+    if (table_data.rows.len == 0) return;
+
+    var table_area = surface.child(.{
+        .col = 0,
+        .row = 0,
+        .width = @min(surface.size().width, table_data.table.naturalWidthFor(0, .full) +| 10),
+        .height = @intCast(@min(max_rows, @as(usize, surface.size().height))),
+    });
+    table_data.table.view(&table_area, .{
+        .grid = .full,
+        .grid_style = .rounded,
+        .show_separator = true,
+        .body_separators = false,
+        .header_style = styles.label,
+        .separator_style = .{},
+        .cell_style = .{},
+    });
+}
 
 pub fn drawLine(surface: *chasen.Surface, row: u16, absolute_line_index: usize, line: []const u8, styles: LineStyles) void {
     if (absolute_line_index == 0) {
@@ -712,6 +922,57 @@ test "detail draw line colors title labels and tables" {
     try std.testing.expect(!ts.surface.readCell(2, 2).?.style.fg.eql(accent.toVaxis()));
     try std.testing.expect(!ts.surface.readCell(2, 2).?.style.dim);
     try std.testing.expect(!ts.surface.readCell(0, 3).?.style.fg.eql(accent.toVaxis()));
+}
+
+test "detail poll table block draws recommendation markers" {
+    var poll_results = try std.testing.allocator.alloc(bgg_model.PlayerCountVotes, 3);
+    poll_results[0] = .{ .num_players = try std.testing.allocator.dupe(u8, "2"), .best = 8, .recommended = 2, .not_recommended = 1 };
+    poll_results[1] = .{ .num_players = try std.testing.allocator.dupe(u8, "3"), .best = 2, .recommended = 8, .not_recommended = 1 };
+    poll_results[2] = .{ .num_players = try std.testing.allocator.dupe(u8, "4"), .best = 3, .recommended = 3, .not_recommended = 1 };
+    var games = try std.testing.allocator.alloc(bgg_model.Game, 1);
+    games[0] = .{
+        .id = 13,
+        .name = try std.testing.allocator.dupe(u8, "CATAN"),
+        .player_count_poll = .{ .results = poll_results },
+    };
+
+    var state: State = .{};
+    try state.setLoaded(std.testing.allocator, games, 80);
+    defer state.deinit(std.testing.allocator);
+
+    var block_index: usize = 0;
+    while (block_index < state.blocks.len and state.blocks[block_index].kind != .player_poll_table) : (block_index += 1) {}
+    try std.testing.expect(block_index < state.blocks.len);
+
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(48, 8);
+    defer ts.deinit();
+
+    const accent = chasen.Color{ .rgb = .{ 203, 166, 247 } };
+    try drawBlock(&ts.surface, &state, .{
+        .index = block_index,
+        .skip_rows = 0,
+        .max_rows = state.blocks[block_index].height(),
+        .row = 0,
+    }, .{
+        .title = .{ .bold = true },
+        .label = .{ .fg = accent, .bold = true },
+    });
+
+    try std.testing.expect(ts.surface.readCell(0, 2).?.char.grapheme.len > 0);
+    try expectStyledStarOnRow(&ts.surface, 3, accent);
+    try expectStyledStarOnRow(&ts.surface, 4, accent);
+}
+
+fn expectStyledStarOnRow(surface: *const chasen.Surface, row: u16, color: chasen.Color) !void {
+    var col: u16 = 0;
+    while (col < surface.size().width) : (col += 1) {
+        const cell = surface.readCell(col, row) orelse continue;
+        if (!std.mem.eql(u8, cell.char.grapheme, "★")) continue;
+        try std.testing.expect(cell.style.fg.eql(color.toVaxis()));
+        return;
+    }
+    return error.TestExpectedStyledStar;
 }
 
 test "player count poll table skips polls without vote rows" {
