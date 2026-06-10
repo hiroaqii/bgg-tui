@@ -14,7 +14,6 @@ const format = @import("format.zig");
 const help_overlay = @import("help_overlay.zig");
 const image_mod = @import("image.zig");
 const layout_mod = @import("layout.zig");
-const line_blocks = @import("line_blocks.zig");
 const list_view = @import("list_view.zig");
 const motion = @import("motion.zig");
 const paste = @import("paste.zig");
@@ -862,7 +861,7 @@ pub const App = struct {
                     .width = area.size().width,
                     .height = @intCast(@min(thread_layout.content_height, std.math.maxInt(u16))),
                 });
-                self.drawThreadBody(&body_area);
+                try self.drawThreadBody(&body_area);
 
                 if (self.thread.browser_error_url.len > 0) {
                     try self.drawManualOpenHint(&area, thread_layout.scroll_row, self.thread.browser_error_url);
@@ -2169,16 +2168,20 @@ pub const App = struct {
         return @intCast((surface_width - max_width) / 2);
     }
 
-    fn drawThreadBody(self: *const App, surface: *chasen.Surface) void {
-        const range = self.thread.visibleRange(surface.size().height);
-        for (self.thread.lines[range.start..range.end], 0..) |line, index| {
-            const row: u16 = @intCast(index);
-            if (row >= surface.size().height) break;
-            const style: chasen.TextStyle = if (std.mem.startsWith(u8, line, ">") or std.mem.startsWith(u8, line, "─"))
-                .{ .dim = true }
-            else
-                .{};
-            _ = surface.borrowTextAt(0, row, line, style);
+    fn drawThreadBody(self: *const App, surface: *chasen.Surface) !void {
+        var it = self.thread.visibleBlocks(surface.size().height);
+        while (it.next()) |visible| {
+            var block_area = surface.child(.{
+                .col = 0,
+                .row = visible.row,
+                .width = surface.size().width,
+                .height = @intCast(@min(visible.max_rows, std.math.maxInt(u16))),
+            });
+            try screens.thread.drawBlock(&block_area, &self.thread, visible, .{
+                .header = self.titleStyle(),
+                .subtle = self.subtleStyle(),
+                .quote = .{ .dim = true },
+            });
         }
     }
 
@@ -3732,18 +3735,24 @@ test "thread scroll uses resized body height" {
     try app.handleResize(.{ .width = 80, .height = 10 });
     try std.testing.expectEqual(threadLayoutForTerminal(&app).content_height, app.thread.visible_height);
 
-    const text = try std.testing.allocator.dupe(u8, "0\n1\n2\n3\n4\n5\n6\n7\n8\n9");
-    app.thread.rendered_text = text;
-    const lines = try std.testing.allocator.alloc([]const u8, 10);
-    for (lines, 0..) |*line, index| {
-        line.* = text[index * 2 .. index * 2 + 1];
-    }
-    app.thread.lines = lines;
-    app.thread.line_blocks = try line_blocks.oneRowBlocks(std.testing.allocator, lines.len);
-    app.thread.load_state = .loaded;
+    const articles = try std.testing.allocator.alloc(bgg_model.Article, 1);
+    articles[0] = .{
+        .id = 1,
+        .username = try std.testing.allocator.dupe(u8, "hiro"),
+        .post_date = try std.testing.allocator.dupe(u8, "Sat, 01 Jan 2025 10:00:00 +0000"),
+        .body = try std.testing.allocator.dupe(u8, "0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15"),
+    };
+    const thread = bgg_model.Thread{
+        .id = 100,
+        .subject = try std.testing.allocator.dupe(u8, "Rules"),
+        .articles = articles,
+    };
+    try app.thread.setLoaded(std.testing.allocator, thread);
 
-    for (0..10) |_| app.thread.moveDown(threadLayoutForTerminal(&app).content_height);
-    try std.testing.expectEqual(app.thread.maxScroll(threadLayoutForTerminal(&app).content_height), app.thread.scrollOffset());
+    const visible_height = threadLayoutForTerminal(&app).content_height;
+    const max_scroll = app.thread.maxScroll(visible_height);
+    for (0..max_scroll + visible_height + 1) |_| app.thread.moveDown(visible_height);
+    try std.testing.expectEqual(max_scroll, app.thread.scrollOffset());
 }
 
 test "detail scroll uses resized body height" {

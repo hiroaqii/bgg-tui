@@ -1,10 +1,10 @@
 const std = @import("std");
+const chasen = @import("chasen");
 
 const bgg_html = @import("../bgg/html.zig");
 const bgg_model = @import("../bgg/model.zig");
 const bgg_xml = @import("../bgg/xml.zig");
 const format = @import("../format.zig");
-const line_blocks = @import("../line_blocks.zig");
 const ui = @import("chasen_ui");
 
 pub const LoadState = union(enum) {
@@ -14,14 +14,37 @@ pub const LoadState = union(enum) {
     failed: []const u8,
 };
 
+pub const ArticleView = struct {
+    username: []const u8,
+    date_text: []u8,
+    body_text: []u8,
+    body_lines: []const []const u8,
+};
+
+pub const Block = struct {
+    kind: Kind,
+    article_index: usize,
+    line_count: usize,
+
+    pub const Kind = enum {
+        article_header,
+        article_body,
+        separator,
+    };
+
+    pub fn height(self: Block) usize {
+        return self.line_count;
+    }
+};
+
 pub const State = struct {
     request_id: u64 = 0,
     thread_id: u32 = 0,
     load_state: LoadState = .idle,
     thread: ?bgg_model.Thread = null,
-    rendered_text: []u8 = "",
-    lines: []const []const u8 = &.{},
-    line_blocks: []const ui.BlockViewport.Block = &.{},
+    articles: []ArticleView = &.{},
+    blocks: []const Block = &.{},
+    viewport_blocks: []const ui.BlockViewport.Block = &.{},
     viewport: ui.BlockViewport.State = .{},
     sort_newest: bool = false,
     wrap_width: usize = 90,
@@ -48,16 +71,16 @@ pub const State = struct {
     }
 
     pub fn moveUp(self: *State) void {
-        self.viewport.scrollBy(self.line_blocks, self.visible_height, -1);
+        self.viewport.scrollBy(self.viewport_blocks, self.visible_height, -1);
     }
 
     pub fn moveDown(self: *State, visible_height: usize) void {
-        self.viewport.scrollBy(self.line_blocks, visible_height, 1);
+        self.viewport.scrollBy(self.viewport_blocks, visible_height, 1);
     }
 
     pub fn setVisibleHeight(self: *State, visible_height: usize) void {
         self.visible_height = @max(visible_height, 1);
-        self.viewport.clamp(self.line_blocks, self.visible_height);
+        self.viewport.clamp(self.viewport_blocks, self.visible_height);
     }
 
     pub fn toggleSort(self: *State, allocator: std.mem.Allocator) !void {
@@ -78,15 +101,12 @@ pub const State = struct {
         self.browser_error_url = "";
     }
 
-    pub fn visibleRange(self: *const State, visible_height: usize) ui.Viewport.Range {
-        const range = self.viewport.range(self.line_blocks, visible_height);
-        const start = @min(range.clamped_offset, self.lines.len);
-        const end = @min(self.lines.len, start +| visible_height);
-        return .{ .start = start, .end = end };
+    pub fn visibleBlocks(self: *const State, visible_height: usize) ui.BlockViewport.Iterator {
+        return self.viewport.iterator(self.viewport_blocks, visible_height);
     }
 
     pub fn maxScroll(self: *const State, visible_height: usize) usize {
-        return ui.BlockViewport.maxOffset(self.line_blocks, visible_height);
+        return ui.BlockViewport.maxOffset(self.viewport_blocks, visible_height);
     }
 
     pub fn scrollOffset(self: *const State) usize {
@@ -118,28 +138,28 @@ pub const State = struct {
 
     fn clearThread(self: *State, allocator: std.mem.Allocator) void {
         self.clearBrowserErrorUrl(allocator);
-        allocator.free(self.lines);
-        allocator.free(self.line_blocks);
-        allocator.free(self.rendered_text);
+        freeArticleViews(allocator, self.articles);
+        allocator.free(self.blocks);
+        allocator.free(self.viewport_blocks);
         if (self.thread) |thread| bgg_xml.freeThread(allocator, thread);
         self.thread = null;
-        self.rendered_text = "";
-        self.lines = &.{};
-        self.line_blocks = &.{};
+        self.articles = &.{};
+        self.blocks = &.{};
+        self.viewport_blocks = &.{};
     }
 
     fn rebuildLines(self: *State, allocator: std.mem.Allocator) !void {
-        allocator.free(self.lines);
-        allocator.free(self.line_blocks);
-        allocator.free(self.rendered_text);
-        self.lines = &.{};
-        self.line_blocks = &.{};
-        self.rendered_text = "";
+        freeArticleViews(allocator, self.articles);
+        allocator.free(self.blocks);
+        allocator.free(self.viewport_blocks);
+        self.articles = &.{};
+        self.blocks = &.{};
+        self.viewport_blocks = &.{};
 
         const thread = self.thread orelse return;
-        self.rendered_text = try renderArticles(allocator, thread.articles, self.wrap_width);
-        self.lines = try splitLines(allocator, self.rendered_text);
-        self.line_blocks = try line_blocks.oneRowBlocks(allocator, self.lines.len);
+        self.articles = try buildArticleViews(allocator, thread.articles, self.wrap_width);
+        self.blocks = try buildBlocks(allocator, self.articles);
+        self.viewport_blocks = try buildViewportBlocks(allocator, self.blocks);
     }
 
     fn sortArticles(self: *State) void {
@@ -147,6 +167,12 @@ pub const State = struct {
             std.mem.sort(bgg_model.Article, thread.articles, self.sort_newest, articleDateLessThan);
         }
     }
+};
+
+pub const LineStyles = struct {
+    header: chasen.TextStyle,
+    subtle: chasen.TextStyle,
+    quote: chasen.TextStyle,
 };
 
 pub const Layout = struct {
@@ -206,31 +232,132 @@ fn threadBlockOverhead() usize {
     return 6;
 }
 
-fn renderArticles(allocator: std.mem.Allocator, articles: []const bgg_model.Article, wrap_width: usize) ![]u8 {
-    var out: std.Io.Writer.Allocating = .init(allocator);
-    errdefer out.deinit();
+fn buildArticleViews(allocator: std.mem.Allocator, articles: []const bgg_model.Article, wrap_width: usize) ![]ArticleView {
+    const views = try allocator.alloc(ArticleView, articles.len);
+
+    var initialized: usize = 0;
+    errdefer {
+        freeArticleViewItems(allocator, views[0..initialized]);
+        allocator.free(views);
+    }
 
     for (articles, 0..) |article, index| {
         const date = try dateText(allocator, article.post_date);
-        defer allocator.free(date);
-        try out.writer.print("■ {s}  {s}\n", .{ article.username, date });
+        errdefer allocator.free(date);
 
         const body = try bgg_html.toText(allocator, article.body, .{
             .wrap_width = wrap_width,
             .linkify_urls = true,
         });
-        defer allocator.free(body);
-        try out.writer.writeAll(body);
-        try out.writer.writeByte('\n');
+        errdefer allocator.free(body);
+
+        const body_lines = try splitLines(allocator, body);
+        errdefer allocator.free(body_lines);
+
+        views[index] = .{
+            .username = article.username,
+            .date_text = date,
+            .body_text = body,
+            .body_lines = body_lines,
+        };
+        initialized += 1;
+    }
+
+    return views;
+}
+
+fn freeArticleViews(allocator: std.mem.Allocator, articles: []ArticleView) void {
+    freeArticleViewItems(allocator, articles);
+    allocator.free(articles);
+}
+
+fn freeArticleViewItems(allocator: std.mem.Allocator, articles: []ArticleView) void {
+    for (articles) |article| {
+        allocator.free(article.body_lines);
+        allocator.free(article.body_text);
+        allocator.free(article.date_text);
+    }
+}
+
+pub fn buildBlocks(allocator: std.mem.Allocator, articles: []const ArticleView) ![]const Block {
+    var blocks: std.ArrayList(Block) = .empty;
+    errdefer blocks.deinit(allocator);
+
+    for (articles, 0..) |article, index| {
+        try blocks.append(allocator, .{
+            .kind = .article_header,
+            .article_index = index,
+            .line_count = 1,
+        });
+
+        if (article.body_lines.len > 0) {
+            try blocks.append(allocator, .{
+                .kind = .article_body,
+                .article_index = index,
+                .line_count = article.body_lines.len,
+            });
+        }
 
         if (index + 1 < articles.len) {
-            try out.writer.writeByte('\n');
-            try writeSeparator(&out.writer, wrap_width);
-            try out.writer.writeAll("\n\n");
+            try blocks.append(allocator, .{
+                .kind = .separator,
+                .article_index = index,
+                .line_count = 3,
+            });
         }
     }
 
-    return try out.toOwnedSlice();
+    return try blocks.toOwnedSlice(allocator);
+}
+
+pub fn buildViewportBlocks(allocator: std.mem.Allocator, blocks: []const Block) ![]const ui.BlockViewport.Block {
+    const viewport_blocks = try allocator.alloc(ui.BlockViewport.Block, blocks.len);
+    for (viewport_blocks, blocks) |*viewport_block, block| {
+        viewport_block.* = .{ .height = block.height() };
+    }
+    return viewport_blocks;
+}
+
+pub fn drawBlock(surface: *chasen.Surface, state: *const State, visible: ui.BlockViewport.VisibleBlock, styles: LineStyles) !void {
+    if (visible.index >= state.blocks.len) return;
+    const block = state.blocks[visible.index];
+    if (block.article_index >= state.articles.len) return;
+
+    switch (block.kind) {
+        .article_header => drawArticleHeaderBlock(surface, state.articles[block.article_index], visible.skip_rows, styles),
+        .article_body => drawArticleBodyBlock(surface, state.articles[block.article_index], visible.skip_rows, visible.max_rows, styles),
+        .separator => try drawSeparatorBlock(surface, visible.skip_rows, visible.max_rows, state.wrap_width, styles),
+    }
+}
+
+fn drawArticleHeaderBlock(surface: *chasen.Surface, article: ArticleView, skip_rows: usize, styles: LineStyles) void {
+    if (skip_rows > 0 or surface.size().height == 0) return;
+    _ = surface.borrowTextAt(0, 0, "■", styles.header);
+    _ = surface.borrowTextAt(2, 0, article.username, styles.header);
+    const date_col: u16 = @intCast(@min(chasen.text.displayWidth(article.username) + 4, std.math.maxInt(u16)));
+    _ = surface.borrowTextAt(date_col, 0, article.date_text, styles.subtle);
+}
+
+fn drawArticleBodyBlock(surface: *chasen.Surface, article: ArticleView, skip_rows: usize, max_rows: usize, styles: LineStyles) void {
+    for (0..max_rows) |local_row| {
+        const source_index = skip_rows + local_row;
+        if (source_index >= article.body_lines.len) break;
+        const row: u16 = @intCast(local_row);
+        if (row >= surface.size().height) break;
+
+        const line = article.body_lines[source_index];
+        const style: chasen.TextStyle = if (std.mem.startsWith(u8, line, ">")) styles.quote else .{};
+        _ = surface.borrowTextAt(0, row, line, style);
+    }
+}
+
+fn drawSeparatorBlock(surface: *chasen.Surface, skip_rows: usize, max_rows: usize, wrap_width: usize, styles: LineStyles) !void {
+    for (0..max_rows) |local_row| {
+        const source_index = skip_rows + local_row;
+        const row: u16 = @intCast(local_row);
+        if (row >= surface.size().height) break;
+        if (source_index == 1) try drawSeparatorLine(surface, row, wrap_width, styles.subtle);
+    }
 }
 
 fn splitLines(allocator: std.mem.Allocator, text: []const u8) ![]const []const u8 {
@@ -249,14 +376,24 @@ fn splitLines(allocator: std.mem.Allocator, text: []const u8) ![]const []const u
     return try lines.toOwnedSlice(allocator);
 }
 
-fn writeSeparator(writer: *std.Io.Writer, width: usize) !void {
-    var remaining = @max(width, 1);
-    while (remaining > 0) : (remaining -= 1) {
-        try writer.writeAll("─");
-    }
+fn drawSeparatorLine(surface: *chasen.Surface, row: u16, width: usize, style: chasen.TextStyle) !void {
+    if (row >= surface.size().height) return;
+    const allocator = surface.frameAllocator();
+    const text = try separatorText(allocator, width);
+    _ = surface.borrowTextAt(0, row, text, style);
 }
 
-fn dateText(allocator: std.mem.Allocator, value: []const u8) ![]const u8 {
+fn separatorText(allocator: std.mem.Allocator, width: usize) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+    var remaining = @max(width, 1);
+    while (remaining > 0) : (remaining -= 1) {
+        try out.writer.writeAll("─");
+    }
+    return try out.toOwnedSlice();
+}
+
+fn dateText(allocator: std.mem.Allocator, value: []const u8) ![]u8 {
     if (value.len == 0) return try allocator.dupe(u8, "");
 
     var out: std.Io.Writer.Allocating = .init(allocator);
@@ -312,8 +449,14 @@ test "thread state renders article text lines" {
     try state.setLoaded(std.testing.allocator, thread);
 
     try std.testing.expectEqual(@as(usize, 1), state.postCount());
-    try std.testing.expect(std.mem.indexOf(u8, state.rendered_text, "■ hiro") != null);
-    try std.testing.expect(std.mem.indexOf(u8, state.rendered_text, "Hello") != null);
+    try std.testing.expectEqual(@as(usize, 1), state.articles.len);
+    try std.testing.expectEqualStrings("hiro", state.articles[0].username);
+    try std.testing.expectEqualStrings("Hello", state.articles[0].body_lines[0]);
+    try std.testing.expectEqualStrings("World", state.articles[0].body_lines[1]);
+    try std.testing.expectEqual(@as(usize, 2), state.blocks.len);
+    try std.testing.expectEqual(Block.Kind.article_header, state.blocks[0].kind);
+    try std.testing.expectEqual(Block.Kind.article_body, state.blocks[1].kind);
+    try std.testing.expectEqual(@as(usize, 2), state.blocks[1].line_count);
 }
 
 test "thread sort toggles newest first and resets scroll" {
