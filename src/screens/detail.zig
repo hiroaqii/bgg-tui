@@ -460,11 +460,11 @@ fn playerPollTableData(allocator: std.mem.Allocator, poll: bgg_model.PlayerCount
     }
 
     const columns = try allocator.alloc(ui.Table.Column, 5);
-    columns[0] = .{ .header = "  ", .width = clampU16(players_width + 2), .alignment = .right };
-    columns[1] = .{ .header = " Best ", .width = clampU16(best_width + 2), .alignment = .right };
-    columns[2] = .{ .header = " Rec ", .width = clampU16(recommended_width + 2), .alignment = .right };
-    columns[3] = .{ .header = " Not Rec ", .width = clampU16(not_recommended_width + 2), .alignment = .right };
-    columns[4] = .{ .header = "  ", .width = clampU16(marker_width + 2), .alignment = .left, .cell_style = marker_style };
+    columns[0] = .{ .header = "", .width = clampU16(players_width + 2), .alignment = .right };
+    columns[1] = .{ .header = "Best", .width = clampU16(best_width + 2), .alignment = .right };
+    columns[2] = .{ .header = "Rec", .width = clampU16(recommended_width + 2), .alignment = .right };
+    columns[3] = .{ .header = "Not Rec", .width = clampU16(not_recommended_width + 2), .alignment = .right };
+    columns[4] = .{ .header = "", .width = clampU16(marker_width + 2), .alignment = .left, .cell_style = marker_style };
 
     const rows = try allocator.alloc(ui.Table.Row, valid_rows);
 
@@ -474,11 +474,11 @@ fn playerPollTableData(allocator: std.mem.Allocator, poll: bgg_model.PlayerCount
         if (total == 0) continue;
 
         const cells = try allocator.alloc([]const u8, 5);
-        cells[0] = try paddedText(allocator, result.num_players);
-        cells[1] = try paddedPollVoteText(allocator, result.best, total);
-        cells[2] = try paddedPollVoteText(allocator, result.recommended, total);
-        cells[3] = try paddedPollVoteText(allocator, result.not_recommended, total);
-        cells[4] = try paddedText(allocator, pollRecommendationMarker(result));
+        cells[0] = result.num_players;
+        cells[1] = try pollVoteText(allocator, result.best, total);
+        cells[2] = try pollVoteText(allocator, result.recommended, total);
+        cells[3] = try pollVoteText(allocator, result.not_recommended, total);
+        cells[4] = pollRecommendationMarker(result);
 
         rows[row_index] = cells;
         row_index += 1;
@@ -490,16 +490,10 @@ fn playerPollTableData(allocator: std.mem.Allocator, poll: bgg_model.PlayerCount
     };
 }
 
-fn paddedText(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
-    return try std.fmt.allocPrint(allocator, " {s} ", .{text});
-}
-
-fn paddedPollVoteText(allocator: std.mem.Allocator, value: u32, total: u32) ![]const u8 {
+fn pollVoteText(allocator: std.mem.Allocator, value: u32, total: u32) ![]const u8 {
     var out: std.Io.Writer.Allocating = .init(allocator);
-    try out.writer.writeByte(' ');
     try format.writeUnsignedGrouped(&out.writer, value);
     try out.writer.print(" ({d}%)", .{pollVotePercent(value, total)});
-    try out.writer.writeByte(' ');
     return try out.toOwnedSlice();
 }
 
@@ -683,6 +677,7 @@ fn drawPlayerPollTableBlock(surface: *chasen.Surface, state: *const State, skip_
         .header_style = styles.label,
         .separator_style = .{},
         .cell_style = .{},
+        .cell_padding = .{ .left = 1, .right = 1 },
     }, .{
         .skip_rows = skip_rows,
         .max_rows = max_rows,
