@@ -217,13 +217,18 @@ pub const Block = struct {
     line_count: usize,
 
     pub const Kind = enum {
-        lines,
+        title,
+        metadata,
+        description,
         player_poll_table,
     };
 
     pub fn height(self: Block) usize {
         return switch (self.kind) {
-            .lines => self.line_count,
+            .title,
+            .metadata,
+            .description,
+            => self.line_count,
             .player_poll_table => self.line_count,
         };
     }
@@ -598,6 +603,25 @@ pub fn buildBlocks(allocator: std.mem.Allocator, lines: []const []const u8) ![]c
 
     var index: usize = 0;
     while (index < lines.len) {
+        if (index == 0) {
+            try blocks.append(allocator, .{
+                .kind = .title,
+                .line_start = 0,
+                .line_count = 1,
+            });
+            index = 1;
+            continue;
+        }
+
+        if (isDescriptionHeading(lines[index])) {
+            try blocks.append(allocator, .{
+                .kind = .description,
+                .line_start = index,
+                .line_count = lines.len - index,
+            });
+            break;
+        }
+
         if (isPollTableLine(lines[index])) {
             const start = index;
             while (index < lines.len and isPollTableLine(lines[index])) : (index += 1) {}
@@ -610,9 +634,9 @@ pub fn buildBlocks(allocator: std.mem.Allocator, lines: []const []const u8) ![]c
         }
 
         const start = index;
-        while (index < lines.len and !isPollTableLine(lines[index])) : (index += 1) {}
+        while (index < lines.len and !isPollTableLine(lines[index]) and !isDescriptionHeading(lines[index])) : (index += 1) {}
         try blocks.append(allocator, .{
-            .kind = .lines,
+            .kind = .metadata,
             .line_start = start,
             .line_count = index - start,
         });
@@ -639,18 +663,40 @@ pub fn drawBlock(surface: *chasen.Surface, state: *const State, visible: ui.Bloc
     const block = state.blocks[visible.index];
 
     switch (block.kind) {
-        .lines => drawLineBlock(surface, state, block, visible.skip_rows, visible.max_rows, styles),
+        .title => drawTitleBlock(surface, state, block, visible.skip_rows, visible.max_rows, styles),
+        .metadata => drawMetadataBlock(surface, state, block, visible.skip_rows, visible.max_rows, styles),
+        .description => drawDescriptionBlock(surface, state, block, visible.skip_rows, visible.max_rows, styles),
         .player_poll_table => try drawPlayerPollTableBlock(surface, state, visible.skip_rows, visible.max_rows, styles),
     }
 }
 
-fn drawLineBlock(surface: *chasen.Surface, state: *const State, block: Block, skip_rows: usize, max_rows: usize, styles: LineStyles) void {
+fn drawTitleBlock(surface: *chasen.Surface, state: *const State, block: Block, skip_rows: usize, max_rows: usize, styles: LineStyles) void {
+    drawLineBlock(surface, state, block, skip_rows, max_rows, styles, drawTitleLine);
+}
+
+fn drawMetadataBlock(surface: *chasen.Surface, state: *const State, block: Block, skip_rows: usize, max_rows: usize, styles: LineStyles) void {
+    drawLineBlock(surface, state, block, skip_rows, max_rows, styles, drawMetadataLine);
+}
+
+fn drawDescriptionBlock(surface: *chasen.Surface, state: *const State, block: Block, skip_rows: usize, max_rows: usize, styles: LineStyles) void {
+    drawLineBlock(surface, state, block, skip_rows, max_rows, styles, drawDescriptionLine);
+}
+
+fn drawLineBlock(
+    surface: *chasen.Surface,
+    state: *const State,
+    block: Block,
+    skip_rows: usize,
+    max_rows: usize,
+    styles: LineStyles,
+    comptime drawLineFn: fn (*chasen.Surface, u16, usize, []const u8, LineStyles) void,
+) void {
     for (0..max_rows) |local_row| {
         const line_index = block.line_start + skip_rows + local_row;
         if (line_index >= state.lines.len) break;
         const row: u16 = @intCast(local_row);
         if (row >= surface.size().height) break;
-        drawLine(surface, row, line_index, state.lines[line_index], styles);
+        drawLineFn(surface, row, line_index - block.line_start, state.lines[line_index], styles);
     }
 }
 
@@ -686,12 +732,7 @@ fn drawPlayerPollTableBlock(surface: *chasen.Surface, state: *const State, skip_
 
 pub fn drawLine(surface: *chasen.Surface, row: u16, absolute_line_index: usize, line: []const u8, styles: LineStyles) void {
     if (absolute_line_index == 0) {
-        _ = surface.borrowTextAt(0, row, line, styles.title);
-        return;
-    }
-
-    if (std.mem.eql(u8, line, "Description")) {
-        _ = surface.borrowTextAt(0, row, line, styles.label);
+        drawTitleLine(surface, row, absolute_line_index, line, styles);
         return;
     }
 
@@ -700,6 +741,16 @@ pub fn drawLine(surface: *chasen.Surface, row: u16, absolute_line_index: usize, 
         return;
     }
 
+    drawMetadataLine(surface, row, absolute_line_index, line, styles);
+}
+
+fn drawTitleLine(surface: *chasen.Surface, row: u16, local_line_index: usize, line: []const u8, styles: LineStyles) void {
+    _ = local_line_index;
+    _ = surface.borrowTextAt(0, row, line, styles.title);
+}
+
+fn drawMetadataLine(surface: *chasen.Surface, row: u16, local_line_index: usize, line: []const u8, styles: LineStyles) void {
+    _ = local_line_index;
     if (detailLabelLength(line)) |label_len| {
         const label = line[0..label_len];
         _ = surface.borrowTextAt(0, row, label, styles.label);
@@ -710,9 +761,22 @@ pub fn drawLine(surface: *chasen.Surface, row: u16, absolute_line_index: usize, 
     _ = surface.borrowTextAt(0, row, line, .{});
 }
 
+fn drawDescriptionLine(surface: *chasen.Surface, row: u16, local_line_index: usize, line: []const u8, styles: LineStyles) void {
+    if (local_line_index == 0) {
+        _ = surface.borrowTextAt(0, row, line, styles.label);
+        return;
+    }
+
+    _ = surface.borrowTextAt(0, row, line, .{});
+}
+
 pub fn lineStyle(line: []const u8) chasen.TextStyle {
-    if (std.mem.eql(u8, line, "Description")) return .{ .dim = true };
+    if (isDescriptionHeading(line)) return .{ .dim = true };
     return .{};
+}
+
+fn isDescriptionHeading(line: []const u8) bool {
+    return std.mem.eql(u8, line, "Description");
 }
 
 fn isPollTableLine(line: []const u8) bool {
@@ -912,6 +976,77 @@ test "detail draw line colors title labels and tables" {
     try std.testing.expect(!ts.surface.readCell(2, 2).?.style.fg.eql(accent.toVaxis()));
     try std.testing.expect(!ts.surface.readCell(2, 2).?.style.dim);
     try std.testing.expect(!ts.surface.readCell(0, 3).?.style.fg.eql(accent.toVaxis()));
+}
+
+test "detail blocks split title metadata poll table and description" {
+    const lines = [_][]const u8{
+        "CATAN",
+        "",
+        "Year         1995",
+        "  ┌────┬──────┐",
+        "  │    │ Best │",
+        "  └────┴──────┘",
+        "Weight       2.32 / 5 - Medium",
+        "",
+        "Description",
+        "Trade resources.",
+        "",
+        "Settle the island.",
+    };
+
+    const blocks = try buildBlocks(std.testing.allocator, &lines);
+    defer std.testing.allocator.free(blocks);
+
+    try std.testing.expectEqual(@as(usize, 5), blocks.len);
+    try std.testing.expectEqual(Block.Kind.title, blocks[0].kind);
+    try std.testing.expectEqual(@as(usize, 0), blocks[0].line_start);
+    try std.testing.expectEqual(@as(usize, 1), blocks[0].line_count);
+    try std.testing.expectEqual(Block.Kind.metadata, blocks[1].kind);
+    try std.testing.expectEqual(@as(usize, 1), blocks[1].line_start);
+    try std.testing.expectEqual(@as(usize, 2), blocks[1].line_count);
+    try std.testing.expectEqual(Block.Kind.player_poll_table, blocks[2].kind);
+    try std.testing.expectEqual(@as(usize, 3), blocks[2].line_start);
+    try std.testing.expectEqual(@as(usize, 3), blocks[2].line_count);
+    try std.testing.expectEqual(Block.Kind.metadata, blocks[3].kind);
+    try std.testing.expectEqual(@as(usize, 6), blocks[3].line_start);
+    try std.testing.expectEqual(@as(usize, 2), blocks[3].line_count);
+    try std.testing.expectEqual(Block.Kind.description, blocks[4].kind);
+    try std.testing.expectEqual(@as(usize, 8), blocks[4].line_start);
+    try std.testing.expectEqual(@as(usize, 4), blocks[4].line_count);
+}
+
+test "detail description block colors heading only" {
+    const detail_text = "CATAN\nDescription\nTrade resources.";
+    const lines = try splitOwnedLines(std.testing.allocator, detail_text);
+    defer std.testing.allocator.free(lines);
+
+    var state: State = .{
+        .rendered_text = try std.testing.allocator.dupe(u8, detail_text),
+        .lines = lines,
+        .blocks = try buildBlocks(std.testing.allocator, lines),
+    };
+    defer {
+        std.testing.allocator.free(state.rendered_text);
+        std.testing.allocator.free(state.blocks);
+    }
+
+    var ts: chasen.testing.TestSurface = undefined;
+    try ts.init(32, 2);
+    defer ts.deinit();
+
+    const accent = chasen.Color{ .rgb = .{ 203, 166, 247 } };
+    try drawBlock(&ts.surface, &state, .{
+        .index = 1,
+        .skip_rows = 0,
+        .max_rows = 2,
+        .row = 0,
+    }, .{
+        .title = .{ .bold = true },
+        .label = .{ .fg = accent, .bold = true },
+    });
+
+    try std.testing.expect(ts.surface.readCell(0, 0).?.style.fg.eql(accent.toVaxis()));
+    try std.testing.expect(!ts.surface.readCell(0, 1).?.style.fg.eql(accent.toVaxis()));
 }
 
 test "detail poll table block draws recommendation markers" {
