@@ -646,15 +646,7 @@ pub fn drawBlock(surface: *chasen.Surface, state: *const State, visible: ui.Bloc
 
     switch (block.kind) {
         .lines => drawLineBlock(surface, state, block, visible.skip_rows, visible.max_rows, styles),
-        .player_poll_table => {
-            if (visible.skip_rows == 0) {
-                try drawPlayerPollTableBlock(surface, state, visible.max_rows, styles);
-            } else {
-                // chasen-ui.Table currently draws from row zero. Preserve sane
-                // partial-scroll behavior until Table grows a partial view API.
-                drawLineBlock(surface, state, block, visible.skip_rows, visible.max_rows, styles);
-            }
-        },
+        .player_poll_table => try drawPlayerPollTableBlock(surface, state, visible.skip_rows, visible.max_rows, styles),
     }
 }
 
@@ -668,7 +660,7 @@ fn drawLineBlock(surface: *chasen.Surface, state: *const State, block: Block, sk
     }
 }
 
-fn drawPlayerPollTableBlock(surface: *chasen.Surface, state: *const State, max_rows: usize, styles: LineStyles) !void {
+fn drawPlayerPollTableBlock(surface: *chasen.Surface, state: *const State, skip_rows: usize, max_rows: usize, styles: LineStyles) !void {
     const game = if (state.games.len > 0) state.games[0] else return;
     const poll = game.player_count_poll orelse return;
     if (poll.results.len == 0 or max_rows == 0) return;
@@ -683,7 +675,7 @@ fn drawPlayerPollTableBlock(surface: *chasen.Surface, state: *const State, max_r
         .width = @min(surface.size().width, table_data.table.naturalWidthFor(0, .full) +| 10),
         .height = @intCast(@min(max_rows, @as(usize, surface.size().height))),
     });
-    table_data.table.view(&table_area, .{
+    table_data.table.viewSlice(&table_area, .{
         .grid = .full,
         .grid_style = .rounded,
         .show_separator = true,
@@ -691,6 +683,9 @@ fn drawPlayerPollTableBlock(surface: *chasen.Surface, state: *const State, max_r
         .header_style = styles.label,
         .separator_style = .{},
         .cell_style = .{},
+    }, .{
+        .skip_rows = skip_rows,
+        .max_rows = max_rows,
     });
 }
 
@@ -962,6 +957,21 @@ test "detail poll table block draws recommendation markers" {
     try std.testing.expect(ts.surface.readCell(0, 2).?.char.grapheme.len > 0);
     try expectStyledStarOnRow(&ts.surface, 3, accent);
     try expectStyledStarOnRow(&ts.surface, 4, accent);
+
+    var partial_ts: chasen.testing.TestSurface = undefined;
+    try partial_ts.init(48, 2);
+    defer partial_ts.deinit();
+
+    try drawBlock(&partial_ts.surface, &state, .{
+        .index = block_index,
+        .skip_rows = 3,
+        .max_rows = 2,
+        .row = 0,
+    }, .{
+        .title = .{ .bold = true },
+        .label = .{ .fg = accent, .bold = true },
+    });
+    try expectStyledStarOnRow(&partial_ts.surface, 0, accent);
 }
 
 fn expectStyledStarOnRow(surface: *const chasen.Surface, row: u16, color: chasen.Color) !void {
