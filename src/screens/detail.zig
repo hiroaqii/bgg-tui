@@ -124,24 +124,6 @@ pub const State = struct {
         self.viewport.clamp(self.viewport_blocks, self.visible_height);
     }
 
-    pub fn visibleRange(self: *const State, visible_height: usize) ui.Viewport.Range {
-        var start = self.lines.len;
-        var end: usize = 0;
-
-        var it = self.visibleBlocks(visible_height);
-        while (it.next()) |visible| {
-            if (visible.index >= self.blocks.len) continue;
-            const block = self.blocks[visible.index];
-            const block_start = @min(self.lines.len, block.line_start +| visible.skip_rows);
-            const block_end = @min(self.lines.len, block_start +| visible.max_rows);
-            start = @min(start, block_start);
-            end = @max(end, block_end);
-        }
-
-        if (start == self.lines.len and end == 0) return .{ .start = 0, .end = 0 };
-        return .{ .start = start, .end = end };
-    }
-
     pub fn maxScroll(self: *const State, visible_height: usize) usize {
         return ui.BlockViewport.maxOffset(self.viewport_blocks, visible_height);
     }
@@ -206,7 +188,7 @@ pub const State = struct {
         if (self.games.len == 0) return;
         self.rendered_text = try buildGameDetailContent(allocator, self.games[0], detail_width);
         self.lines = try splitOwnedLines(allocator, self.rendered_text);
-        self.blocks = try buildBlocks(allocator, self.lines);
+        self.blocks = try buildBlocksForGame(allocator, self.lines, self.games[0]);
         self.viewport_blocks = try buildViewportBlocks(allocator, self.blocks);
     }
 };
@@ -255,9 +237,6 @@ fn buildGameDetailContent(allocator: std.mem.Allocator, game: bgg_model.Game, de
     }
     try writeRankDetailLine(&out.writer, game.rank);
     try writePlayersDetailLine(&out.writer, game);
-    if (game.player_count_poll) |poll| {
-        try writePlayerCountPollTable(&out.writer, poll);
-    }
     try writeTimeDetailLine(&out.writer, game);
     try writeWeightDetailLine(&out.writer, game);
     if (game.min_age > 0) try out.writer.print("Age          {d}+\n", .{game.min_age});
@@ -395,52 +374,6 @@ fn writeSpaces(writer: *std.Io.Writer, count: usize) !void {
     }
 }
 
-fn writePlayerCountPollTable(writer: *std.Io.Writer, poll: bgg_model.PlayerCountPoll) !void {
-    if (poll.results.len == 0) return;
-
-    var players_width: usize = 2;
-    var best_width: usize = 4;
-    var recommended_width: usize = 3;
-    var not_recommended_width: usize = 7;
-    var valid_rows: usize = 0;
-    for (poll.results) |result| {
-        const total = result.best + result.recommended + result.not_recommended;
-        if (total == 0) continue;
-        valid_rows += 1;
-        players_width = @max(players_width, format.displayWidth(result.num_players));
-        best_width = @max(best_width, pollVoteWidth(result.best, total));
-        recommended_width = @max(recommended_width, pollVoteWidth(result.recommended, total));
-        not_recommended_width = @max(not_recommended_width, pollVoteWidth(result.not_recommended, total));
-    }
-    if (valid_rows == 0) return;
-
-    try writePollBorder(writer, "┌", "┬", "┐", players_width, best_width, recommended_width, not_recommended_width);
-    try writer.writeAll("  │ ");
-    try writeRightAlignedText(writer, "", players_width);
-    try writer.writeAll(" │ ");
-    try writeRightAlignedText(writer, "Best", best_width);
-    try writer.writeAll(" │ ");
-    try writeRightAlignedText(writer, "Rec", recommended_width);
-    try writer.writeAll(" │ ");
-    try writeRightAlignedText(writer, "Not Rec", not_recommended_width);
-    try writer.writeAll(" │\n");
-    try writePollBorder(writer, "├", "┼", "┤", players_width, best_width, recommended_width, not_recommended_width);
-    for (poll.results) |result| {
-        const total = result.best + result.recommended + result.not_recommended;
-        if (total == 0) continue;
-        try writer.writeAll("  │ ");
-        try writeRightAlignedText(writer, result.num_players, players_width);
-        try writer.writeAll(" │ ");
-        try writeRightAlignedPollVote(writer, result.best, total, best_width);
-        try writer.writeAll(" │ ");
-        try writeRightAlignedPollVote(writer, result.recommended, total, recommended_width);
-        try writer.writeAll(" │ ");
-        try writeRightAlignedPollVote(writer, result.not_recommended, total, not_recommended_width);
-        try writer.writeAll(" │\n");
-    }
-    try writePollBorder(writer, "└", "┴", "┘", players_width, best_width, recommended_width, not_recommended_width);
-}
-
 const PlayerPollTableData = struct {
     table: ui.Table,
     rows: []ui.Table.Row,
@@ -495,6 +428,25 @@ fn playerPollTableData(allocator: std.mem.Allocator, poll: bgg_model.PlayerCount
     };
 }
 
+fn playerPollTableRenderedRowCount(poll: bgg_model.PlayerCountPoll) usize {
+    var valid_rows: usize = 0;
+    for (poll.results) |result| {
+        if (pollVoteTotal(result) > 0) valid_rows += 1;
+    }
+    if (valid_rows == 0) return 0;
+
+    const table = ui.Table.init(.{
+        .columns = &.{.{ .header = "", .width = 1 }},
+        .rows = &.{},
+    });
+    const chrome_rows = table.renderedRowCountForOptions(.{
+        .grid = .full,
+        .show_separator = true,
+        .body_separators = false,
+    });
+    return chrome_rows + valid_rows;
+}
+
 fn pollVoteText(allocator: std.mem.Allocator, value: u32, total: u32) ![]const u8 {
     var out: std.Io.Writer.Allocating = .init(allocator);
     try format.writeUnsignedGrouped(&out.writer, value);
@@ -510,32 +462,6 @@ fn pollRecommendationMarker(result: bgg_model.PlayerCountVotes) []const u8 {
 
 fn pollVoteTotal(result: bgg_model.PlayerCountVotes) u32 {
     return result.best + result.recommended + result.not_recommended;
-}
-
-fn writePollBorder(writer: *std.Io.Writer, left: []const u8, middle: []const u8, right: []const u8, players_width: usize, best_width: usize, recommended_width: usize, not_recommended_width: usize) !void {
-    try writer.writeAll("  ");
-    try writer.writeAll(left);
-    try writeRepeat(writer, "─", players_width + 2);
-    try writer.writeAll(middle);
-    try writeRepeat(writer, "─", best_width + 2);
-    try writer.writeAll(middle);
-    try writeRepeat(writer, "─", recommended_width + 2);
-    try writer.writeAll(middle);
-    try writeRepeat(writer, "─", not_recommended_width + 2);
-    try writer.writeAll(right);
-    try writer.writeByte('\n');
-}
-
-fn writeRightAlignedText(writer: *std.Io.Writer, text: []const u8, width: usize) !void {
-    try writeSpaces(writer, width -| @min(width, format.displayWidth(text)));
-    try writer.writeAll(text);
-}
-
-fn writeRightAlignedPollVote(writer: *std.Io.Writer, value: u32, total: u32, width: usize) !void {
-    const actual_width = pollVoteWidth(value, total);
-    try writeSpaces(writer, width -| @min(width, actual_width));
-    try format.writeUnsignedGrouped(writer, value);
-    try writer.print(" ({d}%)", .{pollVotePercent(value, total)});
 }
 
 fn pollVoteWidth(value: u32, total: u32) usize {
@@ -598,8 +524,22 @@ fn splitOwnedLines(allocator: std.mem.Allocator, text: []const u8) ![]const []co
 }
 
 pub fn buildBlocks(allocator: std.mem.Allocator, lines: []const []const u8) ![]const Block {
+    return buildBlocksForGameOrNull(allocator, lines, null);
+}
+
+pub fn buildBlocksForGame(allocator: std.mem.Allocator, lines: []const []const u8, game: bgg_model.Game) ![]const Block {
+    return buildBlocksForGameOrNull(allocator, lines, game);
+}
+
+fn buildBlocksForGameOrNull(allocator: std.mem.Allocator, lines: []const []const u8, maybe_game: ?bgg_model.Game) ![]const Block {
     var blocks: std.ArrayList(Block) = .empty;
     errdefer blocks.deinit(allocator);
+
+    const poll_height = if (maybe_game) |game|
+        if (game.player_count_poll) |poll| playerPollTableRenderedRowCount(poll) else 0
+    else
+        0;
+    var poll_inserted = false;
 
     var index: usize = 0;
     while (index < lines.len) {
@@ -610,6 +550,22 @@ pub fn buildBlocks(allocator: std.mem.Allocator, lines: []const []const u8) ![]c
                 .line_count = 1,
             });
             index = 1;
+            continue;
+        }
+
+        if (!poll_inserted and poll_height > 0 and isPlayersLine(lines[index])) {
+            try blocks.append(allocator, .{
+                .kind = .metadata,
+                .line_start = index,
+                .line_count = 1,
+            });
+            try blocks.append(allocator, .{
+                .kind = .player_poll_table,
+                .line_start = index + 1,
+                .line_count = poll_height,
+            });
+            index += 1;
+            poll_inserted = true;
             continue;
         }
 
@@ -634,7 +590,11 @@ pub fn buildBlocks(allocator: std.mem.Allocator, lines: []const []const u8) ![]c
         }
 
         const start = index;
-        while (index < lines.len and !isPollTableLine(lines[index]) and !isDescriptionHeading(lines[index])) : (index += 1) {}
+        while (index < lines.len and
+            !isPollTableLine(lines[index]) and
+            !isDescriptionHeading(lines[index]) and
+            !(!poll_inserted and poll_height > 0 and isPlayersLine(lines[index]))) : (index += 1)
+        {}
         try blocks.append(allocator, .{
             .kind = .metadata,
             .line_start = start,
@@ -779,6 +739,10 @@ fn isDescriptionHeading(line: []const u8) bool {
     return std.mem.eql(u8, line, "Description");
 }
 
+fn isPlayersLine(line: []const u8) bool {
+    return std.mem.startsWith(u8, line, "Players");
+}
+
 fn isPollTableLine(line: []const u8) bool {
     return std.mem.startsWith(u8, line, "  ┌") or
         std.mem.startsWith(u8, line, "  │") or
@@ -917,10 +881,7 @@ test "game detail content follows field order" {
     try std.testing.expect(std.mem.indexOf(u8, text, "Geek Rating  6.98") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "Rank         #389") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "Players      3-4  (Recommended with 3-4 players)") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "  ┌────┬─────────┬─────────┬──────────┐") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "  │    │    Best │     Rec │  Not Rec │") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "  │ 5+ │ 1 (50%) │  0 (0%) │  1 (50%) │") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "  └────┴─────────┴─────────┴──────────┘") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "  ┌") == null);
     try std.testing.expect(std.mem.indexOf(u8, text, "Weight       2.32 / 5 - Medium") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "Designer     Klaus Teuber, Someone Else") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "\nDescription\nTrade resources and build roads.\n\nSettle the island.") != null);
@@ -1013,6 +974,49 @@ test "detail blocks split title metadata poll table and description" {
     try std.testing.expectEqual(Block.Kind.description, blocks[4].kind);
     try std.testing.expectEqual(@as(usize, 8), blocks[4].line_start);
     try std.testing.expectEqual(@as(usize, 4), blocks[4].line_count);
+}
+
+test "detail blocks insert poll table after players line" {
+    var poll_results = [_]bgg_model.PlayerCountVotes{
+        .{ .num_players = "1", .best = 0, .recommended = 0, .not_recommended = 3 },
+        .{ .num_players = "2", .best = 2, .recommended = 1, .not_recommended = 2 },
+    };
+    const game = bgg_model.Game{
+        .id = 13,
+        .name = "CATAN",
+        .player_count_poll = .{ .results = &poll_results },
+    };
+    const lines = [_][]const u8{
+        "CATAN",
+        "",
+        "Year         1995",
+        "Players      3-4",
+        "Time         120 min",
+        "",
+        "Description",
+        "Trade resources.",
+    };
+
+    const blocks = try buildBlocksForGame(std.testing.allocator, &lines, game);
+    defer std.testing.allocator.free(blocks);
+
+    try std.testing.expectEqual(@as(usize, 6), blocks.len);
+    try std.testing.expectEqual(Block.Kind.title, blocks[0].kind);
+    try std.testing.expectEqual(Block.Kind.metadata, blocks[1].kind);
+    try std.testing.expectEqual(@as(usize, 1), blocks[1].line_start);
+    try std.testing.expectEqual(@as(usize, 2), blocks[1].line_count);
+    try std.testing.expectEqual(Block.Kind.metadata, blocks[2].kind);
+    try std.testing.expectEqual(@as(usize, 3), blocks[2].line_start);
+    try std.testing.expectEqual(@as(usize, 1), blocks[2].line_count);
+    try std.testing.expectEqual(Block.Kind.player_poll_table, blocks[3].kind);
+    try std.testing.expectEqual(@as(usize, 4), blocks[3].line_start);
+    try std.testing.expectEqual(@as(usize, 6), blocks[3].line_count);
+    try std.testing.expectEqual(Block.Kind.metadata, blocks[4].kind);
+    try std.testing.expectEqual(@as(usize, 4), blocks[4].line_start);
+    try std.testing.expectEqual(@as(usize, 2), blocks[4].line_count);
+    try std.testing.expectEqual(Block.Kind.description, blocks[5].kind);
+    try std.testing.expectEqual(@as(usize, 6), blocks[5].line_start);
+    try std.testing.expectEqual(@as(usize, 2), blocks[5].line_count);
 }
 
 test "detail description block colors heading only" {
@@ -1115,16 +1119,12 @@ fn expectStyledStarOnRow(surface: *const chasen.Surface, row: u16, color: chasen
     return error.TestExpectedStyledStar;
 }
 
-test "player count poll table skips polls without vote rows" {
+test "player count poll table height skips polls without vote rows" {
     var poll_results = [_]bgg_model.PlayerCountVotes{
         .{ .num_players = "1" },
         .{ .num_players = "2" },
     };
     const poll = bgg_model.PlayerCountPoll{ .results = &poll_results };
 
-    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
-    defer out.deinit();
-
-    try writePlayerCountPollTable(&out.writer, poll);
-    try std.testing.expectEqualStrings("", out.written());
+    try std.testing.expectEqual(@as(usize, 0), playerPollTableRenderedRowCount(poll));
 }
