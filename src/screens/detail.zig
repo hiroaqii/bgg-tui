@@ -34,6 +34,8 @@ pub const State = struct {
     games: []bgg_model.Game = &.{},
     rendered_text: []u8 = "",
     lines: []const []const u8 = &.{},
+    description_text: []u8 = "",
+    description_lines: []const []const u8 = &.{},
     blocks: []const Block = &.{},
     viewport_blocks: []const ui.BlockViewport.Block = &.{},
     viewport: ui.BlockViewport.State = .{},
@@ -150,15 +152,19 @@ pub const State = struct {
         bgg_xml.freeGames(allocator, self.games);
         self.clearImage(allocator);
         allocator.free(self.lines);
+        allocator.free(self.description_lines);
         allocator.free(self.blocks);
         allocator.free(self.viewport_blocks);
         allocator.free(self.rendered_text);
+        allocator.free(self.description_text);
         self.clearBrowserErrorUrl(allocator);
         self.games = &.{};
         self.lines = &.{};
+        self.description_lines = &.{};
         self.blocks = &.{};
         self.viewport_blocks = &.{};
         self.rendered_text = "";
+        self.description_text = "";
         self.viewport = .{};
         self.visible_height = 1;
         self.load_state = .idle;
@@ -177,18 +183,24 @@ pub const State = struct {
 
     fn rebuildLines(self: *State, allocator: std.mem.Allocator, detail_width: usize) !void {
         allocator.free(self.lines);
+        allocator.free(self.description_lines);
         allocator.free(self.blocks);
         allocator.free(self.viewport_blocks);
         allocator.free(self.rendered_text);
+        allocator.free(self.description_text);
         self.lines = &.{};
+        self.description_lines = &.{};
         self.blocks = &.{};
         self.viewport_blocks = &.{};
         self.rendered_text = "";
+        self.description_text = "";
 
         if (self.games.len == 0) return;
-        self.rendered_text = try buildGameDetailContent(allocator, self.games[0], detail_width);
+        self.rendered_text = try buildGameDetailMetadataContent(allocator, self.games[0], detail_width);
         self.lines = try splitOwnedLines(allocator, self.rendered_text);
-        self.blocks = try buildBlocksForGame(allocator, self.lines, self.games[0]);
+        self.description_text = try buildGameDetailDescriptionText(allocator, self.games[0], detail_width);
+        self.description_lines = try splitOwnedLines(allocator, self.description_text);
+        self.blocks = try buildBlocksForGame(allocator, self.lines, self.description_lines.len, self.games[0]);
         self.viewport_blocks = try buildViewportBlocks(allocator, self.blocks);
     }
 };
@@ -216,7 +228,7 @@ pub const Block = struct {
     }
 };
 
-fn buildGameDetailContent(allocator: std.mem.Allocator, game: bgg_model.Game, detail_width: usize) ![]u8 {
+fn buildGameDetailMetadataContent(allocator: std.mem.Allocator, game: bgg_model.Game, detail_width: usize) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(allocator);
     errdefer out.deinit();
 
@@ -256,13 +268,12 @@ fn buildGameDetailContent(allocator: std.mem.Allocator, game: bgg_model.Game, de
     try writeJoinedDetailValues(&out.writer, "Categories", game.categories, detail_width);
     try writeJoinedDetailValues(&out.writer, "Mechanics", game.mechanics, detail_width);
 
-    try out.writer.writeAll("\nDescription\n");
-    const description = if (game.description.len == 0) "No description available." else game.description;
-    const body = try bgg_html.toText(allocator, description, .{ .wrap_width = detail_width });
-    defer allocator.free(body);
-    try out.writer.writeAll(body);
-
     return try out.toOwnedSlice();
+}
+
+fn buildGameDetailDescriptionText(allocator: std.mem.Allocator, game: bgg_model.Game, detail_width: usize) ![]u8 {
+    const description = if (game.description.len == 0) "No description available." else game.description;
+    return try bgg_html.toText(allocator, description, .{ .wrap_width = detail_width });
 }
 
 fn writeRatingDetailLine(writer: *std.Io.Writer, game: bgg_model.Game) !void {
@@ -492,13 +503,6 @@ fn countDigits(value: u32) usize {
     return count;
 }
 
-fn writeRepeat(writer: *std.Io.Writer, text: []const u8, count: usize) !void {
-    var remaining = count;
-    while (remaining > 0) : (remaining -= 1) {
-        try writer.writeAll(text);
-    }
-}
-
 fn complexityLabel(weight: f64) []const u8 {
     if (weight < 1.0) return "Light";
     if (weight < 2.0) return "Medium Light";
@@ -524,14 +528,14 @@ fn splitOwnedLines(allocator: std.mem.Allocator, text: []const u8) ![]const []co
 }
 
 pub fn buildBlocks(allocator: std.mem.Allocator, lines: []const []const u8) ![]const Block {
-    return buildBlocksForGameOrNull(allocator, lines, null);
+    return buildBlocksForGameOrNull(allocator, lines, 0, null);
 }
 
-pub fn buildBlocksForGame(allocator: std.mem.Allocator, lines: []const []const u8, game: bgg_model.Game) ![]const Block {
-    return buildBlocksForGameOrNull(allocator, lines, game);
+pub fn buildBlocksForGame(allocator: std.mem.Allocator, lines: []const []const u8, description_line_count: usize, game: bgg_model.Game) ![]const Block {
+    return buildBlocksForGameOrNull(allocator, lines, description_line_count, game);
 }
 
-fn buildBlocksForGameOrNull(allocator: std.mem.Allocator, lines: []const []const u8, maybe_game: ?bgg_model.Game) ![]const Block {
+fn buildBlocksForGameOrNull(allocator: std.mem.Allocator, lines: []const []const u8, description_line_count: usize, maybe_game: ?bgg_model.Game) ![]const Block {
     var blocks: std.ArrayList(Block) = .empty;
     errdefer blocks.deinit(allocator);
 
@@ -539,6 +543,7 @@ fn buildBlocksForGameOrNull(allocator: std.mem.Allocator, lines: []const []const
         if (game.player_count_poll) |poll| playerPollTableRenderedRowCount(poll) else 0
     else
         0;
+    const has_game = maybe_game != null;
     var poll_inserted = false;
 
     var index: usize = 0;
@@ -569,7 +574,7 @@ fn buildBlocksForGameOrNull(allocator: std.mem.Allocator, lines: []const []const
             continue;
         }
 
-        if (isDescriptionHeading(lines[index])) {
+        if (!has_game and isDescriptionHeading(lines[index])) {
             try blocks.append(allocator, .{
                 .kind = .description,
                 .line_start = index,
@@ -599,6 +604,14 @@ fn buildBlocksForGameOrNull(allocator: std.mem.Allocator, lines: []const []const
             .kind = .metadata,
             .line_start = start,
             .line_count = index - start,
+        });
+    }
+
+    if (has_game and description_line_count > 0) {
+        try blocks.append(allocator, .{
+            .kind = .description,
+            .line_start = 0,
+            .line_count = description_line_count + 1,
         });
     }
 
@@ -639,7 +652,21 @@ fn drawMetadataBlock(surface: *chasen.Surface, state: *const State, block: Block
 }
 
 fn drawDescriptionBlock(surface: *chasen.Surface, state: *const State, block: Block, skip_rows: usize, max_rows: usize, styles: LineStyles) void {
-    drawLineBlock(surface, state, block, skip_rows, max_rows, styles, drawDescriptionLine);
+    _ = block;
+    for (0..max_rows) |local_row| {
+        const source_index = skip_rows + local_row;
+        const row: u16 = @intCast(local_row);
+        if (row >= surface.size().height) break;
+
+        if (source_index == 0) {
+            _ = surface.borrowTextAt(0, row, "Description", styles.label);
+            continue;
+        }
+
+        const description_index = source_index - 1;
+        if (description_index >= state.description_lines.len) break;
+        _ = surface.borrowTextAt(0, row, state.description_lines[description_index], .{});
+    }
 }
 
 fn drawLineBlock(
@@ -715,15 +742,6 @@ fn drawMetadataLine(surface: *chasen.Surface, row: u16, local_line_index: usize,
         const label = line[0..label_len];
         _ = surface.borrowTextAt(0, row, label, styles.label);
         _ = surface.borrowTextAt(chasen.text.displayWidth(label), row, line[label_len..], .{});
-        return;
-    }
-
-    _ = surface.borrowTextAt(0, row, line, .{});
-}
-
-fn drawDescriptionLine(surface: *chasen.Surface, row: u16, local_line_index: usize, line: []const u8, styles: LineStyles) void {
-    if (local_line_index == 0) {
-        _ = surface.borrowTextAt(0, row, line, styles.label);
         return;
     }
 
@@ -873,7 +891,7 @@ test "game detail content follows field order" {
         },
     };
 
-    const text = try buildGameDetailContent(std.testing.allocator, game, 72);
+    const text = try buildGameDetailMetadataContent(std.testing.allocator, game, 72);
     defer std.testing.allocator.free(text);
 
     try std.testing.expect(std.mem.indexOf(u8, text, "CATAN\n\nYear         1995") != null);
@@ -884,7 +902,11 @@ test "game detail content follows field order" {
     try std.testing.expect(std.mem.indexOf(u8, text, "  ┌") == null);
     try std.testing.expect(std.mem.indexOf(u8, text, "Weight       2.32 / 5 - Medium") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "Designer     Klaus Teuber, Someone Else") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "\nDescription\nTrade resources and build roads.\n\nSettle the island.") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "Description") == null);
+
+    const description = try buildGameDetailDescriptionText(std.testing.allocator, game, 72);
+    defer std.testing.allocator.free(description);
+    try std.testing.expectEqualStrings("Trade resources and build roads.\n\nSettle the island.", description);
 }
 
 test "detail content height follows density overhead" {
@@ -993,11 +1015,9 @@ test "detail blocks insert poll table after players line" {
         "Players      3-4",
         "Time         120 min",
         "",
-        "Description",
-        "Trade resources.",
     };
 
-    const blocks = try buildBlocksForGame(std.testing.allocator, &lines, game);
+    const blocks = try buildBlocksForGame(std.testing.allocator, &lines, 2, game);
     defer std.testing.allocator.free(blocks);
 
     try std.testing.expectEqual(@as(usize, 6), blocks.len);
@@ -1015,22 +1035,28 @@ test "detail blocks insert poll table after players line" {
     try std.testing.expectEqual(@as(usize, 4), blocks[4].line_start);
     try std.testing.expectEqual(@as(usize, 2), blocks[4].line_count);
     try std.testing.expectEqual(Block.Kind.description, blocks[5].kind);
-    try std.testing.expectEqual(@as(usize, 6), blocks[5].line_start);
-    try std.testing.expectEqual(@as(usize, 2), blocks[5].line_count);
+    try std.testing.expectEqual(@as(usize, 0), blocks[5].line_start);
+    try std.testing.expectEqual(@as(usize, 3), blocks[5].line_count);
 }
 
 test "detail description block colors heading only" {
-    const detail_text = "CATAN\nDescription\nTrade resources.";
+    const detail_text = "CATAN";
     const lines = try splitOwnedLines(std.testing.allocator, detail_text);
     defer std.testing.allocator.free(lines);
+    const description_text = "Trade resources.";
+    const description_lines = try splitOwnedLines(std.testing.allocator, description_text);
+    defer std.testing.allocator.free(description_lines);
 
     var state: State = .{
         .rendered_text = try std.testing.allocator.dupe(u8, detail_text),
         .lines = lines,
-        .blocks = try buildBlocks(std.testing.allocator, lines),
+        .description_text = try std.testing.allocator.dupe(u8, description_text),
+        .description_lines = description_lines,
+        .blocks = try buildBlocksForGame(std.testing.allocator, lines, description_lines.len, .{ .id = 13, .name = "CATAN" }),
     };
     defer {
         std.testing.allocator.free(state.rendered_text);
+        std.testing.allocator.free(state.description_text);
         std.testing.allocator.free(state.blocks);
     }
 
