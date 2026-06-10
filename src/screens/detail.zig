@@ -552,10 +552,6 @@ fn splitOwnedLines(allocator: std.mem.Allocator, text: []const u8) ![]const []co
     return try lines.toOwnedSlice(allocator);
 }
 
-pub fn buildBlocks(allocator: std.mem.Allocator, lines: []const []const u8) ![]const Block {
-    return buildLegacyLineBlocks(allocator, lines);
-}
-
 pub fn buildBlocksForGame(allocator: std.mem.Allocator, metadata_rows: []const MetadataRow, description_line_count: usize, game: bgg_model.Game) ![]const Block {
     var blocks: std.ArrayList(Block) = .empty;
     errdefer blocks.deinit(allocator);
@@ -613,54 +609,6 @@ fn metadataRowsHeight(rows: []const MetadataRow, start: usize, end: usize) usize
     var height: usize = 0;
     for (rows[start..end]) |row| height += row.height();
     return height;
-}
-
-fn buildLegacyLineBlocks(allocator: std.mem.Allocator, lines: []const []const u8) ![]const Block {
-    var blocks: std.ArrayList(Block) = .empty;
-    errdefer blocks.deinit(allocator);
-
-    var index: usize = 0;
-    while (index < lines.len) {
-        if (index == 0) {
-            try blocks.append(allocator, .{
-                .kind = .title,
-                .line_start = 0,
-                .line_count = 1,
-            });
-            index = 1;
-            continue;
-        }
-
-        if (isDescriptionHeading(lines[index])) {
-            try blocks.append(allocator, .{
-                .kind = .description,
-                .line_start = index,
-                .line_count = lines.len - index,
-            });
-            break;
-        }
-
-        if (isPollTableLine(lines[index])) {
-            const start = index;
-            while (index < lines.len and isPollTableLine(lines[index])) : (index += 1) {}
-            try blocks.append(allocator, .{
-                .kind = .player_poll_table,
-                .line_start = start,
-                .line_count = index - start,
-            });
-            continue;
-        }
-
-        const start = index;
-        while (index < lines.len and !isPollTableLine(lines[index]) and !isDescriptionHeading(lines[index])) : (index += 1) {}
-        try blocks.append(allocator, .{
-            .kind = .metadata,
-            .line_start = start,
-            .line_count = index - start,
-        });
-    }
-
-    return try blocks.toOwnedSlice(allocator);
 }
 
 pub fn buildViewportBlocks(allocator: std.mem.Allocator, blocks: []const Block) ![]const ui.BlockViewport.Block {
@@ -782,72 +730,11 @@ fn drawPlayerPollTableBlock(surface: *chasen.Surface, state: *const State, skip_
     });
 }
 
-pub fn drawLine(surface: *chasen.Surface, row: u16, absolute_line_index: usize, line: []const u8, styles: LineStyles) void {
-    if (absolute_line_index == 0) {
-        _ = surface.borrowTextAt(0, row, line, styles.title);
-        return;
-    }
-
-    if (isPollTableLine(line)) {
-        _ = surface.borrowTextAt(0, row, line, .{});
-        return;
-    }
-
-    if (detailLabelLength(line)) |label_len| {
-        const label = line[0..label_len];
-        _ = surface.borrowTextAt(0, row, label, styles.label);
-        _ = surface.borrowTextAt(chasen.text.displayWidth(label), row, line[label_len..], .{});
-        return;
-    }
-
-    _ = surface.borrowTextAt(0, row, line, .{});
-}
-
 fn drawMetadataLine(surface: *chasen.Surface, row: u16, line: MetadataLine, styles: LineStyles) void {
     if (line.label) |label| {
         _ = surface.borrowTextAt(0, row, label, styles.label);
     }
     _ = surface.borrowTextAt(metadata_value_col, row, line.value, .{});
-}
-
-pub fn lineStyle(line: []const u8) chasen.TextStyle {
-    if (isDescriptionHeading(line)) return .{ .dim = true };
-    return .{};
-}
-
-fn isDescriptionHeading(line: []const u8) bool {
-    return std.mem.eql(u8, line, "Description");
-}
-
-fn isPollTableLine(line: []const u8) bool {
-    return std.mem.startsWith(u8, line, "  ┌") or
-        std.mem.startsWith(u8, line, "  │") or
-        std.mem.startsWith(u8, line, "  ├") or
-        std.mem.startsWith(u8, line, "  └");
-}
-
-fn detailLabelLength(line: []const u8) ?usize {
-    const labels = [_][]const u8{
-        "Year",
-        "Rating",
-        "Geek Rating",
-        "Rank",
-        "Players",
-        "Time",
-        "Weight",
-        "Age",
-        "Owned",
-        "Comments",
-        "Designer",
-        "Artist",
-        "Categories",
-        "Mechanics",
-    };
-
-    for (labels) |label| {
-        if (std.mem.startsWith(u8, line, label)) return label.len;
-    }
-    return null;
 }
 
 pub const Layout = struct {
@@ -994,13 +881,18 @@ test "detail layout keeps content and footer positions consistent" {
     try std.testing.expect(small.footer_row < 5);
 }
 
-test "detail line style does not dim wrapped metadata lines" {
-    try std.testing.expect(!lineStyle("             Deck Building, Hand Management").dim);
-    try std.testing.expect(!lineStyle("  │ 5+ │ 1 (50%) │  0 (0%) │  1 (50%) │").dim);
-    try std.testing.expect(lineStyle("Description").dim);
-}
+test "detail semantic blocks color title and metadata labels" {
+    const games = try std.testing.allocator.alloc(bgg_model.Game, 1);
+    games[0] = .{
+        .id = 13,
+        .name = try std.testing.allocator.dupe(u8, "CATAN"),
+        .year_published = 1995,
+    };
 
-test "detail draw line colors title labels and tables" {
+    var state: State = .{};
+    try state.setLoaded(std.testing.allocator, games, 80);
+    defer state.deinit(std.testing.allocator);
+
     var ts: chasen.testing.TestSurface = undefined;
     try ts.init(40, 4);
     defer ts.deinit();
@@ -1011,54 +903,29 @@ test "detail draw line colors title labels and tables" {
         .label = .{ .fg = accent, .bold = true },
     };
 
-    drawLine(&ts.surface, 0, 0, "CATAN", styles);
-    drawLine(&ts.surface, 1, 2, "Rating       7.14", styles);
-    drawLine(&ts.surface, 2, 4, "  │    │ Best │", styles);
-    drawLine(&ts.surface, 3, 5, "Trade resources", styles);
+    try drawBlock(&ts.surface, &state, .{
+        .index = 0,
+        .skip_rows = 0,
+        .max_rows = state.blocks[0].height(),
+        .row = 0,
+    }, styles);
+
+    var metadata_area = ts.surface.child(.{
+        .col = 0,
+        .row = 2,
+        .width = 40,
+        .height = 2,
+    });
+    try drawBlock(&metadata_area, &state, .{
+        .index = 1,
+        .skip_rows = 0,
+        .max_rows = 2,
+        .row = 2,
+    }, styles);
 
     try std.testing.expect(ts.surface.readCell(0, 0).?.style.fg.eql(accent.toVaxis()));
-    try std.testing.expect(ts.surface.readCell(0, 1).?.style.fg.eql(accent.toVaxis()));
-    try std.testing.expect(!ts.surface.readCell(13, 1).?.style.fg.eql(accent.toVaxis()));
-    try std.testing.expect(!ts.surface.readCell(2, 2).?.style.fg.eql(accent.toVaxis()));
-    try std.testing.expect(!ts.surface.readCell(2, 2).?.style.dim);
-    try std.testing.expect(!ts.surface.readCell(0, 3).?.style.fg.eql(accent.toVaxis()));
-}
-
-test "detail blocks split title metadata poll table and description" {
-    const lines = [_][]const u8{
-        "CATAN",
-        "",
-        "Year         1995",
-        "  ┌────┬──────┐",
-        "  │    │ Best │",
-        "  └────┴──────┘",
-        "Weight       2.32 / 5 - Medium",
-        "",
-        "Description",
-        "Trade resources.",
-        "",
-        "Settle the island.",
-    };
-
-    const blocks = try buildBlocks(std.testing.allocator, &lines);
-    defer std.testing.allocator.free(blocks);
-
-    try std.testing.expectEqual(@as(usize, 5), blocks.len);
-    try std.testing.expectEqual(Block.Kind.title, blocks[0].kind);
-    try std.testing.expectEqual(@as(usize, 0), blocks[0].line_start);
-    try std.testing.expectEqual(@as(usize, 1), blocks[0].line_count);
-    try std.testing.expectEqual(Block.Kind.metadata, blocks[1].kind);
-    try std.testing.expectEqual(@as(usize, 1), blocks[1].line_start);
-    try std.testing.expectEqual(@as(usize, 2), blocks[1].line_count);
-    try std.testing.expectEqual(Block.Kind.player_poll_table, blocks[2].kind);
-    try std.testing.expectEqual(@as(usize, 3), blocks[2].line_start);
-    try std.testing.expectEqual(@as(usize, 3), blocks[2].line_count);
-    try std.testing.expectEqual(Block.Kind.metadata, blocks[3].kind);
-    try std.testing.expectEqual(@as(usize, 6), blocks[3].line_start);
-    try std.testing.expectEqual(@as(usize, 2), blocks[3].line_count);
-    try std.testing.expectEqual(Block.Kind.description, blocks[4].kind);
-    try std.testing.expectEqual(@as(usize, 8), blocks[4].line_start);
-    try std.testing.expectEqual(@as(usize, 4), blocks[4].line_count);
+    try std.testing.expect(ts.surface.readCell(0, 2).?.style.fg.eql(accent.toVaxis()));
+    try std.testing.expect(!ts.surface.readCell(metadata_value_col, 2).?.style.fg.eql(accent.toVaxis()));
 }
 
 test "detail blocks insert poll table after players line" {
