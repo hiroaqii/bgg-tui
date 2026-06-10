@@ -3755,19 +3755,16 @@ test "detail scroll uses resized body height" {
     try app.handleResize(.{ .width = 80, .height = 10 });
     try std.testing.expectEqual(detailLayoutForTerminal(&app).content_height, app.game_detail.visible_height);
 
-    const text = try std.testing.allocator.dupe(u8, "0\n1\n2\n3\n4\n5\n6\n7\n8\n9");
-    app.game_detail.rendered_text = text;
-    const lines = try std.testing.allocator.alloc([]const u8, 10);
-    for (lines, 0..) |*line, index| {
-        line.* = text[index * 2 .. index * 2 + 1];
-    }
-    app.game_detail.lines = lines;
-    app.game_detail.blocks = try screens.detail.buildBlocks(std.testing.allocator, lines);
-    app.game_detail.viewport_blocks = try screens.detail.buildViewportBlocks(std.testing.allocator, app.game_detail.blocks);
-    app.game_detail.load_state = .loaded;
+    const games = try std.testing.allocator.alloc(bgg_model.Game, 1);
+    games[0] = .{
+        .id = 13,
+        .name = try std.testing.allocator.dupe(u8, "CATAN"),
+        .description = try std.testing.allocator.dupe(u8, "0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15"),
+    };
+    try app.game_detail.setLoaded(std.testing.allocator, games, 80);
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
-    for (0..10) |_| try app.update(.{ .game_detail = .move_next }, &tc.ctx);
+    for (0..40) |_| try app.update(.{ .game_detail = .move_next }, &tc.ctx);
     try std.testing.expectEqual(app.game_detail.maxScroll(detailLayoutForTerminal(&app).content_height), app.game_detail.scrollOffset());
 }
 

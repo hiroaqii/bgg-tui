@@ -32,8 +32,7 @@ pub const State = struct {
     terminal_image_handle: ?chasen.TerminalImageHandle = null,
     terminal_image_load_error: ?chasen.TerminalImageLoadError = null,
     games: []bgg_model.Game = &.{},
-    rendered_text: []u8 = "",
-    lines: []const []const u8 = &.{},
+    metadata_rows: []MetadataRow = &.{},
     description_text: []u8 = "",
     description_lines: []const []const u8 = &.{},
     blocks: []const Block = &.{},
@@ -151,19 +150,17 @@ pub const State = struct {
     pub fn deinit(self: *State, allocator: std.mem.Allocator) void {
         bgg_xml.freeGames(allocator, self.games);
         self.clearImage(allocator);
-        allocator.free(self.lines);
+        freeMetadataRows(allocator, self.metadata_rows);
         allocator.free(self.description_lines);
         allocator.free(self.blocks);
         allocator.free(self.viewport_blocks);
-        allocator.free(self.rendered_text);
         allocator.free(self.description_text);
         self.clearBrowserErrorUrl(allocator);
         self.games = &.{};
-        self.lines = &.{};
+        self.metadata_rows = &.{};
         self.description_lines = &.{};
         self.blocks = &.{};
         self.viewport_blocks = &.{};
-        self.rendered_text = "";
         self.description_text = "";
         self.viewport = .{};
         self.visible_height = 1;
@@ -182,26 +179,33 @@ pub const State = struct {
     }
 
     fn rebuildLines(self: *State, allocator: std.mem.Allocator, detail_width: usize) !void {
-        allocator.free(self.lines);
+        freeMetadataRows(allocator, self.metadata_rows);
         allocator.free(self.description_lines);
         allocator.free(self.blocks);
         allocator.free(self.viewport_blocks);
-        allocator.free(self.rendered_text);
         allocator.free(self.description_text);
-        self.lines = &.{};
+        self.metadata_rows = &.{};
         self.description_lines = &.{};
         self.blocks = &.{};
         self.viewport_blocks = &.{};
-        self.rendered_text = "";
         self.description_text = "";
 
         if (self.games.len == 0) return;
-        self.rendered_text = try buildGameDetailMetadataContent(allocator, self.games[0], detail_width);
-        self.lines = try splitOwnedLines(allocator, self.rendered_text);
+        self.metadata_rows = try buildGameDetailMetadataRows(allocator, self.games[0], detail_width);
         self.description_text = try buildGameDetailDescriptionText(allocator, self.games[0], detail_width);
         self.description_lines = try splitOwnedLines(allocator, self.description_text);
-        self.blocks = try buildBlocksForGame(allocator, self.lines, self.description_lines.len, self.games[0]);
+        self.blocks = try buildBlocksForGame(allocator, self.metadata_rows, self.description_lines.len, self.games[0]);
         self.viewport_blocks = try buildViewportBlocks(allocator, self.blocks);
+    }
+};
+
+pub const MetadataRow = struct {
+    label: []const u8,
+    value_text: []u8,
+    value_lines: []const []const u8,
+
+    pub fn height(self: MetadataRow) usize {
+        return @max(@as(usize, 1), self.value_lines.len);
     }
 };
 
@@ -228,47 +232,57 @@ pub const Block = struct {
     }
 };
 
-fn buildGameDetailMetadataContent(allocator: std.mem.Allocator, game: bgg_model.Game, detail_width: usize) ![]u8 {
-    var out: std.Io.Writer.Allocating = .init(allocator);
-    errdefer out.deinit();
+const metadata_value_col: u16 = 13;
 
-    try out.writer.writeAll(game.name);
-    try out.writer.writeAll("\n\n");
+fn buildGameDetailMetadataRows(allocator: std.mem.Allocator, game: bgg_model.Game, detail_width: usize) ![]MetadataRow {
+    var rows: std.ArrayList(MetadataRow) = .empty;
+    errdefer freeMetadataRows(allocator, rows.items);
 
-    try out.writer.writeAll("Year         ");
     if (game.year_published) |year| {
-        try out.writer.print("{d}\n", .{year});
+        try appendMetadataRow(allocator, &rows, "Year", try std.fmt.allocPrint(allocator, "{d}", .{year}));
     } else {
-        try out.writer.writeAll("N/A\n");
+        try appendMetadataRow(allocator, &rows, "Year", try allocator.dupe(u8, "N/A"));
     }
-    try writeRatingDetailLine(&out.writer, game);
-    if (game.bayes_average > 0) {
-        try out.writer.writeAll("Geek Rating  ");
-        try format.writeFixedDecimal(&out.writer, game.bayes_average, 2);
-        try out.writer.writeByte('\n');
-    }
-    try writeRankDetailLine(&out.writer, game.rank);
-    try writePlayersDetailLine(&out.writer, game);
-    try writeTimeDetailLine(&out.writer, game);
-    try writeWeightDetailLine(&out.writer, game);
-    if (game.min_age > 0) try out.writer.print("Age          {d}+\n", .{game.min_age});
-    if (game.owned > 0) {
-        try out.writer.writeAll("Owned        ");
-        try format.writeUnsignedGrouped(&out.writer, game.owned);
-        try out.writer.writeByte('\n');
-    }
-    if (game.num_comments > 0) {
-        try out.writer.writeAll("Comments     ");
-        try format.writeUnsignedGrouped(&out.writer, game.num_comments);
-        try out.writer.writeByte('\n');
-    }
+    try appendMetadataRow(allocator, &rows, "Rating", try ratingDetailValue(allocator, game));
+    if (game.bayes_average > 0) try appendMetadataRow(allocator, &rows, "Geek Rating", try fixedDecimalValue(allocator, game.bayes_average));
+    try appendMetadataRow(allocator, &rows, "Rank", try rankDetailValue(allocator, game.rank));
+    try appendMetadataRow(allocator, &rows, "Players", try playersDetailValue(allocator, game));
+    try appendMetadataRow(allocator, &rows, "Time", try timeDetailValue(allocator, game));
+    try appendMetadataRow(allocator, &rows, "Weight", try weightDetailValue(allocator, game));
+    if (game.min_age > 0) try appendMetadataRow(allocator, &rows, "Age", try std.fmt.allocPrint(allocator, "{d}+", .{game.min_age}));
+    if (game.owned > 0) try appendMetadataRow(allocator, &rows, "Owned", try unsignedGroupedValue(allocator, game.owned));
+    if (game.num_comments > 0) try appendMetadataRow(allocator, &rows, "Comments", try unsignedGroupedValue(allocator, game.num_comments));
 
-    try writeJoinedDetailValues(&out.writer, "Designer", game.designers, detail_width);
-    try writeJoinedDetailValues(&out.writer, "Artist", game.artists, detail_width);
-    try writeJoinedDetailValues(&out.writer, "Categories", game.categories, detail_width);
-    try writeJoinedDetailValues(&out.writer, "Mechanics", game.mechanics, detail_width);
+    try appendJoinedMetadataRow(allocator, &rows, "Designer", game.designers, detail_width);
+    try appendJoinedMetadataRow(allocator, &rows, "Artist", game.artists, detail_width);
+    try appendJoinedMetadataRow(allocator, &rows, "Categories", game.categories, detail_width);
+    try appendJoinedMetadataRow(allocator, &rows, "Mechanics", game.mechanics, detail_width);
 
-    return try out.toOwnedSlice();
+    return try rows.toOwnedSlice(allocator);
+}
+
+fn appendMetadataRow(allocator: std.mem.Allocator, rows: *std.ArrayList(MetadataRow), label: []const u8, value_text: []u8) !void {
+    errdefer allocator.free(value_text);
+    const value_lines = try splitOwnedLines(allocator, value_text);
+    errdefer allocator.free(value_lines);
+    try rows.append(allocator, .{
+        .label = label,
+        .value_text = value_text,
+        .value_lines = value_lines,
+    });
+}
+
+fn appendJoinedMetadataRow(allocator: std.mem.Allocator, rows: *std.ArrayList(MetadataRow), label: []const u8, values: []const []const u8, detail_width: usize) !void {
+    if (values.len == 0) return;
+    try appendMetadataRow(allocator, rows, label, try joinedDetailValue(allocator, values, detail_width));
+}
+
+fn freeMetadataRows(allocator: std.mem.Allocator, rows: []MetadataRow) void {
+    for (rows) |row| {
+        allocator.free(row.value_lines);
+        allocator.free(row.value_text);
+    }
+    allocator.free(rows);
 }
 
 fn buildGameDetailDescriptionText(allocator: std.mem.Allocator, game: bgg_model.Game, detail_width: usize) ![]u8 {
@@ -276,113 +290,124 @@ fn buildGameDetailDescriptionText(allocator: std.mem.Allocator, game: bgg_model.
     return try bgg_html.toText(allocator, description, .{ .wrap_width = detail_width });
 }
 
-fn writeRatingDetailLine(writer: *std.Io.Writer, game: bgg_model.Game) !void {
-    try writer.writeAll("Rating       ");
+fn ratingDetailValue(allocator: std.mem.Allocator, game: bgg_model.Game) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+
     if (game.rating <= 0) {
-        try writer.writeAll("N/A\n");
-        return;
+        try out.writer.writeAll("N/A");
+        return try out.toOwnedSlice();
     }
 
-    try format.writeFixedDecimal(writer, game.rating, 2);
-    try writer.writeAll(" (");
-    try format.writeUnsignedGrouped(writer, game.users_rated);
-    try writer.writeAll(" votes");
+    try format.writeFixedDecimal(&out.writer, game.rating, 2);
+    try out.writer.writeAll(" (");
+    try format.writeUnsignedGrouped(&out.writer, game.users_rated);
+    try out.writer.writeAll(" votes");
     if (game.stddev > 0) {
-        try writer.writeAll(", σ ");
-        try format.writeFixedDecimal(writer, game.stddev, 2);
+        try out.writer.writeAll(", σ ");
+        try format.writeFixedDecimal(&out.writer, game.stddev, 2);
     }
-    try writer.writeByte(')');
+    try out.writer.writeByte(')');
     if (game.median > 0) {
-        try writer.writeAll(" median ");
-        try format.writeFixedDecimal(writer, game.median, 2);
+        try out.writer.writeAll(" median ");
+        try format.writeFixedDecimal(&out.writer, game.median, 2);
     }
-    try writer.writeByte('\n');
+    return try out.toOwnedSlice();
 }
 
-fn writeRankDetailLine(writer: *std.Io.Writer, rank: u32) !void {
-    try writer.writeAll("Rank         ");
+fn fixedDecimalValue(allocator: std.mem.Allocator, value: f64) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+    try format.writeFixedDecimal(&out.writer, value, 2);
+    return try out.toOwnedSlice();
+}
+
+fn rankDetailValue(allocator: std.mem.Allocator, rank: u32) ![]u8 {
     if (rank == 0) {
-        try writer.writeAll("Not Ranked\n");
-        return;
+        return try allocator.dupe(u8, "Not Ranked");
     }
-    try writer.writeByte('#');
-    try format.writeUnsignedGrouped(writer, rank);
-    try writer.writeByte('\n');
+
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+    try out.writer.writeByte('#');
+    try format.writeUnsignedGrouped(&out.writer, rank);
+    return try out.toOwnedSlice();
 }
 
-fn writePlayersDetailLine(writer: *std.Io.Writer, game: bgg_model.Game) !void {
-    try writer.writeAll("Players      ");
+fn playersDetailValue(allocator: std.mem.Allocator, game: bgg_model.Game) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+
     if (game.min_players == 0 and game.max_players == 0) {
-        try writer.writeAll("N/A");
+        try out.writer.writeAll("N/A");
     } else if (game.min_players == game.max_players) {
-        try writer.print("{d}", .{game.min_players});
+        try out.writer.print("{d}", .{game.min_players});
     } else {
-        try writer.print("{d}-{d}", .{ game.min_players, game.max_players });
+        try out.writer.print("{d}-{d}", .{ game.min_players, game.max_players });
     }
     if (game.player_count_poll) |poll| {
         if (poll.recommended_with) |recommended| {
-            if (recommended.len > 0) try writer.print("  ({s})", .{recommended});
+            if (recommended.len > 0) try out.writer.print("  ({s})", .{recommended});
         }
     }
-    try writer.writeByte('\n');
+    return try out.toOwnedSlice();
 }
 
-fn writeTimeDetailLine(writer: *std.Io.Writer, game: bgg_model.Game) !void {
-    try writer.writeAll("Time         ");
+fn timeDetailValue(allocator: std.mem.Allocator, game: bgg_model.Game) ![]u8 {
     if (game.playing_time == 0 and game.min_play_time == 0 and game.max_play_time == 0) {
-        try writer.writeAll("N/A\n");
-    } else if (game.min_play_time > 0 and game.max_play_time > 0 and game.min_play_time != game.max_play_time) {
-        try writer.print("{d}-{d} min\n", .{ game.min_play_time, game.max_play_time });
-    } else {
-        try writer.print("{d} min\n", .{game.playing_time});
+        return try allocator.dupe(u8, "N/A");
     }
+
+    if (game.min_play_time > 0 and game.max_play_time > 0 and game.min_play_time != game.max_play_time)
+        return try std.fmt.allocPrint(allocator, "{d}-{d} min", .{ game.min_play_time, game.max_play_time });
+
+    return try std.fmt.allocPrint(allocator, "{d} min", .{game.playing_time});
 }
 
-fn writeWeightDetailLine(writer: *std.Io.Writer, game: bgg_model.Game) !void {
-    try writer.writeAll("Weight       ");
+fn weightDetailValue(allocator: std.mem.Allocator, game: bgg_model.Game) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+
     if (game.weight <= 0) {
-        try writer.writeAll("N/A\n");
-        return;
+        try out.writer.writeAll("N/A");
+        return try out.toOwnedSlice();
     }
 
-    try format.writeFixedDecimal(writer, game.weight, 2);
-    try writer.print(" / 5 - {s}", .{complexityLabel(game.weight)});
+    try format.writeFixedDecimal(&out.writer, game.weight, 2);
+    try out.writer.print(" / 5 - {s}", .{complexityLabel(game.weight)});
     if (game.num_weights > 0) {
-        try writer.writeAll(" (");
-        try format.writeUnsignedGrouped(writer, game.num_weights);
-        try writer.writeAll(" votes)");
+        try out.writer.writeAll(" (");
+        try format.writeUnsignedGrouped(&out.writer, game.num_weights);
+        try out.writer.writeAll(" votes)");
     }
-    try writer.writeByte('\n');
+    return try out.toOwnedSlice();
 }
 
-fn writeJoinedDetailValues(writer: *std.Io.Writer, label: []const u8, values: []const []const u8, detail_width: usize) !void {
-    if (values.len == 0) return;
+fn unsignedGroupedValue(allocator: std.mem.Allocator, value: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+    try format.writeUnsignedGrouped(&out.writer, value);
+    return try out.toOwnedSlice();
+}
 
-    try writer.writeAll(label);
-    try writeSpaces(writer, 12 -| @min(@as(usize, 12), format.displayWidth(label)));
-    try writer.writeByte(' ');
+fn joinedDetailValue(allocator: std.mem.Allocator, values: []const []const u8, detail_width: usize) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
 
-    var line_width = @max(@as(usize, 13), format.displayWidth(label) + 1);
+    const value_width = detail_width -| @min(detail_width, @as(usize, metadata_value_col));
+    var line_width: usize = 0;
     for (values, 0..) |value, index| {
         const prefix = if (index == 0) "" else ", ";
         const part_width = format.displayWidth(prefix) + format.displayWidth(value);
-        if (line_width > 13 and line_width + part_width > detail_width) {
-            try writer.writeByte('\n');
-            try writeSpaces(writer, 13);
-            line_width = 13;
+        if (line_width > 0 and line_width + part_width > value_width) {
+            try out.writer.writeByte('\n');
+            line_width = 0;
         }
-        try writer.writeAll(prefix);
-        try writer.writeAll(value);
+        if (line_width > 0) try out.writer.writeAll(prefix);
+        try out.writer.writeAll(value);
         line_width += part_width;
     }
-    try writer.writeByte('\n');
-}
-
-fn writeSpaces(writer: *std.Io.Writer, count: usize) !void {
-    var remaining = count;
-    while (remaining > 0) : (remaining -= 1) {
-        try writer.writeByte(' ');
-    }
+    return try out.toOwnedSlice();
 }
 
 const PlayerPollTableData = struct {
@@ -528,23 +553,71 @@ fn splitOwnedLines(allocator: std.mem.Allocator, text: []const u8) ![]const []co
 }
 
 pub fn buildBlocks(allocator: std.mem.Allocator, lines: []const []const u8) ![]const Block {
-    return buildBlocksForGameOrNull(allocator, lines, 0, null);
+    return buildLegacyLineBlocks(allocator, lines);
 }
 
-pub fn buildBlocksForGame(allocator: std.mem.Allocator, lines: []const []const u8, description_line_count: usize, game: bgg_model.Game) ![]const Block {
-    return buildBlocksForGameOrNull(allocator, lines, description_line_count, game);
-}
-
-fn buildBlocksForGameOrNull(allocator: std.mem.Allocator, lines: []const []const u8, description_line_count: usize, maybe_game: ?bgg_model.Game) ![]const Block {
+pub fn buildBlocksForGame(allocator: std.mem.Allocator, metadata_rows: []const MetadataRow, description_line_count: usize, game: bgg_model.Game) ![]const Block {
     var blocks: std.ArrayList(Block) = .empty;
     errdefer blocks.deinit(allocator);
 
-    const poll_height = if (maybe_game) |game|
-        if (game.player_count_poll) |poll| playerPollTableRenderedRowCount(poll) else 0
-    else
-        0;
-    const has_game = maybe_game != null;
+    const poll_height = if (game.player_count_poll) |poll| playerPollTableRenderedRowCount(poll) else 0;
     var poll_inserted = false;
+
+    try blocks.append(allocator, .{
+        .kind = .title,
+        .line_start = 0,
+        .line_count = 2,
+    });
+
+    var index: usize = 0;
+    while (index < metadata_rows.len) {
+        if (!poll_inserted and poll_height > 0 and std.mem.eql(u8, metadata_rows[index].label, "Players")) {
+            try blocks.append(allocator, .{
+                .kind = .metadata,
+                .line_start = index,
+                .line_count = metadata_rows[index].height(),
+            });
+            try blocks.append(allocator, .{
+                .kind = .player_poll_table,
+                .line_start = index + 1,
+                .line_count = poll_height,
+            });
+            index += 1;
+            poll_inserted = true;
+            continue;
+        }
+
+        const start = index;
+        while (index < metadata_rows.len and
+            !(!poll_inserted and poll_height > 0 and std.mem.eql(u8, metadata_rows[index].label, "Players"))) : (index += 1)
+        {}
+        try blocks.append(allocator, .{
+            .kind = .metadata,
+            .line_start = start,
+            .line_count = metadataRowsHeight(metadata_rows, start, index),
+        });
+    }
+
+    if (description_line_count > 0) {
+        try blocks.append(allocator, .{
+            .kind = .description,
+            .line_start = 0,
+            .line_count = description_line_count + 1,
+        });
+    }
+
+    return try blocks.toOwnedSlice(allocator);
+}
+
+fn metadataRowsHeight(rows: []const MetadataRow, start: usize, end: usize) usize {
+    var height: usize = 0;
+    for (rows[start..end]) |row| height += row.height();
+    return height;
+}
+
+fn buildLegacyLineBlocks(allocator: std.mem.Allocator, lines: []const []const u8) ![]const Block {
+    var blocks: std.ArrayList(Block) = .empty;
+    errdefer blocks.deinit(allocator);
 
     var index: usize = 0;
     while (index < lines.len) {
@@ -558,23 +631,7 @@ fn buildBlocksForGameOrNull(allocator: std.mem.Allocator, lines: []const []const
             continue;
         }
 
-        if (!poll_inserted and poll_height > 0 and isPlayersLine(lines[index])) {
-            try blocks.append(allocator, .{
-                .kind = .metadata,
-                .line_start = index,
-                .line_count = 1,
-            });
-            try blocks.append(allocator, .{
-                .kind = .player_poll_table,
-                .line_start = index + 1,
-                .line_count = poll_height,
-            });
-            index += 1;
-            poll_inserted = true;
-            continue;
-        }
-
-        if (!has_game and isDescriptionHeading(lines[index])) {
+        if (isDescriptionHeading(lines[index])) {
             try blocks.append(allocator, .{
                 .kind = .description,
                 .line_start = index,
@@ -595,23 +652,11 @@ fn buildBlocksForGameOrNull(allocator: std.mem.Allocator, lines: []const []const
         }
 
         const start = index;
-        while (index < lines.len and
-            !isPollTableLine(lines[index]) and
-            !isDescriptionHeading(lines[index]) and
-            !(!poll_inserted and poll_height > 0 and isPlayersLine(lines[index]))) : (index += 1)
-        {}
+        while (index < lines.len and !isPollTableLine(lines[index]) and !isDescriptionHeading(lines[index])) : (index += 1) {}
         try blocks.append(allocator, .{
             .kind = .metadata,
             .line_start = start,
             .line_count = index - start,
-        });
-    }
-
-    if (has_game and description_line_count > 0) {
-        try blocks.append(allocator, .{
-            .kind = .description,
-            .line_start = 0,
-            .line_count = description_line_count + 1,
         });
     }
 
@@ -624,6 +669,31 @@ pub fn buildViewportBlocks(allocator: std.mem.Allocator, blocks: []const Block) 
         viewport_block.* = .{ .height = block.height() };
     }
     return viewport_blocks;
+}
+
+const MetadataLine = struct {
+    label: ?[]const u8,
+    value: []const u8,
+};
+
+fn metadataLineAt(rows: []const MetadataRow, row_start: usize, line_index: usize) ?MetadataLine {
+    var remaining = line_index;
+    var row_index = row_start;
+    while (row_index < rows.len) : (row_index += 1) {
+        const row = rows[row_index];
+        const height = row.height();
+        if (remaining >= height) {
+            remaining -= height;
+            continue;
+        }
+
+        const value = if (remaining < row.value_lines.len) row.value_lines[remaining] else "";
+        return .{
+            .label = if (remaining == 0) row.label else null,
+            .value = value,
+        };
+    }
+    return null;
 }
 
 pub const LineStyles = struct {
@@ -644,11 +714,24 @@ pub fn drawBlock(surface: *chasen.Surface, state: *const State, visible: ui.Bloc
 }
 
 fn drawTitleBlock(surface: *chasen.Surface, state: *const State, block: Block, skip_rows: usize, max_rows: usize, styles: LineStyles) void {
-    drawLineBlock(surface, state, block, skip_rows, max_rows, styles, drawTitleLine);
+    _ = block;
+    _ = max_rows;
+    if (skip_rows > 0 or state.games.len == 0) return;
+    _ = surface.borrowTextAt(0, 0, state.games[0].name, styles.title);
 }
 
 fn drawMetadataBlock(surface: *chasen.Surface, state: *const State, block: Block, skip_rows: usize, max_rows: usize, styles: LineStyles) void {
-    drawLineBlock(surface, state, block, skip_rows, max_rows, styles, drawMetadataLine);
+    for (0..max_rows) |local_row| {
+        const source_index = skip_rows + local_row;
+        const row: u16 = @intCast(local_row);
+        if (row >= surface.size().height) break;
+
+        if (metadataLineAt(state.metadata_rows, block.line_start, source_index)) |line| {
+            drawMetadataLine(surface, row, line, styles);
+        } else {
+            break;
+        }
+    }
 }
 
 fn drawDescriptionBlock(surface: *chasen.Surface, state: *const State, block: Block, skip_rows: usize, max_rows: usize, styles: LineStyles) void {
@@ -666,24 +749,6 @@ fn drawDescriptionBlock(surface: *chasen.Surface, state: *const State, block: Bl
         const description_index = source_index - 1;
         if (description_index >= state.description_lines.len) break;
         _ = surface.borrowTextAt(0, row, state.description_lines[description_index], .{});
-    }
-}
-
-fn drawLineBlock(
-    surface: *chasen.Surface,
-    state: *const State,
-    block: Block,
-    skip_rows: usize,
-    max_rows: usize,
-    styles: LineStyles,
-    comptime drawLineFn: fn (*chasen.Surface, u16, usize, []const u8, LineStyles) void,
-) void {
-    for (0..max_rows) |local_row| {
-        const line_index = block.line_start + skip_rows + local_row;
-        if (line_index >= state.lines.len) break;
-        const row: u16 = @intCast(local_row);
-        if (row >= surface.size().height) break;
-        drawLineFn(surface, row, line_index - block.line_start, state.lines[line_index], styles);
     }
 }
 
@@ -719,7 +784,7 @@ fn drawPlayerPollTableBlock(surface: *chasen.Surface, state: *const State, skip_
 
 pub fn drawLine(surface: *chasen.Surface, row: u16, absolute_line_index: usize, line: []const u8, styles: LineStyles) void {
     if (absolute_line_index == 0) {
-        drawTitleLine(surface, row, absolute_line_index, line, styles);
+        _ = surface.borrowTextAt(0, row, line, styles.title);
         return;
     }
 
@@ -728,16 +793,6 @@ pub fn drawLine(surface: *chasen.Surface, row: u16, absolute_line_index: usize, 
         return;
     }
 
-    drawMetadataLine(surface, row, absolute_line_index, line, styles);
-}
-
-fn drawTitleLine(surface: *chasen.Surface, row: u16, local_line_index: usize, line: []const u8, styles: LineStyles) void {
-    _ = local_line_index;
-    _ = surface.borrowTextAt(0, row, line, styles.title);
-}
-
-fn drawMetadataLine(surface: *chasen.Surface, row: u16, local_line_index: usize, line: []const u8, styles: LineStyles) void {
-    _ = local_line_index;
     if (detailLabelLength(line)) |label_len| {
         const label = line[0..label_len];
         _ = surface.borrowTextAt(0, row, label, styles.label);
@@ -748,6 +803,13 @@ fn drawMetadataLine(surface: *chasen.Surface, row: u16, local_line_index: usize,
     _ = surface.borrowTextAt(0, row, line, .{});
 }
 
+fn drawMetadataLine(surface: *chasen.Surface, row: u16, line: MetadataLine, styles: LineStyles) void {
+    if (line.label) |label| {
+        _ = surface.borrowTextAt(0, row, label, styles.label);
+    }
+    _ = surface.borrowTextAt(metadata_value_col, row, line.value, .{});
+}
+
 pub fn lineStyle(line: []const u8) chasen.TextStyle {
     if (isDescriptionHeading(line)) return .{ .dim = true };
     return .{};
@@ -755,10 +817,6 @@ pub fn lineStyle(line: []const u8) chasen.TextStyle {
 
 fn isDescriptionHeading(line: []const u8) bool {
     return std.mem.eql(u8, line, "Description");
-}
-
-fn isPlayersLine(line: []const u8) bool {
-    return std.mem.startsWith(u8, line, "Players");
 }
 
 fn isPollTableLine(line: []const u8) bool {
@@ -854,8 +912,8 @@ test "game detail state owns loaded game result" {
     try std.testing.expect(state.load_state == .loaded);
     try std.testing.expectEqual(@as(usize, 1), state.games.len);
     try std.testing.expectEqualStrings("CATAN", state.games[0].name);
-    try std.testing.expect(state.lines.len > 4);
-    try std.testing.expectEqualStrings("CATAN", state.lines[0]);
+    try std.testing.expect(state.metadata_rows.len > 0);
+    try std.testing.expectEqualStrings("Year", state.metadata_rows[0].label);
 }
 
 test "game detail content follows field order" {
@@ -891,18 +949,23 @@ test "game detail content follows field order" {
         },
     };
 
-    const text = try buildGameDetailMetadataContent(std.testing.allocator, game, 72);
-    defer std.testing.allocator.free(text);
+    const rows = try buildGameDetailMetadataRows(std.testing.allocator, game, 72);
+    defer freeMetadataRows(std.testing.allocator, rows);
 
-    try std.testing.expect(std.mem.indexOf(u8, text, "CATAN\n\nYear         1995") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "Rating       7.14 (123,456 votes)") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "Geek Rating  6.98") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "Rank         #389") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "Players      3-4  (Recommended with 3-4 players)") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "  ┌") == null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "Weight       2.32 / 5 - Medium") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "Designer     Klaus Teuber, Someone Else") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "Description") == null);
+    try std.testing.expectEqualStrings("Year", rows[0].label);
+    try std.testing.expectEqualStrings("1995", rows[0].value_text);
+    try std.testing.expectEqualStrings("Rating", rows[1].label);
+    try std.testing.expectEqualStrings("7.14 (123,456 votes)", rows[1].value_text);
+    try std.testing.expectEqualStrings("Geek Rating", rows[2].label);
+    try std.testing.expectEqualStrings("6.98", rows[2].value_text);
+    try std.testing.expectEqualStrings("Rank", rows[3].label);
+    try std.testing.expectEqualStrings("#389", rows[3].value_text);
+    try std.testing.expectEqualStrings("Players", rows[4].label);
+    try std.testing.expectEqualStrings("3-4  (Recommended with 3-4 players)", rows[4].value_text);
+    try std.testing.expectEqualStrings("Weight", rows[6].label);
+    try std.testing.expectEqualStrings("2.32 / 5 - Medium (9,876 votes)", rows[6].value_text);
+    try std.testing.expectEqualStrings("Designer", rows[8].label);
+    try std.testing.expectEqualStrings("Klaus Teuber, Someone Else", rows[8].value_text);
 
     const description = try buildGameDetailDescriptionText(std.testing.allocator, game, 72);
     defer std.testing.allocator.free(description);
@@ -1008,54 +1071,80 @@ test "detail blocks insert poll table after players line" {
         .name = "CATAN",
         .player_count_poll = .{ .results = &poll_results },
     };
-    const lines = [_][]const u8{
-        "CATAN",
-        "",
-        "Year         1995",
-        "Players      3-4",
-        "Time         120 min",
-        "",
+    const metadata_rows = [_]MetadataRow{
+        .{ .label = "Year", .value_text = @constCast("1995"), .value_lines = &.{"1995"} },
+        .{ .label = "Players", .value_text = @constCast("3-4"), .value_lines = &.{"3-4"} },
+        .{ .label = "Time", .value_text = @constCast("120 min"), .value_lines = &.{"120 min"} },
     };
 
-    const blocks = try buildBlocksForGame(std.testing.allocator, &lines, 2, game);
+    const blocks = try buildBlocksForGame(std.testing.allocator, &metadata_rows, 2, game);
     defer std.testing.allocator.free(blocks);
 
     try std.testing.expectEqual(@as(usize, 6), blocks.len);
     try std.testing.expectEqual(Block.Kind.title, blocks[0].kind);
     try std.testing.expectEqual(Block.Kind.metadata, blocks[1].kind);
-    try std.testing.expectEqual(@as(usize, 1), blocks[1].line_start);
-    try std.testing.expectEqual(@as(usize, 2), blocks[1].line_count);
+    try std.testing.expectEqual(@as(usize, 0), blocks[1].line_start);
+    try std.testing.expectEqual(@as(usize, 1), blocks[1].line_count);
     try std.testing.expectEqual(Block.Kind.metadata, blocks[2].kind);
-    try std.testing.expectEqual(@as(usize, 3), blocks[2].line_start);
+    try std.testing.expectEqual(@as(usize, 1), blocks[2].line_start);
     try std.testing.expectEqual(@as(usize, 1), blocks[2].line_count);
     try std.testing.expectEqual(Block.Kind.player_poll_table, blocks[3].kind);
-    try std.testing.expectEqual(@as(usize, 4), blocks[3].line_start);
+    try std.testing.expectEqual(@as(usize, 2), blocks[3].line_start);
     try std.testing.expectEqual(@as(usize, 6), blocks[3].line_count);
     try std.testing.expectEqual(Block.Kind.metadata, blocks[4].kind);
-    try std.testing.expectEqual(@as(usize, 4), blocks[4].line_start);
-    try std.testing.expectEqual(@as(usize, 2), blocks[4].line_count);
+    try std.testing.expectEqual(@as(usize, 2), blocks[4].line_start);
+    try std.testing.expectEqual(@as(usize, 1), blocks[4].line_count);
     try std.testing.expectEqual(Block.Kind.description, blocks[5].kind);
     try std.testing.expectEqual(@as(usize, 0), blocks[5].line_start);
     try std.testing.expectEqual(@as(usize, 3), blocks[5].line_count);
 }
 
+test "detail metadata block height follows wrapped value lines" {
+    const metadata_rows = [_]MetadataRow{
+        .{
+            .label = "Designer",
+            .value_text = @constCast("Klaus Teuber\nReiner Knizia"),
+            .value_lines = &.{ "Klaus Teuber", "Reiner Knizia" },
+        },
+        .{
+            .label = "Artist",
+            .value_text = @constCast("Volkan Baga"),
+            .value_lines = &.{"Volkan Baga"},
+        },
+    };
+
+    const blocks = try buildBlocksForGame(std.testing.allocator, &metadata_rows, 0, .{ .id = 13, .name = "CATAN" });
+    defer std.testing.allocator.free(blocks);
+
+    try std.testing.expectEqual(@as(usize, 2), blocks.len);
+    try std.testing.expectEqual(Block.Kind.metadata, blocks[1].kind);
+    try std.testing.expectEqual(@as(usize, 0), blocks[1].line_start);
+    try std.testing.expectEqual(@as(usize, 3), blocks[1].line_count);
+
+    const first = metadataLineAt(&metadata_rows, 0, 0).?;
+    try std.testing.expectEqualStrings("Designer", first.label.?);
+    try std.testing.expectEqualStrings("Klaus Teuber", first.value);
+
+    const wrapped = metadataLineAt(&metadata_rows, 0, 1).?;
+    try std.testing.expectEqual(@as(?[]const u8, null), wrapped.label);
+    try std.testing.expectEqualStrings("Reiner Knizia", wrapped.value);
+
+    const next = metadataLineAt(&metadata_rows, 0, 2).?;
+    try std.testing.expectEqualStrings("Artist", next.label.?);
+    try std.testing.expectEqualStrings("Volkan Baga", next.value);
+}
+
 test "detail description block colors heading only" {
-    const detail_text = "CATAN";
-    const lines = try splitOwnedLines(std.testing.allocator, detail_text);
-    defer std.testing.allocator.free(lines);
     const description_text = "Trade resources.";
     const description_lines = try splitOwnedLines(std.testing.allocator, description_text);
     defer std.testing.allocator.free(description_lines);
 
     var state: State = .{
-        .rendered_text = try std.testing.allocator.dupe(u8, detail_text),
-        .lines = lines,
         .description_text = try std.testing.allocator.dupe(u8, description_text),
         .description_lines = description_lines,
-        .blocks = try buildBlocksForGame(std.testing.allocator, lines, description_lines.len, .{ .id = 13, .name = "CATAN" }),
+        .blocks = try buildBlocksForGame(std.testing.allocator, &.{}, description_lines.len, .{ .id = 13, .name = "CATAN" }),
     };
     defer {
-        std.testing.allocator.free(state.rendered_text);
         std.testing.allocator.free(state.description_text);
         std.testing.allocator.free(state.blocks);
     }
