@@ -27,7 +27,7 @@ pub const InputViewOptions = struct {
     muted_title_style: chasen.TextStyle,
     muted_style: chasen.TextStyle,
     subtle_style: chasen.TextStyle,
-    footer_items: []const chasen.key_hint.Item,
+    footer_items: []const ui.key_hint.Item,
     loading_scan_frame: u64,
 };
 
@@ -36,7 +36,7 @@ pub const ResultsViewOptions = struct {
     focused_style: chasen.TextStyle,
     muted_style: chasen.TextStyle,
     subtle_style: chasen.TextStyle,
-    footer_items: []const chasen.key_hint.Item,
+    footer_items: []const ui.key_hint.Item,
     list_density: list_view.Density,
     selection: []const u8,
     animation_frame: u64,
@@ -333,7 +333,7 @@ pub const State = struct {
             .loaded => drawGuidance(area, 4, "Search complete", "Press Enter to run a new search.", opts.muted_title_style, opts.muted_style),
         }
 
-        _ = chasen.key_hint.draw(area, 0, area.size().height -| 1, opts.footer_items, .{ .style = opts.subtle_style });
+        _ = ui.key_hint.draw(area, 0, area.size().height -| 1, opts.footer_items, .{ .style = opts.subtle_style });
     }
 
     pub fn viewResults(self: *const State, area: *chasen.Surface, opts: ResultsViewOptions) !void {
@@ -371,7 +371,7 @@ pub const State = struct {
             },
         }
 
-        _ = chasen.key_hint.draw(area, 0, area.size().height -| 1, opts.footer_items, .{ .style = opts.subtle_style });
+        _ = ui.key_hint.draw(area, 0, area.size().height -| 1, opts.footer_items, .{ .style = opts.subtle_style });
     }
 
     pub fn deinit(self: *State, allocator: std.mem.Allocator) void {

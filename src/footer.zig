@@ -1,15 +1,16 @@
 const std = @import("std");
 const chasen = @import("chasen");
+const ui = @import("chasen_ui");
 
-pub const Item = chasen.key_hint.Item;
+pub const Item = ui.key_hint.Item;
 
 pub const DrawOptions = struct {
     max_lines: u16 = 1,
-    overflow: chasen.key_hint.Overflow = .ellipsis,
+    overflow: ui.key_hint.Overflow = .ellipsis,
 };
 
 pub fn item(keys: []const u8, action: []const u8) Item {
-    return chasen.key_hint.item(keys, action);
+    return ui.key_hint.item(keys, action);
 }
 
 pub const common = struct {
@@ -30,19 +31,19 @@ pub const common = struct {
     pub const quit_esc = item("Esc/q", "quit");
 };
 
-pub fn draw(surface: *chasen.Surface, row: u16, items: []const Item, style: chasen.TextStyle, opts: DrawOptions) chasen.key_hint.DrawResult {
-    return chasen.key_hint.draw(surface, 0, row, items, drawOptions(style, opts));
+pub fn draw(surface: *chasen.Surface, row: u16, items: []const Item, style: chasen.TextStyle, opts: DrawOptions) ui.key_hint.DrawResult {
+    return ui.key_hint.draw(surface, 0, row, items, drawOptions(style, opts));
 }
 
-pub fn drawCentered(surface: *chasen.Surface, row: u16, items: []const Item, style: chasen.TextStyle, opts: DrawOptions) chasen.key_hint.DrawResult {
+pub fn drawCentered(surface: *chasen.Surface, row: u16, items: []const Item, style: chasen.TextStyle, opts: DrawOptions) ui.key_hint.DrawResult {
     const chasen_opts = drawOptions(style, opts);
-    const footer_width = chasen.key_hint.width(items, chasen_opts);
+    const footer_width = ui.key_hint.width(items, chasen_opts);
     const size = surface.size();
     const col: u16 = if (footer_width >= size.width) 0 else (size.width - footer_width) / 2;
-    return chasen.key_hint.draw(surface, col, row, items, chasen_opts);
+    return ui.key_hint.draw(surface, col, row, items, chasen_opts);
 }
 
-pub fn allocText(allocator: std.mem.Allocator, items: []const Item, opts: chasen.key_hint.DrawOptions) ![]const u8 {
+pub fn allocText(allocator: std.mem.Allocator, items: []const Item, opts: ui.key_hint.DrawOptions) ![]const u8 {
     var out: std.Io.Writer.Allocating = .init(allocator);
     defer out.deinit();
 
@@ -56,7 +57,7 @@ pub fn allocText(allocator: std.mem.Allocator, items: []const Item, opts: chasen
     return out.toOwnedSlice();
 }
 
-pub fn drawOptions(style: chasen.TextStyle, opts: DrawOptions) chasen.key_hint.DrawOptions {
+pub fn drawOptions(style: chasen.TextStyle, opts: DrawOptions) ui.key_hint.DrawOptions {
     var key_style = style;
     key_style.bold = true;
     return .{

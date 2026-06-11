@@ -2449,18 +2449,18 @@ pub const App = struct {
         return if (self.screen == .collection and self.collection.load_state == .loaded and !self.collection.status_picker and !self.collection.filter_active) 2 else 1;
     }
 
-    fn footerOverflow(self: *const App) chasen.key_hint.Overflow {
+    fn footerOverflow(self: *const App) ui.key_hint.Overflow {
         return if (self.footerMaxLines() > 1) .wrap else .ellipsis;
     }
 
-    fn drawFooter(self: *const App, area: *chasen.Surface, row: u16) chasen.key_hint.DrawResult {
+    fn drawFooter(self: *const App, area: *chasen.Surface, row: u16) ui.key_hint.DrawResult {
         return footer.draw(area, row, self.footerItems(), self.subtleStyle(), .{
             .max_lines = self.footerMaxLines(),
             .overflow = self.footerOverflow(),
         });
     }
 
-    fn drawCenteredFooter(self: *const App, area: *chasen.Surface, row: u16) chasen.key_hint.DrawResult {
+    fn drawCenteredFooter(self: *const App, area: *chasen.Surface, row: u16) ui.key_hint.DrawResult {
         return footer.drawCentered(area, row, self.footerItems(), self.subtleStyle(), .{
             .max_lines = self.footerMaxLines(),
             .overflow = self.footerOverflow(),

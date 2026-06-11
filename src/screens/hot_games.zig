@@ -44,7 +44,7 @@ pub const ViewOptions = struct {
     muted_style: chasen.TextStyle,
     subtle_style: chasen.TextStyle,
     accent: chasen.Color,
-    footer_items: []const chasen.key_hint.Item,
+    footer_items: []const ui.key_hint.Item,
     list_density: list_view.Density,
     selection: []const u8,
     animation_frame: u64,
@@ -382,7 +382,7 @@ pub const State = struct {
             },
         };
 
-        _ = chasen.key_hint.draw(area, 0, area.size().height -| 1, opts.footer_items, .{ .style = opts.subtle_style });
+        _ = ui.key_hint.draw(area, 0, area.size().height -| 1, opts.footer_items, .{ .style = opts.subtle_style });
         return image_rect;
     }
 
