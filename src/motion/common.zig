@@ -5,10 +5,7 @@ pub const transition_edge_color = chasen.Color{ .rgb = .{ 0x4e, 0xcd, 0xc4 } };
 pub const glitch_chars = [_][]const u8{ "@", "#", "$", "%", "&", "*", "!", "?", "+", "=", "~", "^", "x", "X", "░", "▒", "▓", "█" };
 
 pub fn isVisibleSingleWidthCell(cell: anytype) bool {
-    if (cell.default) return false;
-    if (cell.char.grapheme.len == 0) return false;
-    if (std.mem.eql(u8, cell.char.grapheme, " ")) return false;
-    return cell.char.width == 1;
+    return cell.isVisibleText() and cell.char.width == 1;
 }
 
 pub fn clearCell(surface: *chasen.Surface, col: u16, row: u16) void {
@@ -22,7 +19,7 @@ pub fn clearRowRange(surface: *chasen.Surface, row: u16, col: u16, width: u16) v
 
 pub fn copyCellOrClear(surface: *chasen.Surface, source_col: u16, target_col: u16, row: u16) void {
     if (surface.readCell(source_col, row)) |cell| {
-        if (!cell.default and cell.char.width == 1) {
+        if (!cell.isBlank() and cell.char.width == 1) {
             surface.writeCell(target_col, row, cell);
             return;
         }

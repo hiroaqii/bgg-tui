@@ -5,6 +5,9 @@ const common = @import("common.zig");
 
 const code_rain_chars = [_][]const u8{ "0", "1", "3", "7", "9", "A", "B", "C", "D", "E", "F", "$", "#", "@", "%", "&", "+", "=", "░", "▒", "▓" };
 
+// Transitions operate on Chasen-owned text/style cells. Backend metadata such
+// as terminal image placement is intentionally outside this lossy boundary, so
+// screens with images must redraw their image placements after transition work.
 pub fn applyScreenTransition(surface: *chasen.Surface, transition: anim.Transition) void {
     switch (transition.kind) {
         .code_rain => applyCodeRainTransition(surface, transition),
@@ -29,7 +32,7 @@ fn applyScanlineTransition(surface: *chasen.Surface, progress: f32) void {
 
     const scan_position: u16 = @intFromFloat(@floor(anim.ease.clamp01(progress) * @as(f32, @floatFromInt(size.height + 1))));
     if (scan_position < size.height) {
-        const style = (chasen.TextStyle{ .fg = common.transition_edge_color, .bold = true }).toVaxis();
+        const style = chasen.TextStyle{ .fg = common.transition_edge_color, .bold = true };
         styleRow(surface, scan_position, style);
         surface.clear(.{
             .col = 0,
@@ -45,7 +48,7 @@ fn styleRow(surface: *chasen.Surface, row: u16, style: anytype) void {
     var col: u16 = 0;
     while (col < size.width) : (col += 1) {
         var cell = surface.readCell(col, row) orelse continue;
-        if (cell.default) continue;
+        if (cell.isBlank()) continue;
         cell.style = style;
         surface.writeCell(col, row, cell);
     }
@@ -77,14 +80,14 @@ fn dissolveThreshold(row: u16, col: u16) f32 {
 
 fn applyFadeTransition(surface: *chasen.Surface, progress: f32) void {
     const size = surface.size();
-    const style = (chasen.TextStyle{ .fg = .{ .index = fadeGrayIndex(progress) } }).toVaxis();
+    const style = chasen.TextStyle{ .fg = .{ .index = fadeGrayIndex(progress) } };
 
     var row: u16 = 0;
     while (row < size.height) : (row += 1) {
         var col: u16 = 0;
         while (col < size.width) : (col += 1) {
             var cell = surface.readCell(col, row) orelse continue;
-            if (cell.default) continue;
+            if (cell.isBlank()) continue;
             // Match the Go version's string post-processing: ANSI styling is
             // stripped, then the whole visible frame is rendered in grayscale.
             cell.style = style;
@@ -103,7 +106,7 @@ fn applyGlitchTransition(surface: *chasen.Surface, transition: anim.Transition) 
     const size = surface.size();
     const threshold = transitionGlitchThreshold(transition.progress());
     const tick = transition.frame / 5;
-    const style = (chasen.TextStyle{ .fg = common.transition_edge_color }).toVaxis();
+    const style = chasen.TextStyle{ .fg = common.transition_edge_color };
 
     var row: u16 = 0;
     while (row < size.height) : (row += 1) {
@@ -161,7 +164,7 @@ fn applyCodeRainTransition(surface: *chasen.Surface, transition: anim.Transition
             }
 
             cell.char.grapheme = codeRainReplacement(transition.frame, row, col);
-            cell.style = codeRainStyle(progress, transition.frame, row, col, size.height).toVaxis();
+            cell.style = codeRainStyle(progress, transition.frame, row, col, size.height);
             surface.writeCell(col, row, cell);
         }
     }
@@ -232,7 +235,7 @@ fn lineContentWidth(surface: *chasen.Surface, row: u16) u16 {
     var col: u16 = 0;
     while (col < size.width) : (col += 1) {
         const cell = surface.readCell(col, row) orelse continue;
-        if (cell.default or cell.char.grapheme.len == 0 or std.mem.eql(u8, cell.char.grapheme, " ")) continue;
+        if (cell.isBlank()) continue;
         width = @max(width, col +| cell.char.width);
     }
     return width;
@@ -282,7 +285,7 @@ fn applySpiralTransition(surface: *chasen.Surface, progress: f32) void {
 
     const clamped = anim.ease.clamp01(progress);
     if (clamped >= 1.0) return;
-    const edge_style = (chasen.TextStyle{ .fg = common.transition_edge_color, .bold = true }).toVaxis();
+    const edge_style = chasen.TextStyle{ .fg = common.transition_edge_color, .bold = true };
 
     var row: u16 = 0;
     while (row < size.height) : (row += 1) {

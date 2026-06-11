@@ -923,9 +923,9 @@ test "detail semantic blocks color title and metadata labels" {
         .row = 2,
     }, styles);
 
-    try std.testing.expect(ts.surface.readCell(0, 0).?.style.fg.eql(accent.toVaxis()));
-    try std.testing.expect(ts.surface.readCell(0, 2).?.style.fg.eql(accent.toVaxis()));
-    try std.testing.expect(!ts.surface.readCell(metadata_value_col, 2).?.style.fg.eql(accent.toVaxis()));
+    try std.testing.expect(ts.surface.readCell(0, 0).?.style.fg.eql(accent));
+    try std.testing.expect(ts.surface.readCell(0, 2).?.style.fg.eql(accent));
+    try std.testing.expect(!ts.surface.readCell(metadata_value_col, 2).?.style.fg.eql(accent));
 }
 
 test "detail blocks insert poll table after players line" {
@@ -1031,8 +1031,8 @@ test "detail description block colors heading only" {
         .label = .{ .fg = accent, .bold = true },
     });
 
-    try std.testing.expect(ts.surface.readCell(0, 0).?.style.fg.eql(accent.toVaxis()));
-    try std.testing.expect(!ts.surface.readCell(0, 1).?.style.fg.eql(accent.toVaxis()));
+    try std.testing.expect(ts.surface.readCell(0, 0).?.style.fg.eql(accent));
+    try std.testing.expect(!ts.surface.readCell(0, 1).?.style.fg.eql(accent));
 }
 
 test "detail poll table block draws recommendation markers" {
@@ -1095,7 +1095,7 @@ fn expectStyledStarOnRow(surface: *const chasen.Surface, row: u16, color: chasen
     while (col < surface.size().width) : (col += 1) {
         const cell = surface.readCell(col, row) orelse continue;
         if (!std.mem.eql(u8, cell.char.grapheme, "★")) continue;
-        try std.testing.expect(cell.style.fg.eql(color.toVaxis()));
+        try std.testing.expect(cell.style.fg.eql(color));
         return;
     }
     return error.TestExpectedStyledStar;
