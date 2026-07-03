@@ -1318,7 +1318,7 @@ pub const App = struct {
 
         self.hot_games.setLoading();
         self.beginLoadingMotion(ctx);
-        ctx.task().spawnWith(task, HotGamesTask.run) catch |err| {
+        ctx.task().spawnWith(.{ .ctx = task, .run = HotGamesTask.run, .failed = HotGamesTask.failed }) catch |err| {
             self.hot_games.setFailed("Could not start hot games loading task");
             return err;
         };
@@ -1351,7 +1351,7 @@ pub const App = struct {
         };
         errdefer ctx.allocator().free(task.token);
 
-        ctx.task().spawnWith(task, HotGameStatsTask.run) catch |err| {
+        ctx.task().spawnWith(.{ .ctx = task, .run = HotGameStatsTask.run, .failed = HotGameStatsTask.failed }) catch |err| {
             return err;
         };
     }
@@ -1403,7 +1403,7 @@ pub const App = struct {
         self.search.setLoading(self.allocator.?);
         self.switchScreenWithoutTransition(.search_results);
         self.beginLoadingMotion(ctx);
-        ctx.task().spawnWith(task, SearchTask.run) catch |err| {
+        ctx.task().spawnWith(.{ .ctx = task, .run = SearchTask.run, .failed = SearchTask.failed }) catch |err| {
             self.search.setFailed(self.allocator.?, "Could not start search task");
             return err;
         };
@@ -1461,7 +1461,7 @@ pub const App = struct {
         self.collection.setLoading(self.allocator.?);
         self.switchScreenWithoutTransition(.collection);
         self.beginLoadingMotion(ctx);
-        ctx.task().spawnWith(task, CollectionTask.run) catch |err| {
+        ctx.task().spawnWith(.{ .ctx = task, .run = CollectionTask.run, .failed = CollectionTask.failed }) catch |err| {
             self.collection.setFailed(self.allocator.?, "Could not start collection loading task");
             return err;
         };
@@ -1513,7 +1513,7 @@ pub const App = struct {
         self.game_detail.setLoading(self.allocator.?);
         self.switchScreenWithoutTransition(.game_detail);
         self.beginLoadingMotion(ctx);
-        ctx.task().spawnWith(task, GameDetailTask.run) catch |err| {
+        ctx.task().spawnWith(.{ .ctx = task, .run = GameDetailTask.run, .failed = GameDetailTask.failed }) catch |err| {
             self.game_detail.setFailed("Could not start game detail task");
             return err;
         };
@@ -1574,7 +1574,7 @@ pub const App = struct {
         errdefer ctx.allocator().free(task.url);
 
         self.game_detail.setImageLoading(self.allocator.?);
-        ctx.task().spawnWith(task, GameDetailImageTask.run) catch |err| {
+        ctx.task().spawnWith(.{ .ctx = task, .run = GameDetailImageTask.run, .failed = GameDetailImageTask.failed }) catch |err| {
             self.game_detail.setImageFailed(self.allocator.?, "Could not start image cache task");
             return err;
         };
@@ -1725,7 +1725,7 @@ pub const App = struct {
         errdefer ctx.allocator().free(task.url);
 
         self.list_image.cache_task_pending = true;
-        ctx.task().spawnWith(task, ListImageTask.run) catch |err| {
+        ctx.task().spawnWith(.{ .ctx = task, .run = ListImageTask.run, .failed = ListImageTask.failed }) catch |err| {
             self.list_image.cache_task_pending = false;
             self.list_image.setImageFailed(self.allocator.?, "Could not start image cache task");
             return err;
@@ -1845,7 +1845,7 @@ pub const App = struct {
         errdefer ctx.allocator().destroy(task);
         task.* = .{ .url = url, .request_id = request_id, .target = .game_detail };
 
-        ctx.task().spawnWith(task, BrowserOpenTask.run) catch |err| {
+        ctx.task().spawnWith(.{ .ctx = task, .run = BrowserOpenTask.run, .failed = BrowserOpenTask.failed }) catch |err| {
             ctx.allocator().free(url);
             return err;
         };
@@ -1876,7 +1876,7 @@ pub const App = struct {
         };
         errdefer ctx.allocator().free(task.token);
 
-        ctx.task().spawnWith(task, ForumListTask.run) catch |err| {
+        ctx.task().spawnWith(.{ .ctx = task, .run = ForumListTask.run, .failed = ForumListTask.failed }) catch |err| {
             self.forums.setFailed("Could not start forum loading task");
             return err;
         };
@@ -1936,7 +1936,7 @@ pub const App = struct {
         };
         errdefer ctx.allocator().free(task.token);
 
-        ctx.task().spawnWith(task, ForumThreadsTask.run) catch |err| {
+        ctx.task().spawnWith(.{ .ctx = task, .run = ForumThreadsTask.run, .failed = ForumThreadsTask.failed }) catch |err| {
             self.forums.setFailed("Could not start thread list loading task");
             return err;
         };
@@ -1991,7 +1991,7 @@ pub const App = struct {
         };
         errdefer ctx.allocator().free(task.token);
 
-        ctx.task().spawnWith(task, ThreadTask.run) catch |err| {
+        ctx.task().spawnWith(.{ .ctx = task, .run = ThreadTask.run, .failed = ThreadTask.failed }) catch |err| {
             self.thread.setFailed("Could not start thread loading task");
             return err;
         };
@@ -2035,7 +2035,7 @@ pub const App = struct {
         errdefer ctx.allocator().destroy(task);
         task.* = .{ .url = url, .request_id = request_id, .target = .thread };
 
-        ctx.task().spawnWith(task, BrowserOpenTask.run) catch |err| {
+        ctx.task().spawnWith(.{ .ctx = task, .run = BrowserOpenTask.run, .failed = BrowserOpenTask.failed }) catch |err| {
             ctx.allocator().free(url);
             return err;
         };
@@ -2636,6 +2636,15 @@ const HotGamesTask = struct {
 
         return .{ .hot_games = .{ .loaded = task_bgg.loadHotGames(allocator, io, task.token) catch |err| .{ .failed = @errorName(err) } } };
     }
+
+    fn failed(ctx_ptr: *anyopaque, failure: chasen.TaskFailure, allocator: std.mem.Allocator) App.Msg {
+        const task: *HotGamesTask = @ptrCast(@alignCast(ctx_ptr));
+        defer {
+            allocator.free(task.token);
+            allocator.destroy(task);
+        }
+        return .{ .hot_games = .{ .loaded = .{ .failed = taskFailureMessage(failure) } } };
+    }
 };
 
 const HotGameStatsTask = struct {
@@ -2654,6 +2663,19 @@ const HotGameStatsTask = struct {
         return .{ .hot_games = .{ .stats_loaded = .{
             .request_id = task.request_id,
             .result = task_bgg.loadHotGameStats(allocator, io, task.token, task.ids) catch |err| .{ .failed = @errorName(err) },
+        } } };
+    }
+
+    fn failed(ctx_ptr: *anyopaque, failure: chasen.TaskFailure, allocator: std.mem.Allocator) App.Msg {
+        const task: *HotGameStatsTask = @ptrCast(@alignCast(ctx_ptr));
+        defer {
+            allocator.free(task.token);
+            allocator.free(task.ids);
+            allocator.destroy(task);
+        }
+        return .{ .hot_games = .{ .stats_loaded = .{
+            .request_id = task.request_id,
+            .result = .{ .failed = taskFailureMessage(failure) },
         } } };
     }
 };
@@ -2676,6 +2698,19 @@ const SearchTask = struct {
             .result = task_bgg.loadSearchResults(allocator, io, task.token, task.query) catch |err| .{ .failed = @errorName(err) },
         } } };
     }
+
+    fn failed(ctx_ptr: *anyopaque, failure: chasen.TaskFailure, allocator: std.mem.Allocator) App.Msg {
+        const task: *SearchTask = @ptrCast(@alignCast(ctx_ptr));
+        defer {
+            allocator.free(task.token);
+            allocator.free(task.query);
+            allocator.destroy(task);
+        }
+        return .{ .search = .{ .results_loaded = .{
+            .request_id = task.request_id,
+            .result = .{ .failed = taskFailureMessage(failure) },
+        } } };
+    }
 };
 
 const CollectionTask = struct {
@@ -2696,6 +2731,19 @@ const CollectionTask = struct {
             .result = task_bgg.loadCollectionItems(allocator, io, task.token, task.username) catch |err| .{ .failed = @errorName(err) },
         } } };
     }
+
+    fn failed(ctx_ptr: *anyopaque, failure: chasen.TaskFailure, allocator: std.mem.Allocator) App.Msg {
+        const task: *CollectionTask = @ptrCast(@alignCast(ctx_ptr));
+        defer {
+            allocator.free(task.token);
+            allocator.free(task.username);
+            allocator.destroy(task);
+        }
+        return .{ .collection = .{ .items_loaded = .{
+            .request_id = task.request_id,
+            .result = .{ .failed = taskFailureMessage(failure) },
+        } } };
+    }
 };
 
 const GameDetailTask = struct {
@@ -2713,6 +2761,18 @@ const GameDetailTask = struct {
         return .{ .game_detail = .{ .loaded = .{
             .request_id = task.request_id,
             .result = task_bgg.loadGameDetail(allocator, io, task.token, task.game_id) catch |err| .{ .failed = @errorName(err) },
+        } } };
+    }
+
+    fn failed(ctx_ptr: *anyopaque, failure: chasen.TaskFailure, allocator: std.mem.Allocator) App.Msg {
+        const task: *GameDetailTask = @ptrCast(@alignCast(ctx_ptr));
+        defer {
+            allocator.free(task.token);
+            allocator.destroy(task);
+        }
+        return .{ .game_detail = .{ .loaded = .{
+            .request_id = task.request_id,
+            .result = .{ .failed = taskFailureMessage(failure) },
         } } };
     }
 };
@@ -2742,6 +2802,19 @@ const GameDetailImageTask = struct {
             .result = .{ .ok = cached.path },
         } } };
     }
+
+    fn failed(ctx_ptr: *anyopaque, failure: chasen.TaskFailure, allocator: std.mem.Allocator) App.Msg {
+        const task: *GameDetailImageTask = @ptrCast(@alignCast(ctx_ptr));
+        defer {
+            allocator.free(task.cache_dir);
+            allocator.free(task.url);
+            allocator.destroy(task);
+        }
+        return .{ .game_detail = .{ .image_cached = .{
+            .request_id = task.request_id,
+            .result = .{ .failed = taskFailureMessage(failure) },
+        } } };
+    }
 };
 
 const ListImageTask = struct {
@@ -2767,6 +2840,19 @@ const ListImageTask = struct {
         return .{ .list_image = .{ .image_cached = .{
             .request_id = task.request_id,
             .result = .{ .ok = cached.path },
+        } } };
+    }
+
+    fn failed(ctx_ptr: *anyopaque, failure: chasen.TaskFailure, allocator: std.mem.Allocator) App.Msg {
+        const task: *ListImageTask = @ptrCast(@alignCast(ctx_ptr));
+        defer {
+            allocator.free(task.cache_dir);
+            allocator.free(task.url);
+            allocator.destroy(task);
+        }
+        return .{ .list_image = .{ .image_cached = .{
+            .request_id = task.request_id,
+            .result = .{ .failed = taskFailureMessage(failure) },
         } } };
     }
 };
@@ -2816,6 +2902,18 @@ const ForumListTask = struct {
             .result = task_bgg.loadForumList(allocator, io, task.token, task.game_id) catch |err| .{ .failed = @errorName(err) },
         } } };
     }
+
+    fn failed(ctx_ptr: *anyopaque, failure: chasen.TaskFailure, allocator: std.mem.Allocator) App.Msg {
+        const task: *ForumListTask = @ptrCast(@alignCast(ctx_ptr));
+        defer {
+            allocator.free(task.token);
+            allocator.destroy(task);
+        }
+        return .{ .forum = .{ .loaded = .{
+            .request_id = task.request_id,
+            .result = .{ .failed = taskFailureMessage(failure) },
+        } } };
+    }
 };
 
 const ForumThreadsTask = struct {
@@ -2836,6 +2934,18 @@ const ForumThreadsTask = struct {
             .result = task_bgg.loadForumThreads(allocator, io, task.token, task.forum_id, task.page) catch |err| .{ .failed = @errorName(err) },
         } } };
     }
+
+    fn failed(ctx_ptr: *anyopaque, failure: chasen.TaskFailure, allocator: std.mem.Allocator) App.Msg {
+        const task: *ForumThreadsTask = @ptrCast(@alignCast(ctx_ptr));
+        defer {
+            allocator.free(task.token);
+            allocator.destroy(task);
+        }
+        return .{ .forum = .{ .threads_loaded = .{
+            .request_id = task.request_id,
+            .result = .{ .failed = taskFailureMessage(failure) },
+        } } };
+    }
 };
 
 const ThreadTask = struct {
@@ -2853,6 +2963,18 @@ const ThreadTask = struct {
         return .{ .thread = .{ .loaded = .{
             .request_id = task.request_id,
             .result = task_bgg.loadThread(allocator, io, task.token, task.thread_id) catch |err| .{ .failed = @errorName(err) },
+        } } };
+    }
+
+    fn failed(ctx_ptr: *anyopaque, failure: chasen.TaskFailure, allocator: std.mem.Allocator) App.Msg {
+        const task: *ThreadTask = @ptrCast(@alignCast(ctx_ptr));
+        defer {
+            allocator.free(task.token);
+            allocator.destroy(task);
+        }
+        return .{ .thread = .{ .loaded = .{
+            .request_id = task.request_id,
+            .result = .{ .failed = taskFailureMessage(failure) },
         } } };
     }
 };
@@ -2882,7 +3004,24 @@ const BrowserOpenTask = struct {
             .result = .ok,
         } } };
     }
+
+    fn failed(ctx_ptr: *anyopaque, _: chasen.TaskFailure, allocator: std.mem.Allocator) App.Msg {
+        const task: *BrowserOpenTask = @ptrCast(@alignCast(ctx_ptr));
+        defer allocator.destroy(task);
+
+        return .{ .browser = .{ .opened = .{
+            .request_id = task.request_id,
+            .target = task.target,
+            .result = .{ .failed = task.url },
+        } } };
+    }
 };
+
+fn taskFailureMessage(failure: chasen.TaskFailure) []const u8 {
+    return switch (failure) {
+        .start_failed => |message| message,
+    };
+}
 
 fn drawDescriptionPreview(surface: *chasen.Surface, description: []const u8) void {
     const size = surface.size();
