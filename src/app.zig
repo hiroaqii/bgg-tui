@@ -3151,13 +3151,12 @@ fn detailLayoutForTerminal(self: *const App) screens.detail.Layout {
 }
 
 fn freePendingHotGameStatsTasks(ctx: *chasen.Ctx(App.Msg)) void {
-    for (ctx.pendingTaskWithSlice()) |entry| {
+    for (ctx.takePendingTasksWith()) |entry| {
         const task: *HotGameStatsTask = @ptrCast(@alignCast(entry.ctx));
         ctx.allocator().free(task.token);
         ctx.allocator().free(task.ids);
         ctx.allocator().destroy(task);
     }
-    ctx.pending_tasks_with_len = 0;
 }
 
 fn screenForMenuIndex(index: usize) ?Screen {
@@ -3627,7 +3626,7 @@ test "search query shorter than three characters fails before spawning task" {
     try app.startSearch(&tc.ctx);
 
     try std.testing.expect(app.search.load_state == .failed);
-    try std.testing.expectEqual(@as(u8, 0), tc.ctx.pending_tasks_with_len);
+    try std.testing.expectEqual(@as(u8, 0), tc.ctx._pending_tasks_with_len);
 }
 
 test "collection empty username fails before spawning task" {
@@ -3640,7 +3639,7 @@ test "collection empty username fails before spawning task" {
     try app.startCollectionLoad(&tc.ctx);
 
     try std.testing.expect(app.collection.load_state == .failed);
-    try std.testing.expectEqual(@as(u8, 0), tc.ctx.pending_tasks_with_len);
+    try std.testing.expectEqual(@as(u8, 0), tc.ctx._pending_tasks_with_len);
 }
 
 test "collection status filter initializes from config" {
@@ -3741,7 +3740,7 @@ test "collection status picker toggles multiple statuses without request" {
     try std.testing.expectEqual(screens.collection.statusBit(0) | screens.collection.statusBit(6), app.collection.status_mask);
     try std.testing.expectEqual(screens.collection.statusBit(0) | screens.collection.statusBit(6), app.config.collection.status_filter.mask);
     try std.testing.expectEqual(@as(usize, 3), app.collection.items.len);
-    try std.testing.expectEqual(@as(u8, 0), tc.ctx.pending_tasks_with_len);
+    try std.testing.expectEqual(@as(u8, 0), tc.ctx._pending_tasks_with_len);
 
     app.collection.status_cursor = screens.collection.status_clear_index;
     try app.updateCollection(.status_toggle, &tc.ctx);
@@ -3749,7 +3748,7 @@ test "collection status picker toggles multiple statuses without request" {
     try std.testing.expectEqual(@as(u8, 0), app.collection.status_mask);
     try std.testing.expectEqual(@as(u8, 0), app.config.collection.status_filter.mask);
     try std.testing.expectEqual(@as(usize, 3), app.collection.items.len);
-    try std.testing.expectEqual(@as(u8, 0), tc.ctx.pending_tasks_with_len);
+    try std.testing.expectEqual(@as(u8, 0), tc.ctx._pending_tasks_with_len);
 }
 
 test "changing collection user clears loaded state and invalidates tasks" {
@@ -4291,7 +4290,7 @@ test "settings interface cycle fields update supported values" {
     try std.testing.expect(app.hasActiveScreenTransition());
     try std.testing.expectEqual(Screen.setup_token, app.transition_from_screen.?);
     try std.testing.expectEqual(Screen.setup_token, app.transition_to_screen.?);
-    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expect(tc.ctx._frame_requested);
     try app.cycleSettingsField(&tc.ctx, .selection);
     try std.testing.expectEqualStrings("invert", app.config.interface.selection);
     try app.cycleSettingsField(&tc.ctx, .border_style);
@@ -4418,17 +4417,17 @@ test "settings transition picker previews without committing or starting real tr
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
     try app.update(.{ .settings = .{ .picker_open = .transition } }, &tc.ctx);
-    try std.testing.expect(!tc.ctx.frame_requested);
+    try std.testing.expect(!tc.ctx._frame_requested);
 
     try app.update(.{ .settings = .picker_move_next }, &tc.ctx);
 
-    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expect(tc.ctx._frame_requested);
     try std.testing.expectEqualStrings("none", app.config.interface.transition);
     try std.testing.expect(!app.hasActiveScreenTransition());
 
     tc.resetTransient();
     try app.update(.{ .frame = .{ .now_ns = 100, .delta_ns = 16, .index = 1 } }, &tc.ctx);
-    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expect(tc.ctx._frame_requested);
     try std.testing.expectEqualStrings("none", app.config.interface.transition);
     try std.testing.expect(!app.hasActiveScreenTransition());
 
@@ -4438,7 +4437,7 @@ test "settings transition picker previews without committing or starting real tr
     try std.testing.expect(!app.settings.pickerOpen());
     try std.testing.expectEqualStrings("none", app.config.interface.transition);
     try std.testing.expect(!app.hasActiveScreenTransition());
-    try std.testing.expect(!tc.ctx.frame_requested);
+    try std.testing.expect(!tc.ctx._frame_requested);
 }
 
 test "settings transition picker confirm commits and starts real transition" {
@@ -4457,7 +4456,7 @@ test "settings transition picker confirm commits and starts real transition" {
     try std.testing.expect(app.hasActiveScreenTransition());
     try std.testing.expectEqual(Screen.settings, app.transition_from_screen.?);
     try std.testing.expectEqual(Screen.settings, app.transition_to_screen.?);
-    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expect(tc.ctx._frame_requested);
 }
 
 test "settings selection picker previews and requests frames only when animated" {
@@ -4466,15 +4465,15 @@ test "settings selection picker previews and requests frames only when animated"
 
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
     try app.update(.{ .settings = .{ .picker_open = .selection } }, &tc.ctx);
-    try std.testing.expect(!tc.ctx.frame_requested);
+    try std.testing.expect(!tc.ctx._frame_requested);
 
     try app.update(.{ .settings = .picker_move_next }, &tc.ctx);
-    try std.testing.expect(!tc.ctx.frame_requested);
+    try std.testing.expect(!tc.ctx._frame_requested);
     try std.testing.expectEqualStrings("none", app.config.interface.selection);
     try std.testing.expectEqualStrings("invert", app.effectiveRenderConfig().interface.selection);
 
     try app.update(.{ .settings = .picker_move_next }, &tc.ctx);
-    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expect(tc.ctx._frame_requested);
     try std.testing.expectEqualStrings("none", app.config.interface.selection);
     try std.testing.expectEqualStrings("wave", app.effectiveRenderConfig().interface.selection);
 
@@ -4500,7 +4499,7 @@ test "settings selection picker confirm commits animated selection and requests 
 
     try std.testing.expect(!app.settings.pickerOpen());
     try std.testing.expectEqualStrings("wave", app.config.interface.selection);
-    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expect(tc.ctx._frame_requested);
 }
 
 test "settings list density and date format pickers commit selected values" {
@@ -4553,12 +4552,12 @@ test "animated selection requests animation frames" {
     try app.init(&tc.ctx);
     defer app.deinitOwnedState();
 
-    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expect(tc.ctx._frame_requested);
 
     tc.resetTransient();
     try app.update(.{ .frame = .{ .now_ns = 100, .delta_ns = 16, .index = 15 } }, &tc.ctx);
     try std.testing.expectEqual(@as(u64, 15), app.animation_frame);
-    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expect(tc.ctx._frame_requested);
 }
 
 test "non-animated selection does not request animation frames" {
@@ -4568,7 +4567,7 @@ test "non-animated selection does not request animation frames" {
     try app.init(&tc.ctx);
     defer app.deinitOwnedState();
 
-    try std.testing.expect(!tc.ctx.frame_requested);
+    try std.testing.expect(!tc.ctx._frame_requested);
 }
 
 test "none screen transition uses routing path without requesting frames" {
@@ -4583,7 +4582,7 @@ test "none screen transition uses routing path without requesting frames" {
 
     try std.testing.expectEqual(Screen.search, app.screen);
     try std.testing.expect(!app.hasActiveScreenTransition());
-    try std.testing.expect(!tc.ctx.frame_requested);
+    try std.testing.expect(!tc.ctx._frame_requested);
 }
 
 test "sweep screen transition requests frames until completion" {
@@ -4600,7 +4599,7 @@ test "sweep screen transition requests frames until completion" {
     try std.testing.expectEqual(anim.TransitionKind.sweep, app.screen_transition.kind);
     try std.testing.expectEqual(Screen.main_menu, app.transition_from_screen.?);
     try std.testing.expectEqual(Screen.settings, app.transition_to_screen.?);
-    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expect(tc.ctx._frame_requested);
 
     var frame_index: u64 = 1;
     while (app.hasActiveScreenTransition()) : (frame_index += 1) {
@@ -4611,7 +4610,7 @@ test "sweep screen transition requests frames until completion" {
     try std.testing.expectEqual(anim.TransitionKind.none, app.screen_transition.kind);
     try std.testing.expect(app.transition_from_screen == null);
     try std.testing.expect(app.transition_to_screen == null);
-    try std.testing.expect(!tc.ctx.frame_requested);
+    try std.testing.expect(!tc.ctx._frame_requested);
 }
 
 test "prepared screen entry keeps target state before transition starts" {
@@ -4661,7 +4660,7 @@ test "content transition can start within the current screen" {
     try std.testing.expectEqual(anim.TransitionKind.sweep, app.screen_transition.kind);
     try std.testing.expectEqual(Screen.game_detail, app.transition_from_screen.?);
     try std.testing.expectEqual(Screen.game_detail, app.transition_to_screen.?);
-    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expect(tc.ctx._frame_requested);
 }
 
 test "content transition only starts when target screen is visible" {
@@ -4676,7 +4675,7 @@ test "content transition only starts when target screen is visible" {
     app.startContentTransitionIfVisible(&tc.ctx, .game_detail);
 
     try std.testing.expect(!app.hasActiveScreenTransition());
-    try std.testing.expect(!tc.ctx.frame_requested);
+    try std.testing.expect(!tc.ctx._frame_requested);
 
     app.screen = .game_detail;
     app.startContentTransitionIfVisible(&tc.ctx, .game_detail);
@@ -4699,7 +4698,7 @@ test "game detail loading enters without screen transition" {
     tc.resetTransient();
     try app.startGameDetail(&tc.ctx, 13, .hot_games);
     defer {
-        const task: *GameDetailTask = @ptrCast(@alignCast(tc.ctx.pendingTaskWithSlice()[0].ctx));
+        const task: *GameDetailTask = @ptrCast(@alignCast(tc.ctx._pending_tasks_with[0..tc.ctx._pending_tasks_with_len][0].ctx));
         std.testing.allocator.free(task.token);
         std.testing.allocator.destroy(task);
     }
@@ -4707,8 +4706,8 @@ test "game detail loading enters without screen transition" {
     try std.testing.expectEqual(Screen.game_detail, app.screen);
     try std.testing.expect(app.game_detail.load_state == .loading);
     try std.testing.expect(!app.hasActiveScreenTransition());
-    try std.testing.expect(tc.ctx.frame_requested);
-    try std.testing.expectEqual(@as(u8, 1), tc.ctx.pending_tasks_with_len);
+    try std.testing.expect(tc.ctx._frame_requested);
+    try std.testing.expectEqual(@as(u8, 1), tc.ctx._pending_tasks_with_len);
 }
 
 test "game detail load completion starts content transition when visible" {
@@ -4730,7 +4729,7 @@ test "game detail load completion starts content transition when visible" {
     try std.testing.expect(app.hasActiveScreenTransition());
     try std.testing.expectEqual(Screen.game_detail, app.transition_from_screen.?);
     try std.testing.expectEqual(Screen.game_detail, app.transition_to_screen.?);
-    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expect(tc.ctx._frame_requested);
 }
 
 test "game detail load completion stores hidden result without transition" {
@@ -4750,7 +4749,7 @@ test "game detail load completion stores hidden result without transition" {
 
     try std.testing.expect(app.game_detail.load_state == .loaded);
     try std.testing.expect(!app.hasActiveScreenTransition());
-    try std.testing.expect(!tc.ctx.frame_requested);
+    try std.testing.expect(!tc.ctx._frame_requested);
 }
 
 test "game detail image url prefers thumbnail over full image" {
@@ -4805,7 +4804,7 @@ test "game detail skips unsupported cover formats before cache task" {
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
     try app.startGameDetailImageCache(&tc.ctx);
 
-    try std.testing.expectEqual(@as(usize, 0), tc.ctx.pendingTaskWithSlice().len);
+    try std.testing.expectEqual(@as(usize, 0), tc.ctx._pending_tasks_with[0..tc.ctx._pending_tasks_with_len].len);
     switch (app.game_detail.image_state) {
         .failed => |message| try std.testing.expectEqualStrings("WebP covers not supported yet", message),
         else => return error.TestExpectedEqual,
@@ -4832,7 +4831,7 @@ test "hot list image preview reports unsupported WebP thumbnail without cache ta
     };
     try app.syncListImagePreview(&tc.ctx);
 
-    try std.testing.expectEqual(@as(usize, 0), tc.ctx.pendingTaskWithSlice().len);
+    try std.testing.expectEqual(@as(usize, 0), tc.ctx._pending_tasks_with[0..tc.ctx._pending_tasks_with_len].len);
     switch (app.list_image.image_state) {
         .failed => |message| try std.testing.expectEqualStrings("WebP covers not supported yet", message),
         else => return error.TestExpectedEqual,
@@ -4858,20 +4857,20 @@ test "hot list image preview waits before uncached PNG download" {
         .ctx = .{ ._allocator = std.testing.allocator, ._io = std.testing.io },
     };
     try app.syncListImagePreview(&tc.ctx);
-    try std.testing.expectEqual(@as(usize, 0), tc.ctx.pendingTaskWithSlice().len);
+    try std.testing.expectEqual(@as(usize, 0), tc.ctx._pending_tasks_with[0..tc.ctx._pending_tasks_with_len].len);
 
     try app.update(.{ .frame = .{ .now_ns = 16, .delta_ns = 16, .index = list_image_focus_settle_frames } }, &tc.ctx);
     defer {
-        for (tc.ctx.pendingTaskWithSlice()) |entry| {
+        for (tc.ctx._pending_tasks_with[0..tc.ctx._pending_tasks_with_len]) |entry| {
             const task: *ListImageTask = @ptrCast(@alignCast(entry.ctx));
             std.testing.allocator.free(task.cache_dir);
             std.testing.allocator.free(task.url);
             std.testing.allocator.destroy(task);
         }
-        tc.ctx.pending_tasks_with_len = 0;
+        tc.ctx._pending_tasks_with_len = 0;
     }
 
-    try std.testing.expectEqual(@as(usize, 1), tc.ctx.pendingTaskWithSlice().len);
+    try std.testing.expectEqual(@as(usize, 1), tc.ctx._pending_tasks_with[0..tc.ctx._pending_tasks_with_len].len);
 }
 
 test "hot list image preview retries cached terminal load after transition" {
@@ -4900,20 +4899,20 @@ test "hot list image preview retries cached terminal load after transition" {
 
     app.startContentTransition(&tc.ctx);
     try app.syncListImagePreview(&tc.ctx);
-    try std.testing.expectEqual(@as(usize, 0), tc.ctx.pendingTerminalImageLoadSlice().len);
+    try std.testing.expectEqual(@as(usize, 0), tc.ctx._pending_terminal_image_loads[0..tc.ctx._pending_terminal_image_loads_len].len);
 
     var frame_index: u64 = 1;
     while (app.hasActiveScreenTransition()) : (frame_index += 1) {
         try app.update(.{ .frame = .{ .now_ns = frame_index * 16, .delta_ns = 16, .index = frame_index } }, &tc.ctx);
     }
     defer {
-        for (tc.ctx.pendingTerminalImageLoadSlice()) |entry| {
+        for (tc.ctx._pending_terminal_image_loads[0..tc.ctx._pending_terminal_image_loads_len]) |entry| {
             std.testing.allocator.free(entry.path);
         }
-        tc.ctx.pending_terminal_image_loads_len = 0;
+        tc.ctx._pending_terminal_image_loads_len = 0;
     }
 
-    try std.testing.expectEqual(@as(usize, 1), tc.ctx.pendingTerminalImageLoadSlice().len);
+    try std.testing.expectEqual(@as(usize, 1), tc.ctx._pending_terminal_image_loads[0..tc.ctx._pending_terminal_image_loads_len].len);
 }
 
 test "superseded list image terminal load unloads stale handle" {
@@ -4930,13 +4929,13 @@ test "superseded list image terminal load unloads stale handle" {
     try app.startListImageTerminalImageLoad(&tc.ctx, "/tmp/new-cover.png");
 
     defer {
-        for (tc.ctx.pendingTerminalImageLoadSlice()) |entry| {
+        for (tc.ctx._pending_terminal_image_loads[0..tc.ctx._pending_terminal_image_loads_len]) |entry| {
             std.testing.allocator.free(entry.path);
         }
-        tc.ctx.pending_terminal_image_loads_len = 0;
+        tc.ctx._pending_terminal_image_loads_len = 0;
     }
 
-    const pending = tc.ctx.pendingTerminalImageLoadSlice();
+    const pending = tc.ctx._pending_terminal_image_loads[0..tc.ctx._pending_terminal_image_loads_len];
     try std.testing.expectEqual(@as(usize, 2), pending.len);
 
     app.finishListImageTerminalImageLoad(&tc.ctx, .{
@@ -4944,7 +4943,7 @@ test "superseded list image terminal load unloads stale handle" {
         .handle = .{ .id = 7, .generation = 1 },
     });
 
-    try std.testing.expectEqual(@as(usize, 1), tc.ctx.pendingTerminalImageUnloadSlice().len);
+    try std.testing.expectEqual(@as(usize, 1), tc.ctx._pending_terminal_image_unloads[0..tc.ctx._pending_terminal_image_unloads_len].len);
 }
 
 test "collection list image preview reports unsupported WebP thumbnail without cache task" {
@@ -4967,7 +4966,7 @@ test "collection list image preview reports unsupported WebP thumbnail without c
     };
     try app.syncListImagePreview(&tc.ctx);
 
-    try std.testing.expectEqual(@as(usize, 0), tc.ctx.pendingTaskWithSlice().len);
+    try std.testing.expectEqual(@as(usize, 0), tc.ctx._pending_tasks_with[0..tc.ctx._pending_tasks_with_len].len);
     switch (app.list_image.image_state) {
         .failed => |message| try std.testing.expectEqualStrings("WebP covers not supported yet", message),
         else => return error.TestExpectedEqual,
@@ -4993,20 +4992,20 @@ test "collection list image preview waits before uncached PNG download" {
         .ctx = .{ ._allocator = std.testing.allocator, ._io = std.testing.io },
     };
     try app.syncListImagePreview(&tc.ctx);
-    try std.testing.expectEqual(@as(usize, 0), tc.ctx.pendingTaskWithSlice().len);
+    try std.testing.expectEqual(@as(usize, 0), tc.ctx._pending_tasks_with[0..tc.ctx._pending_tasks_with_len].len);
 
     try app.update(.{ .frame = .{ .now_ns = 16, .delta_ns = 16, .index = list_image_focus_settle_frames } }, &tc.ctx);
     defer {
-        for (tc.ctx.pendingTaskWithSlice()) |entry| {
+        for (tc.ctx._pending_tasks_with[0..tc.ctx._pending_tasks_with_len]) |entry| {
             const task: *ListImageTask = @ptrCast(@alignCast(entry.ctx));
             std.testing.allocator.free(task.cache_dir);
             std.testing.allocator.free(task.url);
             std.testing.allocator.destroy(task);
         }
-        tc.ctx.pending_tasks_with_len = 0;
+        tc.ctx._pending_tasks_with_len = 0;
     }
 
-    try std.testing.expectEqual(@as(usize, 1), tc.ctx.pendingTaskWithSlice().len);
+    try std.testing.expectEqual(@as(usize, 1), tc.ctx._pending_tasks_with[0..tc.ctx._pending_tasks_with_len].len);
 }
 
 test "collection list image panel avoids status picker area" {
@@ -5036,7 +5035,7 @@ test "stale game detail image cache result is ignored" {
     });
 
     try std.testing.expect(app.game_detail.image_state == .idle);
-    try std.testing.expectEqual(@as(usize, 0), tc.ctx.pendingTerminalImageLoadSlice().len);
+    try std.testing.expectEqual(@as(usize, 0), tc.ctx._pending_terminal_image_loads[0..tc.ctx._pending_terminal_image_loads_len].len);
 }
 
 test "starting a new game detail invalidates in-flight image cache results" {
@@ -5049,7 +5048,7 @@ test "starting a new game detail invalidates in-flight image cache results" {
     var tc: chasen.testing.TestCtx(App.Msg) = .{};
     try app.startGameDetail(&tc.ctx, 13, .hot_games);
     defer {
-        const task: *GameDetailTask = @ptrCast(@alignCast(tc.ctx.pendingTaskWithSlice()[0].ctx));
+        const task: *GameDetailTask = @ptrCast(@alignCast(tc.ctx._pending_tasks_with[0..tc.ctx._pending_tasks_with_len][0].ctx));
         std.testing.allocator.free(task.token);
         std.testing.allocator.destroy(task);
     }
@@ -5078,13 +5077,13 @@ test "game detail cached image queues terminal image load" {
         .result = .{ .ok = cached_path },
     });
     defer {
-        for (tc.ctx.pendingTerminalImageLoadSlice()) |entry| {
+        for (tc.ctx._pending_terminal_image_loads[0..tc.ctx._pending_terminal_image_loads_len]) |entry| {
             std.testing.allocator.free(entry.path);
         }
-        tc.ctx.pending_terminal_image_loads_len = 0;
+        tc.ctx._pending_terminal_image_loads_len = 0;
     }
 
-    const pending = tc.ctx.pendingTerminalImageLoadSlice();
+    const pending = tc.ctx._pending_terminal_image_loads[0..tc.ctx._pending_terminal_image_loads_len];
     try std.testing.expectEqual(@as(usize, 1), pending.len);
     try std.testing.expectEqualStrings("/tmp/cover.png", pending[0].path);
     try std.testing.expect(app.game_detail.image_state == .cached);
@@ -5106,20 +5105,20 @@ test "game detail terminal image load waits for transition completion" {
         .result = .{ .ok = cached_path },
     });
 
-    try std.testing.expectEqual(@as(usize, 0), tc.ctx.pendingTerminalImageLoadSlice().len);
+    try std.testing.expectEqual(@as(usize, 0), tc.ctx._pending_terminal_image_loads[0..tc.ctx._pending_terminal_image_loads_len].len);
 
     var frame_index: u64 = 1;
     while (app.hasActiveScreenTransition()) : (frame_index += 1) {
         try app.update(.{ .frame = .{ .now_ns = frame_index * 16, .delta_ns = 16, .index = frame_index } }, &tc.ctx);
     }
     defer {
-        for (tc.ctx.pendingTerminalImageLoadSlice()) |entry| {
+        for (tc.ctx._pending_terminal_image_loads[0..tc.ctx._pending_terminal_image_loads_len]) |entry| {
             std.testing.allocator.free(entry.path);
         }
-        tc.ctx.pending_terminal_image_loads_len = 0;
+        tc.ctx._pending_terminal_image_loads_len = 0;
     }
 
-    const pending = tc.ctx.pendingTerminalImageLoadSlice();
+    const pending = tc.ctx._pending_terminal_image_loads[0..tc.ctx._pending_terminal_image_loads_len];
     try std.testing.expectEqual(@as(usize, 1), pending.len);
     try std.testing.expectEqualStrings("/tmp/cover.png", pending[0].path);
 }
@@ -5138,17 +5137,17 @@ test "returning to detail retries deferred terminal image load without transitio
         .request_id = 3,
         .result = .{ .ok = cached_path },
     });
-    try std.testing.expectEqual(@as(usize, 0), tc.ctx.pendingTerminalImageLoadSlice().len);
+    try std.testing.expectEqual(@as(usize, 0), tc.ctx._pending_terminal_image_loads[0..tc.ctx._pending_terminal_image_loads_len].len);
 
     try app.showScreen(.game_detail, &tc.ctx);
     defer {
-        for (tc.ctx.pendingTerminalImageLoadSlice()) |entry| {
+        for (tc.ctx._pending_terminal_image_loads[0..tc.ctx._pending_terminal_image_loads_len]) |entry| {
             std.testing.allocator.free(entry.path);
         }
-        tc.ctx.pending_terminal_image_loads_len = 0;
+        tc.ctx._pending_terminal_image_loads_len = 0;
     }
 
-    const pending = tc.ctx.pendingTerminalImageLoadSlice();
+    const pending = tc.ctx._pending_terminal_image_loads[0..tc.ctx._pending_terminal_image_loads_len];
     try std.testing.expectEqual(@as(usize, 1), pending.len);
     try std.testing.expectEqualStrings("/tmp/cover.png", pending[0].path);
 }
@@ -5166,7 +5165,7 @@ test "stale terminal image load is unloaded" {
         .handle = .{ .id = 9, .generation = 1 },
     });
 
-    const pending = tc.ctx.pendingTerminalImageUnloadSlice();
+    const pending = tc.ctx._pending_terminal_image_unloads[0..tc.ctx._pending_terminal_image_unloads_len];
     try std.testing.expectEqual(@as(usize, 1), pending.len);
     try std.testing.expectEqual(@as(u32, 9), pending[0].id);
     try std.testing.expect(app.game_detail.terminal_image_handle == null);
@@ -5190,7 +5189,7 @@ test "search loading enters results without screen transition" {
     tc.resetTransient();
     try app.startSearch(&tc.ctx);
     defer {
-        const task: *SearchTask = @ptrCast(@alignCast(tc.ctx.pendingTaskWithSlice()[0].ctx));
+        const task: *SearchTask = @ptrCast(@alignCast(tc.ctx._pending_tasks_with[0..tc.ctx._pending_tasks_with_len][0].ctx));
         std.testing.allocator.free(task.token);
         std.testing.allocator.free(task.query);
         std.testing.allocator.destroy(task);
@@ -5199,8 +5198,8 @@ test "search loading enters results without screen transition" {
     try std.testing.expectEqual(Screen.search_results, app.screen);
     try std.testing.expect(app.search.load_state == .loading);
     try std.testing.expect(!app.hasActiveScreenTransition());
-    try std.testing.expect(tc.ctx.frame_requested);
-    try std.testing.expectEqual(@as(u8, 1), tc.ctx.pending_tasks_with_len);
+    try std.testing.expect(tc.ctx._frame_requested);
+    try std.testing.expectEqual(@as(u8, 1), tc.ctx._pending_tasks_with_len);
 }
 
 test "search completion starts content transition when results are visible" {
@@ -5222,7 +5221,7 @@ test "search completion starts content transition when results are visible" {
     try std.testing.expect(app.hasActiveScreenTransition());
     try std.testing.expectEqual(Screen.search_results, app.transition_from_screen.?);
     try std.testing.expectEqual(Screen.search_results, app.transition_to_screen.?);
-    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expect(tc.ctx._frame_requested);
 }
 
 test "search completion stores hidden result without transition" {
@@ -5242,7 +5241,7 @@ test "search completion stores hidden result without transition" {
 
     try std.testing.expect(app.search.load_state == .loaded);
     try std.testing.expect(!app.hasActiveScreenTransition());
-    try std.testing.expect(!tc.ctx.frame_requested);
+    try std.testing.expect(!tc.ctx._frame_requested);
 }
 
 test "collection loading enters collection without screen transition" {
@@ -5263,7 +5262,7 @@ test "collection loading enters collection without screen transition" {
     tc.resetTransient();
     try app.startCollectionLoad(&tc.ctx);
     defer {
-        const task: *CollectionTask = @ptrCast(@alignCast(tc.ctx.pendingTaskWithSlice()[0].ctx));
+        const task: *CollectionTask = @ptrCast(@alignCast(tc.ctx._pending_tasks_with[0..tc.ctx._pending_tasks_with_len][0].ctx));
         std.testing.allocator.free(task.token);
         std.testing.allocator.free(task.username);
         std.testing.allocator.destroy(task);
@@ -5272,8 +5271,8 @@ test "collection loading enters collection without screen transition" {
     try std.testing.expectEqual(Screen.collection, app.screen);
     try std.testing.expect(app.collection.load_state == .loading);
     try std.testing.expect(!app.hasActiveScreenTransition());
-    try std.testing.expect(tc.ctx.frame_requested);
-    try std.testing.expectEqual(@as(u8, 1), tc.ctx.pending_tasks_with_len);
+    try std.testing.expect(tc.ctx._frame_requested);
+    try std.testing.expectEqual(@as(u8, 1), tc.ctx._pending_tasks_with_len);
 }
 
 test "collection completion starts content transition when visible" {
@@ -5295,7 +5294,7 @@ test "collection completion starts content transition when visible" {
     try std.testing.expect(app.hasActiveScreenTransition());
     try std.testing.expectEqual(Screen.collection, app.transition_from_screen.?);
     try std.testing.expectEqual(Screen.collection, app.transition_to_screen.?);
-    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expect(tc.ctx._frame_requested);
 }
 
 test "collection completion stores hidden result without transition" {
@@ -5315,7 +5314,7 @@ test "collection completion stores hidden result without transition" {
 
     try std.testing.expect(app.collection.load_state == .loaded);
     try std.testing.expect(!app.hasActiveScreenTransition());
-    try std.testing.expect(!tc.ctx.frame_requested);
+    try std.testing.expect(!tc.ctx._frame_requested);
 }
 
 test "forum list loading enters forums without screen transition" {
@@ -5335,7 +5334,7 @@ test "forum list loading enters forums without screen transition" {
     tc.resetTransient();
     try app.startForumList(&tc.ctx);
     defer {
-        const task: *ForumListTask = @ptrCast(@alignCast(tc.ctx.pendingTaskWithSlice()[0].ctx));
+        const task: *ForumListTask = @ptrCast(@alignCast(tc.ctx._pending_tasks_with[0..tc.ctx._pending_tasks_with_len][0].ctx));
         std.testing.allocator.free(task.token);
         std.testing.allocator.destroy(task);
     }
@@ -5343,8 +5342,8 @@ test "forum list loading enters forums without screen transition" {
     try std.testing.expectEqual(Screen.forums, app.screen);
     try std.testing.expect(app.forums.load_state == .loading_forums);
     try std.testing.expect(!app.hasActiveScreenTransition());
-    try std.testing.expect(tc.ctx.frame_requested);
-    try std.testing.expectEqual(@as(u8, 1), tc.ctx.pending_tasks_with_len);
+    try std.testing.expect(tc.ctx._frame_requested);
+    try std.testing.expectEqual(@as(u8, 1), tc.ctx._pending_tasks_with_len);
 }
 
 test "forum list completion starts content transition when visible" {
@@ -5369,7 +5368,7 @@ test "forum list completion starts content transition when visible" {
     try std.testing.expect(app.hasActiveScreenTransition());
     try std.testing.expectEqual(Screen.forums, app.transition_from_screen.?);
     try std.testing.expectEqual(Screen.forums, app.transition_to_screen.?);
-    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expect(tc.ctx._frame_requested);
 }
 
 test "forum list completion stores hidden result without transition" {
@@ -5392,7 +5391,7 @@ test "forum list completion stores hidden result without transition" {
 
     try std.testing.expect(app.forums.load_state == .forums_loaded);
     try std.testing.expect(!app.hasActiveScreenTransition());
-    try std.testing.expect(!tc.ctx.frame_requested);
+    try std.testing.expect(!tc.ctx._frame_requested);
 }
 
 test "thread list loading enters forums without screen transition" {
@@ -5417,7 +5416,7 @@ test "thread list loading enters forums without screen transition" {
     tc.resetTransient();
     try app.startForumThreads(&tc.ctx, 0, 1);
     defer {
-        const task: *ForumThreadsTask = @ptrCast(@alignCast(tc.ctx.pendingTaskWithSlice()[0].ctx));
+        const task: *ForumThreadsTask = @ptrCast(@alignCast(tc.ctx._pending_tasks_with[0..tc.ctx._pending_tasks_with_len][0].ctx));
         std.testing.allocator.free(task.token);
         std.testing.allocator.destroy(task);
     }
@@ -5425,8 +5424,8 @@ test "thread list loading enters forums without screen transition" {
     try std.testing.expectEqual(Screen.forums, app.screen);
     try std.testing.expect(app.forums.load_state == .loading_threads);
     try std.testing.expect(!app.hasActiveScreenTransition());
-    try std.testing.expect(tc.ctx.frame_requested);
-    try std.testing.expectEqual(@as(u8, 1), tc.ctx.pending_tasks_with_len);
+    try std.testing.expect(tc.ctx._frame_requested);
+    try std.testing.expectEqual(@as(u8, 1), tc.ctx._pending_tasks_with_len);
 }
 
 test "thread list completion starts content transition when visible" {
@@ -5452,7 +5451,7 @@ test "thread list completion starts content transition when visible" {
     try std.testing.expect(app.hasActiveScreenTransition());
     try std.testing.expectEqual(Screen.forums, app.transition_from_screen.?);
     try std.testing.expectEqual(Screen.forums, app.transition_to_screen.?);
-    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expect(tc.ctx._frame_requested);
 }
 
 test "thread list completion stores hidden result without transition" {
@@ -5476,7 +5475,7 @@ test "thread list completion stores hidden result without transition" {
 
     try std.testing.expect(app.forums.load_state == .threads_loaded);
     try std.testing.expect(!app.hasActiveScreenTransition());
-    try std.testing.expect(!tc.ctx.frame_requested);
+    try std.testing.expect(!tc.ctx._frame_requested);
 }
 
 test "thread loading enters thread without screen transition" {
@@ -5502,7 +5501,7 @@ test "thread loading enters thread without screen transition" {
     tc.resetTransient();
     try app.startThread(&tc.ctx, 0);
     defer {
-        const task: *ThreadTask = @ptrCast(@alignCast(tc.ctx.pendingTaskWithSlice()[0].ctx));
+        const task: *ThreadTask = @ptrCast(@alignCast(tc.ctx._pending_tasks_with[0..tc.ctx._pending_tasks_with_len][0].ctx));
         std.testing.allocator.free(task.token);
         std.testing.allocator.destroy(task);
     }
@@ -5510,8 +5509,8 @@ test "thread loading enters thread without screen transition" {
     try std.testing.expectEqual(Screen.thread, app.screen);
     try std.testing.expect(app.thread.load_state == .loading);
     try std.testing.expect(!app.hasActiveScreenTransition());
-    try std.testing.expect(tc.ctx.frame_requested);
-    try std.testing.expectEqual(@as(u8, 1), tc.ctx.pending_tasks_with_len);
+    try std.testing.expect(tc.ctx._frame_requested);
+    try std.testing.expectEqual(@as(u8, 1), tc.ctx._pending_tasks_with_len);
 }
 
 test "thread completion starts content transition when visible" {
@@ -5535,7 +5534,7 @@ test "thread completion starts content transition when visible" {
     try std.testing.expect(app.hasActiveScreenTransition());
     try std.testing.expectEqual(Screen.thread, app.transition_from_screen.?);
     try std.testing.expectEqual(Screen.thread, app.transition_to_screen.?);
-    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expect(tc.ctx._frame_requested);
 }
 
 test "thread completion stores hidden result without transition" {
@@ -5557,7 +5556,7 @@ test "thread completion stores hidden result without transition" {
 
     try std.testing.expect(app.thread.load_state == .loaded);
     try std.testing.expect(!app.hasActiveScreenTransition());
-    try std.testing.expect(!tc.ctx.frame_requested);
+    try std.testing.expect(!tc.ctx._frame_requested);
 }
 
 test "hot games loading enters hot games without screen transition" {
@@ -5573,7 +5572,7 @@ test "hot games loading enters hot games without screen transition" {
     tc.resetTransient();
     try app.showScreen(.hot_games, &tc.ctx);
     defer {
-        const task: *HotGamesTask = @ptrCast(@alignCast(tc.ctx.pendingTaskWithSlice()[0].ctx));
+        const task: *HotGamesTask = @ptrCast(@alignCast(tc.ctx._pending_tasks_with[0..tc.ctx._pending_tasks_with_len][0].ctx));
         std.testing.allocator.free(task.token);
         std.testing.allocator.destroy(task);
     }
@@ -5581,8 +5580,8 @@ test "hot games loading enters hot games without screen transition" {
     try std.testing.expectEqual(Screen.hot_games, app.screen);
     try std.testing.expect(app.hot_games.load_state == .loading);
     try std.testing.expect(!app.hasActiveScreenTransition());
-    try std.testing.expect(tc.ctx.frame_requested);
-    try std.testing.expectEqual(@as(u8, 1), tc.ctx.pending_tasks_with_len);
+    try std.testing.expect(tc.ctx._frame_requested);
+    try std.testing.expectEqual(@as(u8, 1), tc.ctx._pending_tasks_with_len);
 }
 
 test "hot games loading re-entry clears screen transition" {
@@ -5600,8 +5599,8 @@ test "hot games loading re-entry clears screen transition" {
     try std.testing.expectEqual(Screen.hot_games, app.screen);
     try std.testing.expect(app.hot_games.load_state == .loading);
     try std.testing.expect(!app.hasActiveScreenTransition());
-    try std.testing.expect(tc.ctx.frame_requested);
-    try std.testing.expectEqual(@as(u8, 0), tc.ctx.pending_tasks_with_len);
+    try std.testing.expect(tc.ctx._frame_requested);
+    try std.testing.expectEqual(@as(u8, 0), tc.ctx._pending_tasks_with_len);
 }
 
 test "hot games completion starts content transition when visible" {
@@ -5623,7 +5622,7 @@ test "hot games completion starts content transition when visible" {
     try std.testing.expect(app.hasActiveScreenTransition());
     try std.testing.expectEqual(Screen.hot_games, app.transition_from_screen.?);
     try std.testing.expectEqual(Screen.hot_games, app.transition_to_screen.?);
-    try std.testing.expect(tc.ctx.frame_requested);
+    try std.testing.expect(tc.ctx._frame_requested);
 }
 
 test "hot games completion stores hidden result without transition" {
@@ -5643,7 +5642,7 @@ test "hot games completion stores hidden result without transition" {
 
     try std.testing.expect(app.hot_games.load_state == .loaded);
     try std.testing.expect(!app.hasActiveScreenTransition());
-    try std.testing.expect(!tc.ctx.frame_requested);
+    try std.testing.expect(!tc.ctx._frame_requested);
 }
 
 test "settings interface cycle wraps unknown values to first supported value" {
