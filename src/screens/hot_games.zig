@@ -382,7 +382,7 @@ pub const State = struct {
             },
         };
 
-        _ = ui.key_hint.draw(area, 0, area.size().height -| 1, opts.footer_items, .{ .style = opts.subtle_style });
+        _ = try ui.key_hint.draw(area, 0, area.size().height -| 1, opts.footer_items, .{ .style = opts.subtle_style });
         return image_rect;
     }
 

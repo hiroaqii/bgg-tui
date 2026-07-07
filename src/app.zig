@@ -495,7 +495,7 @@ pub const App = struct {
             input.view(&input_area, .{});
         }
 
-        _ = self.drawFooter(&area, 7);
+        _ = self.drawFooter(&area, 7) catch {};
     }
 
     fn viewMainMenu(self: *const App, sfc: *chasen.Surface) !void {
@@ -523,14 +523,14 @@ pub const App = struct {
             motion.drawFocusedText(&menu_area, 2, row, item.label, self.theme().focused, self.config.interface.selection, self.animation_frame);
         }
 
-        _ = self.drawCenteredFooter(&area, 10);
+        _ = try self.drawCenteredFooter(&area, 10);
     }
 
     fn viewPlaceholder(self: *const App, sfc: *chasen.Surface, title: []const u8, message: []const u8) void {
         var area = layout_mod.centeredSurface(sfc, placeholder_size);
         _ = area.borrowTextAt(0, 0, title, self.titleStyle());
         _ = area.borrowTextAt(0, 2, message, self.mutedStyle());
-        _ = self.drawFooter(&area, 4);
+        _ = self.drawFooter(&area, 4) catch {};
     }
 
     fn viewSettings(self: *const App, sfc: *chasen.Surface) !void {
@@ -677,7 +677,7 @@ pub const App = struct {
         }
 
         const detail_layout = layout_mod.detailLayout(area.size().height, self.config.interface.list_density);
-        _ = self.drawFooter(&area, detail_layout.footer_row);
+        _ = try self.drawFooter(&area, detail_layout.footer_row);
     }
 
     fn viewForums(self: *const App, sfc: *chasen.Surface) !void {
@@ -697,7 +697,7 @@ pub const App = struct {
                     ui.message_block.drawCenteredText(&forum_area, 0, title, self.titleStyle());
                     try self.drawCenteredListPosition(&forum_area, &self.forums.forum_list);
                     try self.drawCenteredForumList(&forum_area);
-                    _ = self.drawCenteredFooter(&forum_area, forum_area.size().height -| 1);
+                    _ = try self.drawCenteredFooter(&forum_area, forum_area.size().height -| 1);
                 }
             },
             .loading_threads => {
@@ -724,7 +724,7 @@ pub const App = struct {
         }
 
         if (self.forums.load_state != .forums_loaded or self.forums.forum_list.items.len == 0) {
-            _ = self.drawFooter(&area, area.size().height -| 1);
+            _ = try self.drawFooter(&area, area.size().height -| 1);
         }
     }
 
@@ -875,7 +875,7 @@ pub const App = struct {
         }
 
         const thread_layout = layout_mod.threadLayout(area.size().height, self.config.interface.list_density);
-        _ = self.drawFooter(&area, thread_layout.footer_row);
+        _ = try self.drawFooter(&area, thread_layout.footer_row);
     }
 
     fn submitToken(self: *App, ctx: *chasen.Ctx(Msg)) !void {
@@ -2453,14 +2453,14 @@ pub const App = struct {
         return if (self.footerMaxLines() > 1) .wrap else .ellipsis;
     }
 
-    fn drawFooter(self: *const App, area: *chasen.Surface, row: u16) ui.key_hint.DrawResult {
+    fn drawFooter(self: *const App, area: *chasen.Surface, row: u16) !ui.key_hint.DrawResult {
         return footer.draw(area, row, self.footerItems(), self.subtleStyle(), .{
             .max_lines = self.footerMaxLines(),
             .overflow = self.footerOverflow(),
         });
     }
 
-    fn drawCenteredFooter(self: *const App, area: *chasen.Surface, row: u16) ui.key_hint.DrawResult {
+    fn drawCenteredFooter(self: *const App, area: *chasen.Surface, row: u16) !ui.key_hint.DrawResult {
         return footer.drawCentered(area, row, self.footerItems(), self.subtleStyle(), .{
             .max_lines = self.footerMaxLines(),
             .overflow = self.footerOverflow(),
@@ -3480,7 +3480,7 @@ test "collection footer wraps to two lines at item boundaries" {
     try ts.init(64, 2);
     defer ts.deinit();
 
-    const result = footer.draw(&ts.surface, 0, app.footerItems(), app.subtleStyle(), .{
+    const result = try footer.draw(&ts.surface, 0, app.footerItems(), app.subtleStyle(), .{
         .max_lines = app.footerMaxLines(),
         .overflow = app.footerOverflow(),
     });

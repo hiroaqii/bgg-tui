@@ -31,11 +31,11 @@ pub const common = struct {
     pub const quit_esc = item("Esc/q", "quit");
 };
 
-pub fn draw(surface: *chasen.Surface, row: u16, items: []const Item, style: chasen.TextStyle, opts: DrawOptions) ui.key_hint.DrawResult {
+pub fn draw(surface: *chasen.Surface, row: u16, items: []const Item, style: chasen.TextStyle, opts: DrawOptions) !ui.key_hint.DrawResult {
     return ui.key_hint.draw(surface, 0, row, items, drawOptions(style, opts));
 }
 
-pub fn drawCentered(surface: *chasen.Surface, row: u16, items: []const Item, style: chasen.TextStyle, opts: DrawOptions) ui.key_hint.DrawResult {
+pub fn drawCentered(surface: *chasen.Surface, row: u16, items: []const Item, style: chasen.TextStyle, opts: DrawOptions) !ui.key_hint.DrawResult {
     const chasen_opts = drawOptions(style, opts);
     const footer_width = ui.key_hint.width(items, chasen_opts);
     const size = surface.size();

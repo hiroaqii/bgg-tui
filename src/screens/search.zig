@@ -333,7 +333,7 @@ pub const State = struct {
             .loaded => drawGuidance(area, 4, "Search complete", "Press Enter to run a new search.", opts.muted_title_style, opts.muted_style),
         }
 
-        _ = ui.key_hint.draw(area, 0, area.size().height -| 1, opts.footer_items, .{ .style = opts.subtle_style });
+        _ = ui.key_hint.draw(area, 0, area.size().height -| 1, opts.footer_items, .{ .style = opts.subtle_style }) catch {};
     }
 
     pub fn viewResults(self: *const State, area: *chasen.Surface, opts: ResultsViewOptions) !void {
@@ -371,7 +371,7 @@ pub const State = struct {
             },
         }
 
-        _ = ui.key_hint.draw(area, 0, area.size().height -| 1, opts.footer_items, .{ .style = opts.subtle_style });
+        _ = try ui.key_hint.draw(area, 0, area.size().height -| 1, opts.footer_items, .{ .style = opts.subtle_style });
     }
 
     pub fn deinit(self: *State, allocator: std.mem.Allocator) void {

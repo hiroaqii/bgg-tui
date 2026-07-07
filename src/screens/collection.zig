@@ -488,7 +488,7 @@ pub const State = struct {
         }
 
         const footer_lines = @min(opts.footer_max_lines, area.size().height);
-        _ = ui.key_hint.draw(area, 0, area.size().height -| footer_lines, opts.footer_items, .{
+        _ = try ui.key_hint.draw(area, 0, area.size().height -| footer_lines, opts.footer_items, .{
             .style = opts.subtle_style,
             .max_lines = footer_lines,
             .overflow = opts.footer_overflow,
