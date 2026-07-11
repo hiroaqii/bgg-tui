@@ -102,6 +102,28 @@ pub const Msg = union(enum) {
     status_close,
     items_loaded: TaskResult,
     list: ui.List.Msg,
+
+    pub fn deinit(self: *Msg, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .items_loaded => |*result| result.deinit(allocator),
+            .username_input,
+            .username_paste,
+            .filter_start,
+            .filter_input,
+            .filter_paste,
+            .filter_clear,
+            .change_user,
+            .refresh,
+            .status_open,
+            .status_move_prev,
+            .status_move_next,
+            .status_toggle,
+            .status_close,
+            .list,
+            => {},
+        }
+        self.* = undefined;
+    }
 };
 
 pub const EventAction = union(enum) {

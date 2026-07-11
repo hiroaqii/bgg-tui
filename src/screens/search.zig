@@ -53,6 +53,22 @@ pub const Msg = union(enum) {
     sort_toggle,
     results_loaded: TaskResult,
     list: ui.List.Msg,
+
+    pub fn deinit(self: *Msg, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .results_loaded => |*result| result.deinit(allocator),
+            .input,
+            .paste,
+            .filter_start,
+            .filter_input,
+            .filter_paste,
+            .filter_clear,
+            .sort_toggle,
+            .list,
+            => {},
+        }
+        self.* = undefined;
+    }
 };
 
 pub const EventAction = union(enum) {

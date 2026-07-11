@@ -9,6 +9,14 @@ const bgg_xml = @import("../bgg/xml.zig");
 pub const HotGamesResult = union(enum) {
     ok: []bgg_model.HotGame,
     failed: []const u8,
+
+    pub fn deinit(self: *HotGamesResult, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .ok => |games| bgg_xml.freeHotGames(allocator, games),
+            .failed => {},
+        }
+        self.* = undefined;
+    }
 };
 
 pub const HotGameStatsResult = struct {
@@ -18,67 +26,158 @@ pub const HotGameStatsResult = struct {
     pub const Result = union(enum) {
         ok: []bgg_model.Game,
         failed: []const u8,
+
+        pub fn deinit(self: *Result, allocator: std.mem.Allocator) void {
+            switch (self.*) {
+                .ok => |games| bgg_xml.freeGames(allocator, games),
+                .failed => {},
+            }
+            self.* = undefined;
+        }
     };
+
+    pub fn deinit(self: *HotGameStatsResult, allocator: std.mem.Allocator) void {
+        self.result.deinit(allocator);
+        self.* = undefined;
+    }
 };
 
 pub const SearchResult = union(enum) {
     ok: []bgg_model.GameSearchResult,
     failed: []const u8,
+
+    pub fn deinit(self: *SearchResult, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .ok => |results| bgg_xml.freeSearchResults(allocator, results),
+            .failed => {},
+        }
+        self.* = undefined;
+    }
 };
 
 pub const SearchTaskResult = struct {
     request_id: u64,
     result: SearchResult,
+
+    pub fn deinit(self: *SearchTaskResult, allocator: std.mem.Allocator) void {
+        self.result.deinit(allocator);
+        self.* = undefined;
+    }
 };
 
 pub const CollectionResult = union(enum) {
     ok: []bgg_model.CollectionItem,
     failed: []const u8,
+
+    pub fn deinit(self: *CollectionResult, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .ok => |items| bgg_xml.freeCollectionItems(allocator, items),
+            .failed => {},
+        }
+        self.* = undefined;
+    }
 };
 
 pub const CollectionTaskResult = struct {
     request_id: u64,
     result: CollectionResult,
+
+    pub fn deinit(self: *CollectionTaskResult, allocator: std.mem.Allocator) void {
+        self.result.deinit(allocator);
+        self.* = undefined;
+    }
 };
 
 pub const GameDetailResult = union(enum) {
     ok: []bgg_model.Game,
     failed: []const u8,
+
+    pub fn deinit(self: *GameDetailResult, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .ok => |games| bgg_xml.freeGames(allocator, games),
+            .failed => {},
+        }
+        self.* = undefined;
+    }
 };
 
 pub const GameDetailTaskResult = struct {
     request_id: u64,
     result: GameDetailResult,
+
+    pub fn deinit(self: *GameDetailTaskResult, allocator: std.mem.Allocator) void {
+        self.result.deinit(allocator);
+        self.* = undefined;
+    }
 };
 
 pub const ForumListResult = union(enum) {
     ok: []bgg_model.Forum,
     failed: []const u8,
+
+    pub fn deinit(self: *ForumListResult, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .ok => |forums| bgg_xml.freeForums(allocator, forums),
+            .failed => {},
+        }
+        self.* = undefined;
+    }
 };
 
 pub const ForumListTaskResult = struct {
     request_id: u64,
     result: ForumListResult,
+
+    pub fn deinit(self: *ForumListTaskResult, allocator: std.mem.Allocator) void {
+        self.result.deinit(allocator);
+        self.* = undefined;
+    }
 };
 
 pub const ForumThreadsResult = union(enum) {
     ok: bgg_model.ThreadList,
     failed: []const u8,
+
+    pub fn deinit(self: *ForumThreadsResult, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .ok => |thread_list| bgg_xml.freeThreadList(allocator, thread_list),
+            .failed => {},
+        }
+        self.* = undefined;
+    }
 };
 
 pub const ForumThreadsTaskResult = struct {
     request_id: u64,
     result: ForumThreadsResult,
+
+    pub fn deinit(self: *ForumThreadsTaskResult, allocator: std.mem.Allocator) void {
+        self.result.deinit(allocator);
+        self.* = undefined;
+    }
 };
 
 pub const ThreadResult = union(enum) {
     ok: bgg_model.Thread,
     failed: []const u8,
+
+    pub fn deinit(self: *ThreadResult, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .ok => |thread| bgg_xml.freeThread(allocator, thread),
+            .failed => {},
+        }
+        self.* = undefined;
+    }
 };
 
 pub const ThreadTaskResult = struct {
     request_id: u64,
     result: ThreadResult,
+
+    pub fn deinit(self: *ThreadTaskResult, allocator: std.mem.Allocator) void {
+        self.result.deinit(allocator);
+        self.* = undefined;
+    }
 };
 
 pub fn loadHotGames(allocator: std.mem.Allocator, io: std.Io, token: []const u8) !HotGamesResult {

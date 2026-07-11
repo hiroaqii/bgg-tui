@@ -128,6 +128,8 @@ pub const App = struct {
     transition_to_screen: ?Screen = null,
     help_open: bool = false,
     pub const Msg = union(enum) {
+        pub const undelivered_policy = .deinit;
+
         setup_token: SetupTokenMsg,
         hot_games: HotGamesMsg,
         search: SearchMsg,
@@ -145,6 +147,33 @@ pub const App = struct {
         help_open,
         help_close,
         quit,
+
+        /// Cleans async results that complete after the app has stopped
+        /// accepting updates. Terminal image handles are deliberately not
+        /// unloaded here: the runtime registry remains their shutdown owner.
+        pub fn deinitUndelivered(self: *@This(), allocator: std.mem.Allocator) void {
+            switch (self.*) {
+                .hot_games => |*msg| msg.deinit(allocator),
+                .search => |*msg| msg.deinit(allocator),
+                .collection => |*msg| msg.deinit(allocator),
+                .game_detail => |*msg| msg.deinit(allocator),
+                .list_image => |*msg| msg.deinit(allocator),
+                .forum => |*msg| msg.deinit(allocator),
+                .thread => |*msg| msg.deinit(allocator),
+                .browser => |*msg| msg.deinit(allocator),
+                .setup_token,
+                .settings,
+                .terminal_resized,
+                .frame,
+                .menu,
+                .show_screen,
+                .help_open,
+                .help_close,
+                .quit,
+                => {},
+            }
+            self.* = undefined;
+        }
     };
 
     pub const Options = struct {
@@ -2518,6 +2547,14 @@ const GameDetailResult = task_bgg.GameDetailResult;
 const GameDetailImageResult = union(enum) {
     ok: []u8,
     failed: []const u8,
+
+    fn deinit(self: *GameDetailImageResult, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .ok => |path| allocator.free(path),
+            .failed => {},
+        }
+        self.* = undefined;
+    }
 };
 
 const GameDetailTaskResult = task_bgg.GameDetailTaskResult;
@@ -2525,6 +2562,11 @@ const GameDetailTaskResult = task_bgg.GameDetailTaskResult;
 const GameDetailImageTaskResult = struct {
     request_id: u64,
     result: GameDetailImageResult,
+
+    fn deinit(self: *GameDetailImageTaskResult, allocator: std.mem.Allocator) void {
+        self.result.deinit(allocator);
+        self.* = undefined;
+    }
 };
 
 const GameDetailTerminalImageLoaded = struct {
@@ -2540,11 +2582,24 @@ const GameDetailTerminalImageFailed = struct {
 const ListImageResult = union(enum) {
     ok: []u8,
     failed: []const u8,
+
+    fn deinit(self: *ListImageResult, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .ok => |path| allocator.free(path),
+            .failed => {},
+        }
+        self.* = undefined;
+    }
 };
 
 const ListImageTaskResult = struct {
     request_id: u64,
     result: ListImageResult,
+
+    fn deinit(self: *ListImageTaskResult, allocator: std.mem.Allocator) void {
+        self.result.deinit(allocator);
+        self.* = undefined;
+    }
 };
 
 const ListImageTerminalImageLoaded = struct {
@@ -2565,12 +2620,34 @@ const GameDetailMsg = union(enum) {
     move_prev,
     move_next,
     open_browser,
+
+    fn deinit(self: *GameDetailMsg, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .loaded => |*result| result.deinit(allocator),
+            .image_cached => |*result| result.deinit(allocator),
+            .terminal_image_loaded,
+            .terminal_image_failed,
+            .move_prev,
+            .move_next,
+            .open_browser,
+            => {},
+        }
+        self.* = undefined;
+    }
 };
 
 const ListImageMsg = union(enum) {
     image_cached: ListImageTaskResult,
     terminal_image_loaded: ListImageTerminalImageLoaded,
     terminal_image_failed: ListImageTerminalImageFailed,
+
+    fn deinit(self: *ListImageMsg, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .image_cached => |*result| result.deinit(allocator),
+            .terminal_image_loaded, .terminal_image_failed => {},
+        }
+        self.* = undefined;
+    }
 };
 
 const ForumListResult = task_bgg.ForumListResult;
@@ -2588,6 +2665,22 @@ const ForumMsg = union(enum) {
     back_to_list,
     next_page,
     previous_page,
+
+    fn deinit(self: *ForumMsg, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .loaded => |*result| result.deinit(allocator),
+            .threads_loaded => |*result| result.deinit(allocator),
+            .open,
+            .list,
+            .thread_list,
+            .back_to_detail,
+            .back_to_list,
+            .next_page,
+            .previous_page,
+            => {},
+        }
+        self.* = undefined;
+    }
 };
 
 const ThreadResult = task_bgg.ThreadResult;
@@ -2600,11 +2693,32 @@ const ThreadMsg = union(enum) {
     sort_toggle,
     open_browser,
     back_to_forums,
+
+    fn deinit(self: *ThreadMsg, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .loaded => |*result| result.deinit(allocator),
+            .move_prev,
+            .move_next,
+            .sort_toggle,
+            .open_browser,
+            .back_to_forums,
+            => {},
+        }
+        self.* = undefined;
+    }
 };
 
 const BrowserOpenResult = union(enum) {
     ok,
     failed: []u8,
+
+    fn deinit(self: *BrowserOpenResult, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .ok => {},
+            .failed => |url| allocator.free(url),
+        }
+        self.* = undefined;
+    }
 };
 
 const BrowserTarget = enum {
@@ -2616,10 +2730,22 @@ const BrowserOpenTaskResult = struct {
     request_id: u64,
     target: BrowserTarget,
     result: BrowserOpenResult,
+
+    fn deinit(self: *BrowserOpenTaskResult, allocator: std.mem.Allocator) void {
+        self.result.deinit(allocator);
+        self.* = undefined;
+    }
 };
 
 const BrowserMsg = union(enum) {
     opened: BrowserOpenTaskResult,
+
+    fn deinit(self: *BrowserMsg, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .opened => |*result| result.deinit(allocator),
+        }
+        self.* = undefined;
+    }
 };
 
 // The task owns only copied request inputs. API response data is transferred
@@ -3020,6 +3146,7 @@ const BrowserOpenTask = struct {
 fn taskFailureMessage(failure: chasen.TaskFailure) []const u8 {
     return switch (failure) {
         .start_failed => |message| message,
+        .runtime_abandoned => "runtime shutting down",
     };
 }
 
@@ -5807,4 +5934,90 @@ test "effective detail content width uses clamped terminal width" {
     app.terminal_size = .{ .width = 92, .height = 24 };
 
     try std.testing.expectEqual(@as(usize, 58), app.effectiveDetailContentWidth());
+}
+
+test "undelivered browser task result releases owned url" {
+    var msg: App.Msg = .{ .browser = .{ .opened = .{
+        .request_id = 1,
+        .target = .game_detail,
+        .result = .{ .failed = try std.testing.allocator.dupe(u8, "https://example.invalid") },
+    } } };
+
+    msg.deinitUndelivered(std.testing.allocator);
+}
+
+test "undelivered nested async result families release owned payloads" {
+    const allocator = std.testing.allocator;
+
+    var hot_games: App.Msg = .{ .hot_games = .{ .loaded = .{
+        .ok = try allocator.alloc(bgg_model.HotGame, 0),
+    } } };
+    hot_games.deinitUndelivered(allocator);
+
+    var hot_stats: App.Msg = .{ .hot_games = .{ .stats_loaded = .{
+        .request_id = 1,
+        .result = .{ .ok = try allocator.alloc(bgg_model.Game, 0) },
+    } } };
+    hot_stats.deinitUndelivered(allocator);
+
+    var search: App.Msg = .{ .search = .{ .results_loaded = .{
+        .request_id = 1,
+        .result = .{ .ok = try allocator.alloc(bgg_model.GameSearchResult, 0) },
+    } } };
+    search.deinitUndelivered(allocator);
+
+    var collection: App.Msg = .{ .collection = .{ .items_loaded = .{
+        .request_id = 1,
+        .result = .{ .ok = try allocator.alloc(bgg_model.CollectionItem, 0) },
+    } } };
+    collection.deinitUndelivered(allocator);
+
+    var game_detail: App.Msg = .{ .game_detail = .{ .loaded = .{
+        .request_id = 1,
+        .result = .{ .ok = try allocator.alloc(bgg_model.Game, 0) },
+    } } };
+    game_detail.deinitUndelivered(allocator);
+
+    var game_image: App.Msg = .{ .game_detail = .{ .image_cached = .{
+        .request_id = 1,
+        .result = .{ .ok = try allocator.dupe(u8, "/tmp/game.png") },
+    } } };
+    game_image.deinitUndelivered(allocator);
+
+    var list_image: App.Msg = .{ .list_image = .{ .image_cached = .{
+        .request_id = 1,
+        .result = .{ .ok = try allocator.dupe(u8, "/tmp/list.png") },
+    } } };
+    list_image.deinitUndelivered(allocator);
+
+    var forums: App.Msg = .{ .forum = .{ .loaded = .{
+        .request_id = 1,
+        .result = .{ .ok = try allocator.alloc(bgg_model.Forum, 0) },
+    } } };
+    forums.deinitUndelivered(allocator);
+
+    var forum_threads: App.Msg = .{ .forum = .{ .threads_loaded = .{
+        .request_id = 1,
+        .result = .{ .ok = .{
+            .threads = try allocator.alloc(bgg_model.ThreadSummary, 0),
+        } },
+    } } };
+    forum_threads.deinitUndelivered(allocator);
+
+    var thread: App.Msg = .{ .thread = .{ .loaded = .{
+        .request_id = 1,
+        .result = .{ .ok = .{
+            .id = 1,
+            .subject = try allocator.dupe(u8, "subject"),
+            .articles = try allocator.alloc(bgg_model.Article, 0),
+        } },
+    } } };
+    thread.deinitUndelivered(allocator);
+
+    // Handles stay registry-owned during shutdown and must remain a no-op here.
+    var terminal_image_msg: App.Msg = .{ .game_detail = .{ .terminal_image_loaded = .{
+        .request_id = .{ .id = 1 },
+        .handle = .{ .id = 1, .generation = 1 },
+    } } };
+    terminal_image_msg.deinitUndelivered(allocator);
 }
